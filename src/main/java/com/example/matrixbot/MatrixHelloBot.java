@@ -200,9 +200,13 @@ public class MatrixHelloBot {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
             String endpoint = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
+            
+            // Sanitize message to prevent user pings
+            String sanitizedMessage = sanitizeUserIds(message);
+            
             Map<String, Object> payload = new java.util.HashMap<>();
             payload.put("msgtype", "m.text");
-            payload.put("body", message);
+            payload.put("body", sanitizedMessage);
             payload.put("m.mentions", Map.of()); // Add empty mentions object to prevent accidental mentions
             String json = mapper.writeValueAsString(payload);
 
@@ -226,12 +230,15 @@ public class MatrixHelloBot {
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
             String endpoint = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
             
+            // Sanitize message to prevent user pings by wrapping user IDs in code blocks
+            String sanitizedMessage = sanitizeUserIds(message);
+            
             // Convert markdown to HTML for Matrix
-            String htmlBody = convertMarkdownToHtml(message);
+            String htmlBody = convertMarkdownToHtml(sanitizedMessage);
             
             Map<String, Object> payload = new java.util.HashMap<>();
             payload.put("msgtype", "m.text");
-            payload.put("body", message); // Plain text fallback
+            payload.put("body", sanitizedMessage); // Plain text fallback
             payload.put("format", "org.matrix.custom.html");
             payload.put("formatted_body", htmlBody); // HTML with markdown formatting
             payload.put("m.mentions", Map.of()); // Add empty mentions object to prevent accidental mentions
@@ -264,6 +271,12 @@ public class MatrixHelloBot {
         html = html.replaceAll("\n", "");
         
         return html;
+    }
+
+    private static String sanitizeUserIds(String message) {
+        // Replace user IDs like @username:domain with `@username:domain` to prevent pings
+        // This regex matches Matrix user IDs: @localpart:domain
+        return message.replaceAll("(@[a-zA-Z0-9._=-]+:[a-zA-Z0-9.-]+)", "`$1`");
     }
 
     private static void exportRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken) {
