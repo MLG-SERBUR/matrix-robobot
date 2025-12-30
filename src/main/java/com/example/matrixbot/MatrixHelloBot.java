@@ -143,29 +143,24 @@ public class MatrixHelloBot {
                                 final Config finalConfig = config;
                                 final String finalRoomId = roomId; // Command room for responses
                                 new Thread(() -> exportRoomHistory(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, hours, finalPrevBatch)).start();
-                            } else if (trimmed.matches("!arliai(?:\\s+(\\d+)h)?(?:\\s+(.*))?")) {
+                            } else if (trimmed.matches("!arliai\\s+[A-Z]{3}\\s+\\d+h(?:\\s+(.*))?")) {
                                 if (userId != null && userId.equals(sender)) continue;
 
-                                int hours = 12; // Default to 12 hours
-                                String question = null;
-
-                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("!arliai(?:\\s+(\\d+)h)?(?:\\s+(.*))?").matcher(trimmed);
+                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("!arliai\\s+([A-Z]{3})\\s+(\\d+)h(?:\\s+(.*))?").matcher(trimmed);
                                 if (matcher.matches()) {
-                                    if (matcher.group(1) != null) {
-                                        hours = Integer.parseInt(matcher.group(1));
-                                    }
-                                    if (matcher.group(2) != null) {
-                                        question = matcher.group(2).trim();
-                                    }
-                                }
+                                    String timezoneAbbr = matcher.group(1);
+                                    int hours = Integer.parseInt(matcher.group(2));
+                                    String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
 
-                                System.out.println("Received arliai command in " + roomId + " from " + sender + " (" + (hours > 0 ? hours + "h" : "all history") + ")" + (question != null ? ", question: " + question : ""));
-                                final int finalHours = hours;
-                                final String finalQuestion = question;
-                                final String finalPrevBatch = prevBatch; // Make prevBatch final for lambda
-                                final Config finalConfig = config;
-                                final String finalRoomId = roomId; // Command room for responses
-                                new Thread(() -> queryArliAIWithChatLogs(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalQuestion, finalConfig, -1, "PST")).start();
+                                    System.out.println("Received arliai command in " + roomId + " from " + sender + " (" + timezoneAbbr + ", " + hours + "h" + (question != null ? ", question: " + question : "") + ")");
+                                    final int finalHours = hours;
+                                    final String finalQuestion = question;
+                                    final String finalPrevBatch = prevBatch; // Make prevBatch final for lambda
+                                    final Config finalConfig = config;
+                                    final String finalRoomId = roomId; // Command room for responses
+                                    final String finalTimezoneAbbr = timezoneAbbr;
+                                    new Thread(() -> queryArliAIWithChatLogs(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalQuestion, finalConfig, -1, finalTimezoneAbbr)).start();
+                                }
                             } else if (trimmed.matches("!arliai-ts\\s+\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}\\s+[A-Z]{3}\\s+\\d+h(?:\\s+(.*))?")) {
                                 if (userId != null && userId.equals(sender)) continue;
 
@@ -176,12 +171,12 @@ public class MatrixHelloBot {
                                     int durationHours = Integer.parseInt(matcher.group(3));
                                     String question = matcher.group(4) != null ? matcher.group(4).trim() : null;
 
-                                    // Convert timezone abbreviation to ZoneId
-                                    ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
-                                    
-                                    // Convert YYYY-MM-DD-HH-MM to Unix timestamp (milliseconds) with timezone
+                                    // Convert YYYY-MM-DD-HH-MM to Unix timestamp (milliseconds) in UTC
+                                    // First parse as user's local time, then convert to UTC
+                                    ZoneId userZone = getZoneIdFromAbbr(timezoneAbbr);
                                     long startTimestamp = java.time.LocalDateTime.parse(startDateStr, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
-                                            .atZone(zoneId)
+                                            .atZone(userZone) // Interpret in user's timezone
+                                            .withZoneSameInstant(ZoneId.of("UTC")) // Convert to UTC for API
                                             .toInstant()
                                             .toEpochMilli();
 
@@ -342,6 +337,7 @@ public class MatrixHelloBot {
             ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "";
             if (startTimestamp > 0) {
+                // Convert UTC timestamp to user's timezone for display
                 String dateStr = java.time.Instant.ofEpochMilli(startTimestamp)
                         .atZone(zoneId)
                         .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
@@ -351,7 +347,10 @@ public class MatrixHelloBot {
             }
             sendMarkdown(client, mapper, url, accessToken, responseRoomId, "Querying Arli AI with chat logs from " + exportRoomId + " (" + timeInfo + (question != null ? " and question: " + question : "") + ")...");
 
-            java.util.List<String> chatLogs = fetchRoomHistory(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTimestamp, zoneId);
+            // Calculate the UTC time range for filtering
+            long endTime = startTimestamp > 0 ? startTimestamp + (long) hours * 3600L * 1000L : -1;
+            
+            java.util.List<String> chatLogs = fetchRoomHistory(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTimestamp, endTime, zoneId);
             if (chatLogs.isEmpty()) {
                 sendMarkdown(client, mapper, url, accessToken, responseRoomId, "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
                 return;
@@ -361,7 +360,7 @@ public class MatrixHelloBot {
             if (question != null && !question.isEmpty()) {
                 prompt = "Given the following chat logs, answer the question: '" + question + "'\\n\\n" + String.join("\\n", chatLogs);
             } else {
-                prompt = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim as bullet points for each topic. Then summarize with bullet points all of the chat at end:\\n\\n" + String.join("\\n", chatLogs);
+                prompt = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic. Then summarize with bullet points all of the chat at end:\\n\\n" + String.join("\\n", chatLogs);
             }
 
             // Make HTTP POST request to Arli AI API
@@ -408,15 +407,17 @@ public class MatrixHelloBot {
     }
 
     private static java.util.List<String> fetchRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken) {
-        return fetchRoomHistory(client, mapper, url, accessToken, roomId, hours, fromToken, -1, ZoneId.of("America/Los_Angeles"));
+        return fetchRoomHistory(client, mapper, url, accessToken, roomId, hours, fromToken, -1, -1, ZoneId.of("America/Los_Angeles"));
     }
 
-    private static java.util.List<String> fetchRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken, long startTimestamp, ZoneId zoneId) {
+    private static java.util.List<String> fetchRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken, long startTimestamp, long endTime, ZoneId zoneId) {
         java.util.List<String> lines = new java.util.ArrayList<>();
         
         // Calculate the time range
-        long startTime = (startTimestamp > 0) ? startTimestamp : System.currentTimeMillis();
-        long endTime = startTime + (long) hours * 3600L * 1000L;
+        // If startTimestamp is provided (arliai-ts), use it as start and add duration for end
+        // If startTimestamp is -1 (arliai), use current time minus duration as start, and current time as end
+        long startTime = (startTimestamp > 0) ? startTimestamp : System.currentTimeMillis() - (long) hours * 3600L * 1000L;
+        long calculatedEndTime = (endTime > 0) ? endTime : System.currentTimeMillis();
         
         // If we don't have a pagination token, try to get one via a short sync
         if (fromToken == null) {
@@ -467,7 +468,7 @@ public class MatrixHelloBot {
                     long originServerTs = ev.path("origin_server_ts").asLong(0);
                     
                     // Stop if we've gone past our time range
-                    if (originServerTs > endTime) {
+                    if (originServerTs > calculatedEndTime) {
                         continue; // Skip messages newer than our range
                     }
                     if (originServerTs < startTime) {
@@ -478,7 +479,7 @@ public class MatrixHelloBot {
                     String body = ev.path("content").path("body").asText(null);
                     String sender = ev.path("sender").asText(null);
                     if (body != null && sender != null) {
-                        // Format timestamp with timezone
+                        // Format timestamp with timezone (convert UTC to user's timezone)
                         String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
                                 .atZone(zoneId)
                                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));

@@ -38,8 +38,9 @@ All commands must be sent in the **command room** specified in your config:
 - `!testcommand` — Bot replies `Hello, world!` in the **command room**
 - `!export<N>h` — Export the last N hours of chat from the **export room** and post the file info in the **command room**
   - Example: `!export12h` will write a file like `!exportRoom-...-last12h-<ts>.txt`
-- `!arliai` or `!arliai <N>h` or `!arliai <N>h <question>` — Queries Arli AI with chat logs from the **export room** and posts the summary/answer in the **command room**
-  - Example: `!arliai`, `!arliai 12h`, or `!arliai 6h What was the main topic of discussion?`
+- `!arliai <TZ> <N>h [question]` — Queries Arli AI with chat logs from the **export room** for the last N hours. Chat logs will use the specified timezone for timestamps.
+  - Example: `!arliai PST 12h` — Analyzes last 12 hours of chat with PST timestamps
+  - Example: `!arliai EST 6h What was the main topic of discussion?` — Analyzes last 6 hours with a specific question
 - `!arliai-ts <YYYY-MM-DD-HH-MM> <TZ> <N>h [question]` — Queries Arli AI with chat logs from the **export room** starting at a specific date and time, covering the next N hours. Chat logs will use the specified timezone for timestamps.
   - Example: `!arliai-ts 2024-12-30-23-59 PST 24h` — Analyzes 24 hours of chat starting at 23:59 PST on December 30, 2024
   - Example: `!arliai-ts 2024-12-30-14-30 EST 6h What was discussed?` — Analyzes 6 hours starting at 14:30 EST on December 30, 2024 with a specific question
