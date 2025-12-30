@@ -14,18 +14,30 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Iterator;
 import java.util.Map;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 public class MatrixHelloBot {
+    
+    private static class Config {
+        public String homeserver;
+        public String accessToken;
+        public String commandRoomId;
+        public String exportRoomId;
+        public String arliApiKey;
+    }
+    
     public static void main(String[] args) throws Exception {
-        String homeserver = System.getenv("MATRIX_HOMESERVER_URL");
-        String accessToken = System.getenv("MATRIX_ACCESS_TOKEN");
-
-        if (homeserver == null || accessToken == null) {
-            System.err.println("Missing environment variables: MATRIX_HOMESERVER_URL, MATRIX_ACCESS_TOKEN");
+        // Load configuration from file
+        String configPath = args.length > 0 ? args[0] : "config.json";
+        Config config = loadConfig(configPath);
+        
+        if (config == null) {
+            System.err.println("Failed to load configuration from: " + configPath);
             System.exit(2);
         }
 
-        String url = homeserver.endsWith("/") ? homeserver.substring(0, homeserver.length() - 1) : homeserver;
+        String url = config.homeserver.endsWith("/") ? config.homeserver.substring(0, config.homeserver.length() - 1) : config.homeserver;
         HttpClient client = HttpClient.newHttpClient();
         ObjectMapper mapper = new ObjectMapper();
 
@@ -34,7 +46,7 @@ public class MatrixHelloBot {
         try {
             HttpRequest whoami = HttpRequest.newBuilder()
                     .uri(URI.create(url + "/_matrix/client/v3/account/whoami"))
-                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Authorization", "Bearer " + config.accessToken)
                     .GET()
                     .build();
             HttpResponse<String> whoamiResp = client.send(whoami, HttpResponse.BodyHandlers.ofString());
@@ -55,7 +67,7 @@ public class MatrixHelloBot {
         try {
             HttpRequest initSync = HttpRequest.newBuilder()
                     .uri(URI.create(url + "/_matrix/client/v3/sync?timeout=0"))
-                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Authorization", "Bearer " + config.accessToken)
                     .GET()
                     .build();
             HttpResponse<String> initResp = client.send(initSync, HttpResponse.BodyHandlers.ofString());
@@ -70,14 +82,16 @@ public class MatrixHelloBot {
             System.out.println("Initial sync failed: " + e.getMessage());
         }
 
-        System.out.println("Starting /sync loop (listening for '!testcommand')...");
+        System.out.println("Starting /sync loop");
+        System.out.println("Command room: " + config.commandRoomId);
+        System.out.println("Export room: " + config.exportRoomId);
 
         while (true) {
             try {
                 String syncUrl = url + "/_matrix/client/v3/sync?timeout=30000" + (since != null ? "&since=" + URLEncoder.encode(since, StandardCharsets.UTF_8) : "");
                 HttpRequest syncReq = HttpRequest.newBuilder()
                         .uri(URI.create(syncUrl))
-                        .header("Authorization", "Bearer " + accessToken)
+                        .header("Authorization", "Bearer " + config.accessToken)
                         .GET()
                         .build();
 
@@ -95,6 +109,12 @@ public class MatrixHelloBot {
                 Iterator<String> roomIds = rooms.fieldNames();
                 while (roomIds.hasNext()) {
                     String roomId = roomIds.next();
+                    
+                    // Only process messages from the command room
+                    if (!roomId.equals(config.commandRoomId)) {
+                        continue;
+                    }
+                    
                     JsonNode roomNode = rooms.path(roomId);
                     JsonNode timelineNode = roomNode.path("timeline");
                     String prevBatch = timelineNode.path("prev_batch").asText(null);
@@ -106,17 +126,21 @@ public class MatrixHelloBot {
                             String sender = ev.path("sender").asText(null);
                             if (body == null) continue;
                             String trimmed = body.trim();
+                            
+                            // Process commands only from command room
                             if ("!testcommand".equals(trimmed)) {
                                 if (userId != null && userId.equals(sender)) continue;
                                 System.out.println("Received !testcommand in " + roomId + " from " + sender);
-                                sendText(client, mapper, url, accessToken, roomId, "Hello, world!");
+                                sendText(client, mapper, url, config.accessToken, roomId, "Hello, world!");
                             } else if (trimmed.matches("!export\\d+h")) {
                                 if (userId != null && userId.equals(sender)) continue;
                                 int hours = Integer.parseInt(trimmed.replaceAll("\\D+", ""));
                                 System.out.println("Received export command in " + roomId + " from " + sender + " (" + hours + "h)");
                                 // run export in a new thread so we don't block the sync loop
                                 final String finalPrevBatch = prevBatch;
-                                new Thread(() -> exportRoomHistory(client, mapper, url, accessToken, roomId, hours, finalPrevBatch)).start();
+                                final Config finalConfig = config;
+                                final String finalRoomId = roomId; // Command room for responses
+                                new Thread(() -> exportRoomHistory(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, hours, finalPrevBatch)).start();
                             } else if (trimmed.matches("!arliai(?:\\s+(\\d+)h)?(?:\\s+(.*))?")) {
                                 if (userId != null && userId.equals(sender)) continue;
 
@@ -137,7 +161,9 @@ public class MatrixHelloBot {
                                 final int finalHours = hours;
                                 final String finalQuestion = question;
                                 final String finalPrevBatch = prevBatch; // Make prevBatch final for lambda
-                                new Thread(() -> queryArliAIWithChatLogs(client, mapper, url, accessToken, roomId, finalHours, finalPrevBatch, finalQuestion)).start();
+                                final Config finalConfig = config;
+                                final String finalRoomId = roomId; // Command room for responses
+                                new Thread(() -> queryArliAIWithChatLogs(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalQuestion, finalConfig)).start();
                             }
                         }
                     }
@@ -150,6 +176,23 @@ public class MatrixHelloBot {
                 try { Thread.sleep(2000); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); break; }
             }
         }
+    }
+    
+    private static Config loadConfig(String configPath) {
+        try {
+            String content = new String(Files.readAllBytes(Paths.get(configPath)));
+            ObjectMapper mapper = new ObjectMapper();
+            return mapper.readValue(content, Config.class);
+        } catch (Exception e) {
+            System.err.println("Error loading config from " + configPath + ": " + e.getMessage());
+            return null;
+        }
+    }
+    
+    private static String getArliApiKey() {
+        // This method can be extended to read from different sources if needed
+        // For now, it will be handled through the config file
+        return null; // Config is passed directly
     }
 
     private static void sendText(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String message) {
@@ -223,18 +266,18 @@ public class MatrixHelloBot {
         return html;
     }
 
-    private static void exportRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken) {
+    private static void exportRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken) {
         try {
             long now = System.currentTimeMillis();
-            String safeRoom = roomId.replaceAll("[^A-Za-z0-9._-]", "_");
+            String safeRoom = exportRoomId.replaceAll("[^A-Za-z0-9._-]", "_");
             String filename = safeRoom + "-last" + hours + "h-" + now + ".txt";
 
-            sendMarkdown(client, mapper, url, accessToken, roomId, "Starting export of last " + hours + "h to " + filename);
+            sendMarkdown(client, mapper, url, accessToken, responseRoomId, "Starting export of last " + hours + "h from " + exportRoomId + " to " + filename);
 
-            java.util.List<String> lines = fetchRoomHistory(client, mapper, url, accessToken, roomId, hours, fromToken);
+            java.util.List<String> lines = fetchRoomHistory(client, mapper, url, accessToken, exportRoomId, hours, fromToken);
 
             if (lines.isEmpty()) {
-                sendMarkdown(client, mapper, url, accessToken, roomId, "No chat logs found for the last " + hours + "h to export.");
+                sendMarkdown(client, mapper, url, accessToken, responseRoomId, "No chat logs found for the last " + hours + "h to export from " + exportRoomId + ".");
                 return;
             }
 
@@ -242,21 +285,21 @@ public class MatrixHelloBot {
                 for (String l : lines) w.write(l + "\n");
             }
 
-            sendMarkdown(client, mapper, url, accessToken, roomId, "Export complete: " + filename + " (" + lines.size() + " messages)");
+            sendMarkdown(client, mapper, url, accessToken, responseRoomId, "Export complete: " + filename + " (" + lines.size() + " messages)");
             System.out.println("Exported " + lines.size() + " messages to " + filename);
         } catch (Exception e) {
             System.out.println("Export failed: " + e.getMessage());
-            try { sendMarkdown(client, mapper, url, accessToken, roomId, "Export failed: " + e.getMessage()); } catch (Exception ignore) {}
+            try { sendMarkdown(client, mapper, url, accessToken, responseRoomId, "Export failed: " + e.getMessage()); } catch (Exception ignore) {}
         }
     }
 
-    private static void queryArliAIWithChatLogs(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken, String question) {
+    private static void queryArliAIWithChatLogs(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken, String question, Config config) {
         try {
-            sendMarkdown(client, mapper, url, accessToken, roomId, "Querying Arli AI with chat logs from last " + (hours > 0 ? hours + "h" : "all history") + (question != null ? " and question: " + question : "") + "...");
+            sendMarkdown(client, mapper, url, accessToken, responseRoomId, "Querying Arli AI with chat logs from " + exportRoomId + " (last " + (hours > 0 ? hours + "h" : "all history") + (question != null ? " and question: " + question : "") + ")...");
 
-            java.util.List<String> chatLogs = fetchRoomHistory(client, mapper, url, accessToken, roomId, hours, fromToken);
+            java.util.List<String> chatLogs = fetchRoomHistory(client, mapper, url, accessToken, exportRoomId, hours, fromToken);
             if (chatLogs.isEmpty()) {
-                sendMarkdown(client, mapper, url, accessToken, roomId, "No chat logs found for the last " + (hours > 0 ? hours + "h" : "all history") + ".");
+                sendMarkdown(client, mapper, url, accessToken, responseRoomId, "No chat logs found for the last " + (hours > 0 ? hours + "h" : "all history") + " in " + exportRoomId + ".");
                 return;
             }
 
@@ -269,10 +312,10 @@ public class MatrixHelloBot {
 
             // Make HTTP POST request to Arli AI API
             String arliApiUrl = "https://api.arliai.com";
-            String arliApiKey = System.getenv("ARLI_API_KEY");
+            String arliApiKey = config.arliApiKey;
 
             if (arliApiKey == null || arliApiKey.isEmpty()) {
-                sendMarkdown(client, mapper, url, accessToken, roomId, "ARLI_API_KEY environment variable is not set or is empty.");
+                sendMarkdown(client, mapper, url, accessToken, responseRoomId, "ARLI_API_KEY is not configured.");
                 return;
             }
 
@@ -299,14 +342,14 @@ public class MatrixHelloBot {
             if (response.statusCode() == 200) {
                 JsonNode arliResponse = mapper.readTree(response.body());
                 String arliAnswer = arliResponse.path("choices").get(0).path("message").path("content").asText("No response from Arli AI.");
-                sendMarkdown(client, mapper, url, accessToken, roomId, arliAnswer);
+                sendMarkdown(client, mapper, url, accessToken, responseRoomId, arliAnswer);
             } else {
-                sendMarkdown(client, mapper, url, accessToken, roomId, "Failed to get response from Arli AI. Status: " + response.statusCode() + ", Body: " + response.body());
+                sendMarkdown(client, mapper, url, accessToken, responseRoomId, "Failed to get response from Arli AI. Status: " + response.statusCode() + ", Body: " + response.body());
             }
 
         } catch (Exception e) {
             System.out.println("Failed to query Arli AI with chat logs: " + e.getMessage());
-            sendMarkdown(client, mapper, url, accessToken, roomId, "Error querying Arli AI: " + e.getMessage());
+            sendMarkdown(client, mapper, url, accessToken, responseRoomId, "Error querying Arli AI: " + e.getMessage());
         }
     }
 

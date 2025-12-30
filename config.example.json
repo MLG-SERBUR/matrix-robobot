@@ -1,0 +1,7 @@
+{
+  "homeserver": "https://matrix.org",
+  "accessToken": "syt_YOUR_ACCESS_TOKEN_1234567890abcdef",
+  "commandRoomId": "!abc123def456:matrix.org",
+  "exportRoomId": "!xyz789uvw012:matrix.org",
+  "arliApiKey": "arli_xxxxxxxxxxxxxxxxxxxxxxxx"
+}
