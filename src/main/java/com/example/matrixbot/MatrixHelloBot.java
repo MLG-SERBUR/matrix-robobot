@@ -2,6 +2,8 @@ package com.example.matrixbot;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.commonmark.renderer.html.HtmlRenderer;
+import org.commonmark.parser.Parser;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -207,62 +209,16 @@ public class MatrixHelloBot {
     }
 
     private static String convertMarkdownToHtml(String markdown) {
-        // Simple markdown to HTML conversion
-        String html = markdown;
+        // Configure parser and renderer
+        Parser parser = Parser.builder().build();
+        HtmlRenderer renderer = HtmlRenderer.builder().build();
         
-        // Convert headers (# Header) - handle them line by line
-        String[] lines = html.split("\n");
-        StringBuilder result = new StringBuilder();
+        // Parse and render markdown to HTML
+        org.commonmark.node.Node document = parser.parse(markdown);
+        String html = renderer.render(document);
         
-        for (String line : lines) {
-            if (line.matches("^#\\s+.*")) {
-                result.append("<h1>").append(line.replaceFirst("^#\\s+", "")).append("</h1>");
-            } else if (line.matches("^##\\s+.*")) {
-                result.append("<h2>").append(line.replaceFirst("^##\\s+", "")).append("</h2>");
-            } else if (line.matches("^###\\s+.*")) {
-                result.append("<h3>").append(line.replaceFirst("^###\\s+", "")).append("</h3>");
-            } else if (line.matches("^####\\s+.*")) {
-                result.append("<h4>").append(line.replaceFirst("^####\\s+", "")).append("</h4>");
-            } else if (line.matches("^#####\\s+.*")) {
-                result.append("<h5>").append(line.replaceFirst("^#####\\s+", "")).append("</h5>");
-            } else if (line.matches("^######\\s+.*")) {
-                result.append("<h6>").append(line.replaceFirst("^######\\s+", "")).append("</h6>");
-            } else if (line.matches("^>\\s+.*")) {
-                result.append("<blockquote>").append(line.replaceFirst("^>\\s+", "")).append("</blockquote>");
-            } else if (line.matches("^[-*]{3,}\\s*$")) {
-                result.append("<hr>");
-            } else if (line.matches("^-\\s+.*")) {
-                result.append("<li>").append(line.replaceFirst("^-\\s+", "")).append("</li>");
-            } else if (line.matches("^\\d+\\.\\s+.*")) {
-                result.append("<li>").append(line.replaceFirst("^\\d+\\.\\s+", "")).append("</li>");
-            } else {
-                result.append(line);
-            }
-            result.append("\n");
-        }
-        
-        html = result.toString();
-        
-        // Convert bold (**text**)
-        html = html.replaceAll("\\*\\*(.*?)\\*\\*", "<strong>$1</strong>");
-        
-        // Convert italic (*text*)
-        html = html.replaceAll("\\*(.*?)\\*", "<em>$1</em>");
-        
-        // Convert inline code (`code`)
-        html = html.replaceAll("`([^`]+)`", "<code>$1</code>");
-        
-        // Convert links ([text](url))
-        html = html.replaceAll("\\[([^\\]]+)\\]\\(([^)]+)\\)", "<a href=\"$2\">$1</a>");
-        
-        // Convert code blocks (```language\ncontent\n```)
-        html = html.replaceAll("```\\w*\n(.*?)\n```", "<pre><code>$1</code></pre>");
-        
-        // Wrap lists in <ul> tags
-        html = html.replaceAll("(<li>.*?</li>)+", "<ul>$0</ul>");
-        
-        // Convert newlines to <br> tags (but preserve HTML tags)
-        html = html.replaceAll("\n", "<br>");
+        // Clean up any extra newlines that might be added by the renderer
+        html = html.replaceAll("\n", "");
         
         return html;
     }
@@ -308,7 +264,7 @@ public class MatrixHelloBot {
             if (question != null && !question.isEmpty()) {
                 prompt = "Given the following chat logs, answer the question: '" + question + "'\\n\\n" + String.join("\\n", chatLogs);
             } else {
-                prompt = "Summarize the following chat logs. Use only a title for each topic and only include one or more direct quotes as bullet points for each topic:\\n\\n" + String.join("\\n", chatLogs);
+                prompt = "Give a high level overview of the following chat logs. Use only a title for each topic and only include one or more chat messages verbatim as bullet points for each topic. Then summarize with bullet points all of the chat at end:\\n\\n" + String.join("\\n", chatLogs);
             }
 
             // Make HTTP POST request to Arli AI API
@@ -321,7 +277,7 @@ public class MatrixHelloBot {
             }
 
             java.util.List<Map<String, String>> messages = new java.util.ArrayList<>();
-            messages.add(Map.of("role", "system", "content", "You summarize chat logs."));
+            messages.add(Map.of("role", "system", "content", "You provide high level overview of a chat log."));
             messages.add(Map.of("role", "user", "content", prompt));
 
             Map<String, Object> arliPayload = Map.of(
