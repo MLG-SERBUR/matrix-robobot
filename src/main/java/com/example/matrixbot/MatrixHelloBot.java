@@ -444,6 +444,91 @@ public class MatrixHelloBot {
         }
     }
 
+    private static String sendTextWithEventId(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String message) {
+        try {
+            String txnId = "m" + Instant.now().toEpochMilli();
+            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+            String endpoint = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
+            
+            // Sanitize message to prevent user pings
+            String sanitizedMessage = sanitizeUserIds(message);
+            
+            Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("msgtype", "m.text");
+            payload.put("body", sanitizedMessage);
+            payload.put("m.mentions", Map.of());
+            String json = mapper.writeValueAsString(payload);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(endpoint))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Content-Type", "application/json")
+                    .PUT(HttpRequest.BodyPublishers.ofString(json))
+                    .build();
+
+            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                JsonNode root = mapper.readTree(resp.body());
+                return root.path("event_id").asText(null);
+            }
+            System.out.println("Sent message to " + roomId + " -> " + resp.statusCode());
+            return null;
+        } catch (Exception e) {
+            System.out.println("Failed to send message: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static String updateTextMessage(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String originalEventId, String message) {
+        try {
+            String txnId = "m" + Instant.now().toEpochMilli();
+            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+            String endpoint = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
+            
+            // Sanitize message to prevent user pings
+            String sanitizedMessage = sanitizeUserIds(message);
+            
+            Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("msgtype", "m.text");
+            payload.put("body", "* " + sanitizedMessage); // Asterisk prefix for edited messages
+            payload.put("m.mentions", Map.of());
+            
+            // Add new_content field
+            Map<String, Object> newContent = new java.util.HashMap<>();
+            newContent.put("msgtype", "m.text");
+            newContent.put("body", sanitizedMessage);
+            newContent.put("m.mentions", Map.of());
+            payload.put("m.new_content", newContent);
+            
+            // Add relation to replace the ORIGINAL message (not the previous update)
+            Map<String, Object> relatesTo = new java.util.HashMap<>();
+            relatesTo.put("event_id", originalEventId);
+            relatesTo.put("rel_type", "m.replace");
+            payload.put("m.relates_to", relatesTo);
+            
+            String json = mapper.writeValueAsString(payload);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(endpoint))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Content-Type", "application/json")
+                    .PUT(HttpRequest.BodyPublishers.ofString(json))
+                    .build();
+
+            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+            System.out.println("Updated message " + originalEventId + " -> " + resp.statusCode());
+            
+            // Return the new event ID for future updates
+            if (resp.statusCode() == 200) {
+                JsonNode root = mapper.readTree(resp.body());
+                return root.path("event_id").asText(null);
+            }
+        } catch (Exception e) {
+            System.out.println("Failed to update message: " + e.getMessage());
+        }
+        return null;
+    }
+
     private static void sendMarkdown(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String message) {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
@@ -982,8 +1067,11 @@ public class MatrixHelloBot {
             ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "last " + hours + "h";
             
-            sendText(client, mapper, url, accessToken, responseRoomId, "Performing grep search in " + exportRoomId + " for: \"" + pattern + "\" (" + timeInfo + ")...");
-
+            // Send initial message and get event ID for updates
+            String initialMessage = "Performing grep search in " + exportRoomId + " for: \"" + pattern + "\" (" + timeInfo + ")...";
+            String eventMessageId = sendTextWithEventId(client, mapper, url, accessToken, responseRoomId, initialMessage);
+            String originalEventId = eventMessageId; // Track the original event ID for all updates
+            
             // Calculate the time range
             long startTime = System.currentTimeMillis() - (long) hours * 3600L * 1000L;
             long endTime = System.currentTimeMillis();
@@ -1013,9 +1101,12 @@ public class MatrixHelloBot {
             java.util.List<String> results = new java.util.ArrayList<>();
             java.util.List<String> eventIds = new java.util.ArrayList<>();
             int maxResults = 50;
+            boolean truncated = false;
             
             // Case-insensitive literal pattern matching
             String lowerPattern = pattern.toLowerCase();
+            long lastUpdateTime = 0;
+            int lastResultCount = 0;
 
             while (token != null && results.size() < maxResults) {
                 try {
@@ -1063,6 +1154,28 @@ public class MatrixHelloBot {
                             if (formattedLog.toLowerCase().contains(lowerPattern)) {
                                 results.add(formattedLog);
                                 eventIds.add(eventId);
+                                
+                                // Update message every 5 results or every 2 seconds
+                                if (eventMessageId != null && (results.size() - lastResultCount >= 5 || System.currentTimeMillis() - lastUpdateTime > 2000)) {
+                                    StringBuilder updateMsg = new StringBuilder();
+                                    updateMsg.append("Grep results for \"").append(pattern).append("\" - ");
+                                    updateMsg.append("from last ").append(hours).append(" hours. ");
+                                    updateMsg.append(results.size()).append(" matches (searching...)\n");
+                                    for (int i = 0; i < results.size(); i++) {
+                                        updateMsg.append(results.get(i)).append(" ");
+                                        String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + eventIds.get(i);
+                                        updateMsg.append(messageLink).append("\n");
+                                    }
+                                    // Always use original event ID for updates
+                                    updateTextMessage(client, mapper, url, accessToken, responseRoomId, originalEventId, updateMsg.toString());
+                                    lastUpdateTime = System.currentTimeMillis();
+                                    lastResultCount = results.size();
+                                }
+                                
+                                if (results.size() >= maxResults) {
+                                    truncated = true;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -1082,16 +1195,20 @@ public class MatrixHelloBot {
             }
 
             if (results.isEmpty()) {
-                sendText(client, mapper, url, accessToken, responseRoomId, "No matches found for pattern: \"" + pattern + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                if (originalEventId != null) {
+                    updateTextMessage(client, mapper, url, accessToken, responseRoomId, originalEventId, "No matches found for pattern: \"" + pattern + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                } else {
+                    sendText(client, mapper, url, accessToken, responseRoomId, "No matches found for pattern: \"" + pattern + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                }
                 return;
             }
 
-            // Format results
+            // Final update with complete results
             StringBuilder response = new StringBuilder();
             response.append("Grep results for \"").append(pattern).append("\" - ");
             response.append("from last ").append(hours).append(" hours. ");
             response.append(results.size()).append(" matches.");
-            if (results.size() >= maxResults) {
+            if (truncated) {
                 response.append(" (there may be more, use !grep-slow to see all results.)");
             }
             response.append("\n");
@@ -1103,7 +1220,11 @@ public class MatrixHelloBot {
                 response.append(messageLink).append("\n");
             }
 
-            sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
+            if (originalEventId != null) {
+                updateTextMessage(client, mapper, url, accessToken, responseRoomId, originalEventId, response.toString());
+            } else {
+                sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
+            }
 
         } catch (Exception e) {
             System.out.println("Failed to perform grep: " + e.getMessage());
@@ -1177,8 +1298,11 @@ public class MatrixHelloBot {
             ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "last " + hours + "h";
             
-            sendText(client, mapper, url, accessToken, responseRoomId, "Performing search in " + exportRoomId + " for: \"" + query + "\" (" + timeInfo + ")...");
-
+            // Send initial message and get event ID for updates
+            String initialMessage = "Performing search in " + exportRoomId + " for: \"" + query + "\" (" + timeInfo + ")...";
+            String eventMessageId = sendTextWithEventId(client, mapper, url, accessToken, responseRoomId, initialMessage);
+            String originalEventId = eventMessageId; // Track the original event ID for all updates
+            
             // Calculate the time range
             long startTime = System.currentTimeMillis() - (long) hours * 3600L * 1000L;
             long endTime = System.currentTimeMillis();
@@ -1212,6 +1336,8 @@ public class MatrixHelloBot {
             java.util.List<String> eventIds = new java.util.ArrayList<>();
             int maxResults = 50;
             boolean truncated = false;
+            long lastUpdateTime = 0;
+            int lastResultCount = 0;
 
             while (token != null && results.size() < maxResults) {
                 try {
@@ -1269,6 +1395,23 @@ public class MatrixHelloBot {
                                 results.add(formattedLog);
                                 eventIds.add(eventId);
                                 
+                                // Update message every 5 results or every 2 seconds
+                                if (eventMessageId != null && (results.size() - lastResultCount >= 5 || System.currentTimeMillis() - lastUpdateTime > 2000)) {
+                                    StringBuilder updateMsg = new StringBuilder();
+                                    updateMsg.append("Search results for \"").append(query).append("\" - ");
+                                    updateMsg.append("from last ").append(hours).append(" hours. ");
+                                    updateMsg.append(results.size()).append(" matches (searching...)\n");
+                                    for (int i = 0; i < results.size(); i++) {
+                                        updateMsg.append(results.get(i)).append(" ");
+                                        String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + eventIds.get(i);
+                                        updateMsg.append(messageLink).append("\n");
+                                    }
+                                    // Always use original event ID for updates
+                                    updateTextMessage(client, mapper, url, accessToken, responseRoomId, originalEventId, updateMsg.toString());
+                                    lastUpdateTime = System.currentTimeMillis();
+                                    lastResultCount = results.size();
+                                }
+                                
                                 if (results.size() >= maxResults) {
                                     truncated = true;
                                     break;
@@ -1292,11 +1435,15 @@ public class MatrixHelloBot {
             }
 
             if (results.isEmpty()) {
-                sendText(client, mapper, url, accessToken, responseRoomId, "No messages found containing all terms: \"" + query + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                if (originalEventId != null) {
+                    updateTextMessage(client, mapper, url, accessToken, responseRoomId, originalEventId, "No messages found containing all terms: \"" + query + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                } else {
+                    sendText(client, mapper, url, accessToken, responseRoomId, "No messages found containing all terms: \"" + query + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                }
                 return;
             }
 
-            // Format results
+            // Final update with complete results
             StringBuilder response = new StringBuilder();
             response.append("Search results for \"").append(query).append("\" - ");
             response.append("from last ").append(hours).append(" hours. ");
@@ -1313,7 +1460,11 @@ public class MatrixHelloBot {
                 response.append(messageLink).append("\n");
             }
 
-            sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
+            if (originalEventId != null) {
+                updateTextMessage(client, mapper, url, accessToken, responseRoomId, originalEventId, response.toString());
+            } else {
+                sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
+            }
 
         } catch (Exception e) {
             System.out.println("Failed to perform search: " + e.getMessage());
