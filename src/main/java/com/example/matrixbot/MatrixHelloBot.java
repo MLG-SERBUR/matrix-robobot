@@ -291,16 +291,21 @@ public class MatrixHelloBot {
                                     final String finalTimezoneAbbr = timezoneAbbr;
                                     new Thread(() -> performSemanticSearch(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalQuery, finalTimezoneAbbr)).start();
                                 }
-                            } else if (trimmed.matches("!grep\\s+[A-Z]{3}\\s+\\d+h\\s+(.+)")) {
+                            } else if (trimmed.matches("!grep\\s+[A-Z]{3}\\s+\\d+[dh]\\s+(.+)")) {
                                 if (userId != null && userId.equals(sender)) continue;
 
-                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("!grep\\s+([A-Z]{3})\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
+                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("!grep\\s+([A-Z]{3})\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
                                 if (matcher.matches()) {
                                     String timezoneAbbr = matcher.group(1);
-                                    int hours = Integer.parseInt(matcher.group(2));
-                                    String pattern = matcher.group(3).trim();
+                                    int duration = Integer.parseInt(matcher.group(2));
+                                    String unit = matcher.group(3);
+                                    String pattern = matcher.group(4).trim();
+                                    
+                                    // Convert to hours
+                                    int hours = unit.equals("d") ? duration * 24 : duration;
+                                    String durationStr = duration + unit;
 
-                                    System.out.println("Received grep command in " + roomId + " from " + sender + " (" + timezoneAbbr + ", " + hours + "h, pattern: " + pattern + ")");
+                                    System.out.println("Received grep command in " + roomId + " from " + sender + " (" + timezoneAbbr + ", " + durationStr + ", pattern: " + pattern + ")");
                                     final int finalHours = hours;
                                     final String finalPattern = pattern;
                                     final String finalPrevBatch = prevBatch;
@@ -309,16 +314,21 @@ public class MatrixHelloBot {
                                     final String finalTimezoneAbbr = timezoneAbbr;
                                     new Thread(() -> performGrep(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalPattern, finalTimezoneAbbr)).start();
                                 }
-                            } else if (trimmed.matches("!grep-slow\\s+[A-Z]{3}\\s+\\d+h\\s+(.+)")) {
+                            } else if (trimmed.matches("!grep-slow\\s+[A-Z]{3}\\s+\\d+[dh]\\s+(.+)")) {
                                 if (userId != null && userId.equals(sender)) continue;
 
-                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("!grep-slow\\s+([A-Z]{3})\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
+                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("!grep-slow\\s+([A-Z]{3})\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
                                 if (matcher.matches()) {
                                     String timezoneAbbr = matcher.group(1);
-                                    int hours = Integer.parseInt(matcher.group(2));
-                                    String pattern = matcher.group(3).trim();
+                                    int duration = Integer.parseInt(matcher.group(2));
+                                    String unit = matcher.group(3);
+                                    String pattern = matcher.group(4).trim();
+                                    
+                                    // Convert to hours
+                                    int hours = unit.equals("d") ? duration * 24 : duration;
+                                    String durationStr = duration + unit;
 
-                                    System.out.println("Received grep-slow command in " + roomId + " from " + sender + " (" + timezoneAbbr + ", " + hours + "h, pattern: " + pattern + ")");
+                                    System.out.println("Received grep-slow command in " + roomId + " from " + sender + " (" + timezoneAbbr + ", " + durationStr + ", pattern: " + pattern + ")");
                                     final int finalHours = hours;
                                     final String finalPattern = pattern;
                                     final String finalPrevBatch = prevBatch;
@@ -327,16 +337,21 @@ public class MatrixHelloBot {
                                     final String finalTimezoneAbbr = timezoneAbbr;
                                     new Thread(() -> performGrepSlow(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalPattern, finalTimezoneAbbr)).start();
                                 }
-                            } else if (trimmed.matches("!search\\s+[A-Z]{3}\\s+\\d+h\\s+(.+)")) {
+                            } else if (trimmed.matches("!search\\s+[A-Z]{3}\\s+\\d+[dh]\\s+(.+)")) {
                                 if (userId != null && userId.equals(sender)) continue;
 
-                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("!search\\s+([A-Z]{3})\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
+                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("!search\\s+([A-Z]{3})\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
                                 if (matcher.matches()) {
                                     String timezoneAbbr = matcher.group(1);
-                                    int hours = Integer.parseInt(matcher.group(2));
-                                    String query = matcher.group(3).trim();
+                                    int duration = Integer.parseInt(matcher.group(2));
+                                    String unit = matcher.group(3);
+                                    String query = matcher.group(4).trim();
+                                    
+                                    // Convert to hours
+                                    int hours = unit.equals("d") ? duration * 24 : duration;
+                                    String durationStr = duration + unit;
 
-                                    System.out.println("Received search command in " + roomId + " from " + sender + " (" + timezoneAbbr + ", " + hours + "h, query: " + query + ")");
+                                    System.out.println("Received search command in " + roomId + " from " + sender + " (" + timezoneAbbr + ", " + durationStr + ", query: " + query + ")");
                                     final int finalHours = hours;
                                     final String finalQuery = query;
                                     final String finalPrevBatch = prevBatch;
@@ -369,17 +384,17 @@ public class MatrixHelloBot {
                                     "  - Duration: Number of hours to search\n" +
                                     "  - Query: Search terms to find relevant messages\n" +
                                     "  - Returns: Top 5 most relevant messages with similarity scores\n\n" +
-                                    "**!grep <timezone> <duration>h <pattern>** - Literal case-insensitive grep search (fast, stops at 50 results)\n" +
+                                    "**!grep <timezone> <duration>[h|d] <pattern>** - Literal case-insensitive grep search (fast, stops at 50 results)\n" +
                                     "  - Timezone: PST, PDT, MST, MDT, CST, CDT, EST, EDT, UTC, GMT\n" +
-                                    "  - Duration: Number of hours to search\n" +
+                                    "  - Duration: Number of hours (24h) or days (2d) to search\n" +
                                     "  - Pattern: Literal text to search for (case-insensitive)\n" +
                                     "  - Returns: Up to 50 matching messages with timestamps\n\n" +
-                                    "**!grep-slow <timezone> <duration>h <pattern>** - Literal case-insensitive grep after collecting all messages\n" +
+                                    "**!grep-slow <timezone> <duration>[h|d] <pattern>** - Literal case-insensitive grep after collecting all messages\n" +
                                     "  - Same format as !grep but collects all messages first, then searches\n" +
                                     "  - Slower but ensures no results are missed\n\n" +
-                                    "**!search <timezone> <duration>h <terms>** - Find messages containing ALL search terms (any order)\n" +
+                                    "**!search <timezone> <duration>[h|d] <terms>** - Find messages containing ALL search terms (any order)\n" +
                                     "  - Timezone: PST, PDT, MST, MDT, CST, CDT, EST, EDT, UTC, GMT\n" +
-                                    "  - Duration: Number of hours to search\n" +
+                                    "  - Duration: Number of hours (24h) or days (2d) to search\n" +
                                     "  - Terms: Space-separated literal terms (case-insensitive)\n" +
                                     "  - Example: `!search PST 24h fluffychat robomwm` finds messages with both terms\n\n" +
                                     "**!help** - Show this help message";
