@@ -18,6 +18,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MatrixHelloBot {
     
@@ -29,6 +30,9 @@ public class MatrixHelloBot {
         public String arliApiKey;
         public String cerebrasApiKey;
     }
+    
+    // Track running search operations by user ID
+    private static final java.util.Map<String, AtomicBoolean> runningOperations = new java.util.concurrent.ConcurrentHashMap<>();
     
     // Centralized prompt configuration
     private static class Prompts {
@@ -312,7 +316,7 @@ public class MatrixHelloBot {
                                     final Config finalConfig = config;
                                     final String finalRoomId = roomId;
                                     final String finalTimezoneAbbr = timezoneAbbr;
-                                    new Thread(() -> performGrep(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalPattern, finalTimezoneAbbr)).start();
+                                    new Thread(() -> performGrep(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalPattern, finalTimezoneAbbr, sender)).start();
                                 }
                             } else if (trimmed.matches("!grep-slow\\s+[A-Z]{3}\\s+\\d+[dh]\\s+(.+)")) {
                                 if (userId != null && userId.equals(sender)) continue;
@@ -335,7 +339,7 @@ public class MatrixHelloBot {
                                     final Config finalConfig = config;
                                     final String finalRoomId = roomId;
                                     final String finalTimezoneAbbr = timezoneAbbr;
-                                    new Thread(() -> performGrepSlow(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalPattern, finalTimezoneAbbr)).start();
+                                    new Thread(() -> performGrepSlow(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalPattern, finalTimezoneAbbr, sender)).start();
                                 }
                             } else if (trimmed.matches("!search\\s+[A-Z]{3}\\s+\\d+[dh]\\s+(.+)")) {
                                 if (userId != null && userId.equals(sender)) continue;
@@ -358,7 +362,19 @@ public class MatrixHelloBot {
                                     final Config finalConfig = config;
                                     final String finalRoomId = roomId;
                                     final String finalTimezoneAbbr = timezoneAbbr;
-                                    new Thread(() -> performSearch(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalQuery, finalTimezoneAbbr)).start();
+                                    new Thread(() -> performSearch(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalQuery, finalTimezoneAbbr, sender)).start();
+                                }
+                            } else if ("!abort".equals(trimmed)) {
+                                if (userId != null && userId.equals(sender)) continue;
+                                System.out.println("Received abort command in " + roomId + " from " + sender);
+                                
+                                // Check if user has any running operations
+                                AtomicBoolean abortFlag = runningOperations.get(sender);
+                                if (abortFlag != null) {
+                                    abortFlag.set(true);
+                                    sendText(client, mapper, url, config.accessToken, roomId, "Aborting your running search/grep operations...");
+                                } else {
+                                    sendText(client, mapper, url, config.accessToken, roomId, "No running operations found to abort.");
                                 }
                             } else if ("!help".equals(trimmed)) {
                                 if (userId != null && userId.equals(sender)) continue;
@@ -397,6 +413,7 @@ public class MatrixHelloBot {
                                     "  - Duration: Number of hours (24h) or days (2d) to search\n" +
                                     "  - Terms: Space-separated literal terms (case-insensitive)\n" +
                                     "  - Example: `!search PST 24h fluffychat robomwm` finds messages with both terms\n\n" +
+                                    "**!abort** - Abort your currently running search/grep operations\n\n" +
                                     "**!help** - Show this help message";
                                 sendMarkdown(client, mapper, url, config.accessToken, roomId, helpText);
                             }
@@ -1077,8 +1094,12 @@ public class MatrixHelloBot {
         }
     }
 
-    private static void performGrep(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken, String pattern, String timezoneAbbr) {
+    private static void performGrep(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken, String pattern, String timezoneAbbr, String sender) {
         try {
+            // Register this operation for abort capability
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+            
             ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "last " + hours + "h";
             
@@ -1124,6 +1145,13 @@ public class MatrixHelloBot {
             int lastResultCount = 0;
 
             while (token != null && results.size() < maxResults) {
+                // Check for abort signal
+                if (abortFlag.get()) {
+                    System.out.println("Grep search aborted by user: " + sender);
+                    runningOperations.remove(sender);
+                    return;
+                }
+                
                 try {
                     String messagesUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(exportRoomId, StandardCharsets.UTF_8)
                             + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=1000";
@@ -1143,6 +1171,13 @@ public class MatrixHelloBot {
 
                     boolean reachedStart = false;
                     for (JsonNode ev : chunk) {
+                        // Check for abort signal inside the loop too
+                        if (abortFlag.get()) {
+                            System.out.println("Grep search aborted by user: " + sender);
+                            runningOperations.remove(sender);
+                            return;
+                        }
+                        
                         if (!"m.room.message".equals(ev.path("type").asText(null))) continue;
                         long originServerTs = ev.path("origin_server_ts").asLong(0);
                         
@@ -1156,14 +1191,14 @@ public class MatrixHelloBot {
                         }
                         
                         String body = ev.path("content").path("body").asText(null);
-                        String sender = ev.path("sender").asText(null);
+                        String senderMsg = ev.path("sender").asText(null);
                         String eventId = ev.path("event_id").asText(null);
-                        if (body != null && sender != null && eventId != null) {
+                        if (body != null && senderMsg != null && eventId != null) {
                             // Format timestamp with timezone (convert UTC to user's timezone)
                             String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
                                     .atZone(zoneId)
                                     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                            String formattedLog = "[" + timestamp + "] <" + sender + "> " + body;
+                            String formattedLog = "[" + timestamp + "] <" + senderMsg + "> " + body;
                             
                             // Case-insensitive literal search on the formatted log line
                             if (formattedLog.toLowerCase().contains(lowerPattern)) {
@@ -1215,6 +1250,7 @@ public class MatrixHelloBot {
                 } else {
                     sendText(client, mapper, url, accessToken, responseRoomId, "No matches found for pattern: \"" + pattern + "\" in " + timeInfo + " of " + exportRoomId + ".");
                 }
+                runningOperations.remove(sender);
                 return;
             }
 
@@ -1241,14 +1277,21 @@ public class MatrixHelloBot {
                 sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
             }
 
+            runningOperations.remove(sender);
+
         } catch (Exception e) {
             System.out.println("Failed to perform grep: " + e.getMessage());
             sendText(client, mapper, url, accessToken, responseRoomId, "Error performing grep: " + e.getMessage());
+            runningOperations.remove(sender);
         }
     }
 
-    private static void performGrepSlow(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken, String pattern, String timezoneAbbr) {
+    private static void performGrepSlow(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken, String pattern, String timezoneAbbr, String sender) {
         try {
+            // Register this operation for abort capability
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+            
             ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "last " + hours + "h";
             
@@ -1259,10 +1302,19 @@ public class MatrixHelloBot {
             long endTime = System.currentTimeMillis();
             
             // Use existing fetchRoomHistoryWithIds to get all messages first
+            // Note: This method doesn't support abort during fetch, but we can check after
             ChatLogsWithIds result = fetchRoomHistoryWithIds(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTime, endTime, zoneId);
+            
+            // Check for abort after fetch
+            if (abortFlag.get()) {
+                System.out.println("Grep-slow aborted by user: " + sender);
+                runningOperations.remove(sender);
+                return;
+            }
             
             if (result.logs.isEmpty()) {
                 sendText(client, mapper, url, accessToken, responseRoomId, "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
+                runningOperations.remove(sender);
                 return;
             }
 
@@ -1272,6 +1324,13 @@ public class MatrixHelloBot {
             java.util.List<String> eventIds = new java.util.ArrayList<>();
 
             for (int i = 0; i < result.logs.size(); i++) {
+                // Check for abort during processing
+                if (abortFlag.get()) {
+                    System.out.println("Grep-slow aborted by user: " + sender);
+                    runningOperations.remove(sender);
+                    return;
+                }
+                
                 String log = result.logs.get(i);
                 String eventId = result.eventIds.get(i);
                 
@@ -1284,6 +1343,7 @@ public class MatrixHelloBot {
 
             if (results.isEmpty()) {
                 sendText(client, mapper, url, accessToken, responseRoomId, "No matches found for pattern: \"" + pattern + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                runningOperations.remove(sender);
                 return;
             }
 
@@ -1301,15 +1361,21 @@ public class MatrixHelloBot {
             }
 
             sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
+            runningOperations.remove(sender);
 
         } catch (Exception e) {
             System.out.println("Failed to perform grep-slow: " + e.getMessage());
             sendText(client, mapper, url, accessToken, responseRoomId, "Error performing grep-slow: " + e.getMessage());
+            runningOperations.remove(sender);
         }
     }
 
-    private static void performSearch(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken, String query, String timezoneAbbr) {
+    private static void performSearch(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken, String query, String timezoneAbbr, String sender) {
         try {
+            // Register this operation for abort capability
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+            
             ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "last " + hours + "h";
             
@@ -1355,6 +1421,13 @@ public class MatrixHelloBot {
             int lastResultCount = 0;
 
             while (token != null && results.size() < maxResults) {
+                // Check for abort signal
+                if (abortFlag.get()) {
+                    System.out.println("Search aborted by user: " + sender);
+                    runningOperations.remove(sender);
+                    return;
+                }
+                
                 try {
                     String messagesUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(exportRoomId, StandardCharsets.UTF_8)
                             + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=1000";
@@ -1374,6 +1447,13 @@ public class MatrixHelloBot {
 
                     boolean reachedStart = false;
                     for (JsonNode ev : chunk) {
+                        // Check for abort signal inside the loop too
+                        if (abortFlag.get()) {
+                            System.out.println("Search aborted by user: " + sender);
+                            runningOperations.remove(sender);
+                            return;
+                        }
+                        
                         if (!"m.room.message".equals(ev.path("type").asText(null))) continue;
                         long originServerTs = ev.path("origin_server_ts").asLong(0);
                         
@@ -1387,14 +1467,14 @@ public class MatrixHelloBot {
                         }
                         
                         String body = ev.path("content").path("body").asText(null);
-                        String sender = ev.path("sender").asText(null);
+                        String senderMsg = ev.path("sender").asText(null);
                         String eventId = ev.path("event_id").asText(null);
-                        if (body != null && sender != null && eventId != null) {
+                        if (body != null && senderMsg != null && eventId != null) {
                             // Format timestamp with timezone (convert UTC to user's timezone)
                             String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
                                     .atZone(zoneId)
                                     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                            String formattedLog = "[" + timestamp + "] <" + sender + "> " + body;
+                            String formattedLog = "[" + timestamp + "] <" + senderMsg + "> " + body;
                             
                             // Check if formatted log contains ALL search terms (case-insensitive)
                             String lowerLog = formattedLog.toLowerCase();
@@ -1455,6 +1535,7 @@ public class MatrixHelloBot {
                 } else {
                     sendText(client, mapper, url, accessToken, responseRoomId, "No messages found containing all terms: \"" + query + "\" in " + timeInfo + " of " + exportRoomId + ".");
                 }
+                runningOperations.remove(sender);
                 return;
             }
 
@@ -1481,9 +1562,12 @@ public class MatrixHelloBot {
                 sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
             }
 
+            runningOperations.remove(sender);
+
         } catch (Exception e) {
             System.out.println("Failed to perform search: " + e.getMessage());
             sendText(client, mapper, url, accessToken, responseRoomId, "Error performing search: " + e.getMessage());
+            runningOperations.remove(sender);
         }
     }
 }
