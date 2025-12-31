@@ -990,7 +990,6 @@ public class MatrixHelloBot {
             java.util.List<String> results = new java.util.ArrayList<>();
             java.util.List<String> eventIds = new java.util.ArrayList<>();
             int maxResults = 50;
-            boolean truncated = false;
             
             // Case-insensitive literal pattern matching
             String lowerPattern = pattern.toLowerCase();
@@ -1066,20 +1065,19 @@ public class MatrixHelloBot {
 
             // Format results
             StringBuilder response = new StringBuilder();
-            response.append("Grep Results");
-            if (truncated) {
-                response.append(" (limited to 50, there may be more)");
+            response.append("Grep results for \"").append(pattern).append("\" - ");
+            response.append("from last ").append(hours).append(" hours. ");
+            response.append(results.size()).append(" matches.");
+            if (results.size() >= maxResults) {
+                response.append(" (there may be more, use !grep-slow to see all results.)");
             }
-            response.append("\n\n");
-            response.append("Pattern: \"").append(pattern).append("\"\n");
-            response.append("Time range: last ").append(hours).append(" hours\n");
-            response.append("Matches: ").append(results.size()).append("\n\n");
+            response.append("\n");
             
             for (int i = 0; i < results.size(); i++) {
-                response.append(results.get(i)).append("\n");
+                response.append(results.get(i)).append(" ");
                 // Add message link
                 String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + eventIds.get(i);
-                response.append(messageLink).append("\n\n");
+                response.append(messageLink).append("\n");
             }
 
             sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
@@ -1132,16 +1130,16 @@ public class MatrixHelloBot {
 
             // Format results
             StringBuilder response = new StringBuilder();
-            response.append("Grep-Slow Results\n\n");
-            response.append("Pattern: \"").append(pattern).append("\"\n");
-            response.append("Time range: last ").append(hours).append(" hours\n");
+            response.append("Grep-Slow: ");
+            response.append("Pattern: \"").append(pattern).append("\" - ");
+            response.append("Time range: last ").append(hours).append(" hours - ");
             response.append("Matches: ").append(results.size()).append("\n\n");
             
             for (int i = 0; i < results.size(); i++) {
-                response.append(results.get(i)).append("\n");
+                response.append(results.get(i)).append(" ");
                 // Add message link
                 String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + eventIds.get(i);
-                response.append(messageLink).append("\n\n");
+                response.append(messageLink).append("\n");
             }
 
             sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
