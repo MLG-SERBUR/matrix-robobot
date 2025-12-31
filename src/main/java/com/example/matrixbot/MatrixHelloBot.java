@@ -327,6 +327,24 @@ public class MatrixHelloBot {
                                     final String finalTimezoneAbbr = timezoneAbbr;
                                     new Thread(() -> performGrepSlow(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalPattern, finalTimezoneAbbr)).start();
                                 }
+                            } else if (trimmed.matches("!search\\s+[A-Z]{3}\\s+\\d+h\\s+(.+)")) {
+                                if (userId != null && userId.equals(sender)) continue;
+
+                                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("!search\\s+([A-Z]{3})\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
+                                if (matcher.matches()) {
+                                    String timezoneAbbr = matcher.group(1);
+                                    int hours = Integer.parseInt(matcher.group(2));
+                                    String query = matcher.group(3).trim();
+
+                                    System.out.println("Received search command in " + roomId + " from " + sender + " (" + timezoneAbbr + ", " + hours + "h, query: " + query + ")");
+                                    final int finalHours = hours;
+                                    final String finalQuery = query;
+                                    final String finalPrevBatch = prevBatch;
+                                    final Config finalConfig = config;
+                                    final String finalRoomId = roomId;
+                                    final String finalTimezoneAbbr = timezoneAbbr;
+                                    new Thread(() -> performSearch(client, mapper, url, finalConfig.accessToken, finalRoomId, finalConfig.exportRoomId, finalHours, finalPrevBatch, finalQuery, finalTimezoneAbbr)).start();
+                                }
                             } else if ("!help".equals(trimmed)) {
                                 if (userId != null && userId.equals(sender)) continue;
                                 System.out.println("Received help command in " + roomId + " from " + sender);
@@ -359,6 +377,11 @@ public class MatrixHelloBot {
                                     "**!grep-slow <timezone> <duration>h <pattern>** - Literal case-insensitive grep after collecting all messages\n" +
                                     "  - Same format as !grep but collects all messages first, then searches\n" +
                                     "  - Slower but ensures no results are missed\n\n" +
+                                    "**!search <timezone> <duration>h <terms>** - Find messages containing ALL search terms (any order)\n" +
+                                    "  - Timezone: PST, PDT, MST, MDT, CST, CDT, EST, EDT, UTC, GMT\n" +
+                                    "  - Duration: Number of hours to search\n" +
+                                    "  - Terms: Space-separated literal terms (case-insensitive)\n" +
+                                    "  - Example: `!search PST 24h fluffychat robomwm` finds messages with both terms\n\n" +
                                     "**!help** - Show this help message";
                                 sendMarkdown(client, mapper, url, config.accessToken, roomId, helpText);
                             }
@@ -1130,10 +1153,9 @@ public class MatrixHelloBot {
 
             // Format results
             StringBuilder response = new StringBuilder();
-            response.append("Grep-Slow: ");
-            response.append("Pattern: \"").append(pattern).append("\" - ");
-            response.append("Time range: last ").append(hours).append(" hours - ");
-            response.append("Matches: ").append(results.size()).append("\n\n");
+            response.append("Grep-Slow results for \"").append(pattern).append("\" - ");
+            response.append("from last ").append(hours).append(" hours. ");
+            response.append(results.size()).append(" matches.\n");
             
             for (int i = 0; i < results.size(); i++) {
                 response.append(results.get(i)).append(" ");
@@ -1147,6 +1169,155 @@ public class MatrixHelloBot {
         } catch (Exception e) {
             System.out.println("Failed to perform grep-slow: " + e.getMessage());
             sendText(client, mapper, url, accessToken, responseRoomId, "Error performing grep-slow: " + e.getMessage());
+        }
+    }
+
+    private static void performSearch(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken, String query, String timezoneAbbr) {
+        try {
+            ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
+            String timeInfo = "last " + hours + "h";
+            
+            sendText(client, mapper, url, accessToken, responseRoomId, "Performing search in " + exportRoomId + " for: \"" + query + "\" (" + timeInfo + ")...");
+
+            // Calculate the time range
+            long startTime = System.currentTimeMillis() - (long) hours * 3600L * 1000L;
+            long endTime = System.currentTimeMillis();
+            
+            // If we don't have a pagination token, try to get one via a short sync
+            String token = fromToken;
+            if (token == null) {
+                try {
+                    HttpRequest syncReq = HttpRequest.newBuilder()
+                            .uri(URI.create(url + "/_matrix/client/v3/sync?timeout=0"))
+                            .header("Authorization", "Bearer " + accessToken)
+                            .GET()
+                            .build();
+                    HttpResponse<String> syncResp = client.send(syncReq, HttpResponse.BodyHandlers.ofString());
+                    if (syncResp.statusCode() == 200) {
+                        JsonNode root = mapper.readTree(syncResp.body());
+                        JsonNode roomNode = root.path("rooms").path("join").path(exportRoomId);
+                        if (!roomNode.isMissingNode()) {
+                             token = roomNode.path("timeline").path("prev_batch").asText(null);
+                        }
+                    }
+                } catch (Exception ignore) {
+                    // ignore errors here, we'll just start fetching from the latest available if sync fails
+                }
+            }
+
+            // Parse search terms (space-separated, case-insensitive)
+            String[] searchTerms = query.toLowerCase().split("\\s+");
+            
+            java.util.List<String> results = new java.util.ArrayList<>();
+            java.util.List<String> eventIds = new java.util.ArrayList<>();
+            int maxResults = 50;
+            boolean truncated = false;
+
+            while (token != null && results.size() < maxResults) {
+                try {
+                    String messagesUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(exportRoomId, StandardCharsets.UTF_8)
+                            + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=1000";
+                    HttpRequest msgReq = HttpRequest.newBuilder()
+                            .uri(URI.create(messagesUrl))
+                            .header("Authorization", "Bearer " + accessToken)
+                            .GET()
+                            .build();
+                    HttpResponse<String> msgResp = client.send(msgReq, HttpResponse.BodyHandlers.ofString());
+                    if (msgResp.statusCode() != 200) {
+                        System.out.println("Failed to fetch messages: " + msgResp.statusCode() + " - " + msgResp.body());
+                        break;
+                    }
+                    JsonNode root = mapper.readTree(msgResp.body());
+                    JsonNode chunk = root.path("chunk");
+                    if (!chunk.isArray() || chunk.size() == 0) break;
+
+                    boolean reachedStart = false;
+                    for (JsonNode ev : chunk) {
+                        if (!"m.room.message".equals(ev.path("type").asText(null))) continue;
+                        long originServerTs = ev.path("origin_server_ts").asLong(0);
+                        
+                        if (originServerTs > endTime) {
+                            continue; // Skip messages newer than our range
+                        }
+
+                        if (originServerTs < startTime) {
+                            reachedStart = true;
+                            break; // Stop when we reach messages older than start time
+                        }
+                        
+                        String body = ev.path("content").path("body").asText(null);
+                        String sender = ev.path("sender").asText(null);
+                        String eventId = ev.path("event_id").asText(null);
+                        if (body != null && sender != null && eventId != null) {
+                            // Format timestamp with timezone (convert UTC to user's timezone)
+                            String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
+                                    .atZone(zoneId)
+                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                            String formattedLog = "[" + timestamp + "] <" + sender + "> " + body;
+                            
+                            // Check if formatted log contains ALL search terms (case-insensitive)
+                            String lowerLog = formattedLog.toLowerCase();
+                            boolean allTermsFound = true;
+                            for (String term : searchTerms) {
+                                if (!lowerLog.contains(term)) {
+                                    allTermsFound = false;
+                                    break;
+                                }
+                            }
+                            
+                            if (allTermsFound) {
+                                results.add(formattedLog);
+                                eventIds.add(eventId);
+                                
+                                if (results.size() >= maxResults) {
+                                    truncated = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (reachedStart) {
+                        break; // We've collected all messages in our time range
+                    }
+                    
+                    if (token != null) {
+                         token = root.path("end").asText(null);
+                    }
+
+                } catch (Exception e) {
+                    System.out.println("Error during search: " + e.getMessage());
+                    break;
+                }
+            }
+
+            if (results.isEmpty()) {
+                sendText(client, mapper, url, accessToken, responseRoomId, "No messages found containing all terms: \"" + query + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                return;
+            }
+
+            // Format results
+            StringBuilder response = new StringBuilder();
+            response.append("Search results for \"").append(query).append("\" - ");
+            response.append("from last ").append(hours).append(" hours. ");
+            response.append(results.size()).append(" matches.");
+            if (truncated) {
+                response.append(" (there may be more.)");
+            }
+            response.append("\n");
+            
+            for (int i = 0; i < results.size(); i++) {
+                response.append(results.get(i)).append(" ");
+                // Add message link
+                String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + eventIds.get(i);
+                response.append(messageLink).append("\n");
+            }
+
+            sendText(client, mapper, url, accessToken, responseRoomId, response.toString());
+
+        } catch (Exception e) {
+            System.out.println("Failed to perform search: " + e.getMessage());
+            sendText(client, mapper, url, accessToken, responseRoomId, "Error performing search: " + e.getMessage());
         }
     }
 }
