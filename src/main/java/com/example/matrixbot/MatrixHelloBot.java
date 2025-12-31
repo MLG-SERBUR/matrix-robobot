@@ -1606,9 +1606,12 @@ public class MatrixHelloBot {
                 boolean isLatest = isLatestMessage(client, mapper, url, accessToken, exportRoomId, lastReadEventId);
                 if (!isLatest) {
                     String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + lastReadEventId;
+                    String messageContent = getMessageContent(client, mapper, url, accessToken, exportRoomId, lastReadEventId);
                     response.append("**Your last read message:**\n");
                     response.append(messageLink).append("\n");
-                    response.append("\n");
+                    if (messageContent != null) {
+                        response.append("\n").append(messageContent).append("\n");
+                    }
                 }
             } else {
                 response.append("**Your last read message:** No read receipt found.\n");
@@ -1703,8 +1706,7 @@ public class MatrixHelloBot {
 
     private static String getReadReceipt(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String userId) {
         try {
-            // Get read receipts for the user in this room
-            // Read receipts are stored in the room state under m.read receipts
+            // Get read receipts for the user in this room (main timeline only)
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
             String encodedUser = URLEncoder.encode(userId, StandardCharsets.UTF_8);
             
@@ -1740,7 +1742,10 @@ public class MatrixHelloBot {
                             String eventId = eventIds.next();
                             JsonNode receiptData = content.path(eventId).path("m.read");
                             if (receiptData.has(userId)) {
-                                return eventId;
+                                // Verify this is a main timeline event by fetching it
+                                if (isMainTimelineEvent(client, mapper, url, accessToken, roomId, eventId)) {
+                                    return eventId;
+                                }
                             }
                         }
                     }
@@ -1758,10 +1763,12 @@ public class MatrixHelloBot {
             
             if (accountResp.statusCode() == 200) {
                 JsonNode accountData = mapper.readTree(accountResp.body());
-                // The content might contain the last read event
                 String lastRead = accountData.path("event_id").asText(null);
                 if (lastRead != null && !lastRead.isEmpty()) {
-                    return lastRead;
+                    // Verify this is a main timeline event
+                    if (isMainTimelineEvent(client, mapper, url, accessToken, roomId, lastRead)) {
+                        return lastRead;
+                    }
                 }
             }
             
@@ -1770,6 +1777,54 @@ public class MatrixHelloBot {
         } catch (Exception e) {
             System.out.println("Error getting read receipt: " + e.getMessage());
             return null;
+        }
+    }
+
+    private static boolean isMainTimelineEvent(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String eventId) {
+        try {
+            // Fetch the event to check if it has a thread relation
+            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+            String encodedEvent = URLEncoder.encode(eventId, StandardCharsets.UTF_8);
+            String eventUrl = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/event/" + encodedEvent;
+            
+            HttpRequest eventReq = HttpRequest.newBuilder()
+                    .uri(URI.create(eventUrl))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> eventResp = client.send(eventReq, HttpResponse.BodyHandlers.ofString());
+            
+            if (eventResp.statusCode() != 200) {
+                return false;
+            }
+            
+            JsonNode event = mapper.readTree(eventResp.body());
+            
+            // Check if the event has a thread relation (indicating it's a thread reply)
+            JsonNode relatesTo = event.path("content").path("m.relates_to");
+            if (relatesTo.isMissingNode()) {
+                return true; // No relation, so it's main timeline
+            }
+            
+            String relType = relatesTo.path("rel_type").asText(null);
+            if ("m.thread".equals(relType)) {
+                return false; // This is a thread reply
+            }
+            
+            // Also check for thread root in unsigned data
+            JsonNode unsigned = event.path("unsigned");
+            if (unsigned.has("m.relations")) {
+                JsonNode relations = unsigned.path("m.relations");
+                if (relations.has("m.thread")) {
+                    return false; // Part of a thread
+                }
+            }
+            
+            return true; // Not a thread reply
+            
+        } catch (Exception e) {
+            System.out.println("Error checking if event is main timeline: " + e.getMessage());
+            return false;
         }
     }
 
@@ -1812,6 +1867,62 @@ public class MatrixHelloBot {
         } catch (Exception e) {
             System.out.println("Error checking if message is latest: " + e.getMessage());
             return false;
+        }
+    }
+
+    private static String getMessageContent(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String eventId) {
+        try {
+            // Try to get the message from the sync response first
+            String syncUrl = url + "/_matrix/client/v3/sync?timeout=0";
+            HttpRequest syncReq = HttpRequest.newBuilder()
+                    .uri(URI.create(syncUrl))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> syncResp = client.send(syncReq, HttpResponse.BodyHandlers.ofString());
+            
+            if (syncResp.statusCode() == 200) {
+                JsonNode root = mapper.readTree(syncResp.body());
+                JsonNode roomNode = root.path("rooms").path("join").path(roomId);
+                if (!roomNode.isMissingNode()) {
+                    // Check timeline events
+                    JsonNode timeline = roomNode.path("timeline").path("events");
+                    if (timeline.isArray()) {
+                        for (JsonNode ev : timeline) {
+                            if (ev.path("event_id").asText(null).equals(eventId)) {
+                                String body = ev.path("content").path("body").asText(null);
+                                if (body != null) {
+                                    return body;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // If not found in sync, try to fetch the event directly
+            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+            String encodedEvent = URLEncoder.encode(eventId, StandardCharsets.UTF_8);
+            String eventUrl = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/event/" + encodedEvent;
+            
+            HttpRequest eventReq = HttpRequest.newBuilder()
+                    .uri(URI.create(eventUrl))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> eventResp = client.send(eventReq, HttpResponse.BodyHandlers.ofString());
+            
+            if (eventResp.statusCode() == 200) {
+                JsonNode event = mapper.readTree(eventResp.body());
+                String body = event.path("content").path("body").asText(null);
+                return body;
+            }
+            
+            return null;
+            
+        } catch (Exception e) {
+            System.out.println("Error getting message content: " + e.getMessage());
+            return null;
         }
     }
 }
