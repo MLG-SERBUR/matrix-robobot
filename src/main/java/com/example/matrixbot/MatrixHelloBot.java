@@ -615,7 +615,7 @@ public class MatrixHelloBot {
         String html = renderer.render(document);
         
         // Clean up any extra newlines that might be added by the renderer
-        html = html.replaceAll("\n", "");
+        //html = html.replaceAll("\n", "");
         
         return html;
     }
@@ -1594,10 +1594,10 @@ public class MatrixHelloBot {
             // Last message sent by sender
             if (lastMessageEventId != null) {
                 String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + lastMessageEventId;
-                response.append("**Your last message:**\n");
-                response.append(messageLink).append("\n\n");
+                response.append("Your last sent: ");
+                response.append(messageLink).append("\n");
             } else {
-                response.append("**Your last message:** No messages found from you in the export room.\n\n");
+                response.append("Your last sent message: No messages found from you in the export room.\n\n");
             }
             
             // Last read message
@@ -1606,15 +1606,15 @@ public class MatrixHelloBot {
                 boolean isLatest = isLatestMessage(client, mapper, url, accessToken, exportRoomId, lastReadEventId);
                 if (!isLatest) {
                     String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + lastReadEventId;
-                    String messageContent = getMessageContent(client, mapper, url, accessToken, exportRoomId, lastReadEventId);
-                    response.append("**Your last read message:**\n");
+                    String messageContent = sanitizeUserIds(getMessageContent(client, mapper, url, accessToken, exportRoomId, lastReadEventId));
+                    response.append(" read: ");
                     response.append(messageLink).append("\n");
                     if (messageContent != null) {
                         response.append("\n").append(messageContent).append("\n");
                     }
                 }
             } else {
-                response.append("**Your last read message:** No read receipt found.\n");
+                response.append("Your last read message: No read receipt found.\n");
             }
             
             sendMarkdown(client, mapper, url, accessToken, responseRoomId, response.toString());
