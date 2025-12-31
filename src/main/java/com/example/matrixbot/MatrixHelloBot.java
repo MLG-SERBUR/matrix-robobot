@@ -37,7 +37,7 @@ public class MatrixHelloBot {
         public static final String QUESTION_PREFIX = "Given the following chat logs, answer the question: '";
         public static final String QUESTION_SUFFIX = "'\\n\\n";
         
-        public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic. Then summarize with bullet points all of the chat at end:\\n\\n";
+        public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end:\\n\\n";
     }
     
     // Helper method to build the user prompt
@@ -609,13 +609,11 @@ public class MatrixHelloBot {
         }
 
         String token = fromToken;
-        int safety = 0;
 
-        while (token != null && safety < 100) {
-            safety++;
+        while (token != null) {
             try {
                 String messagesUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
-                        + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=100";
+                        + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=1000";
                 HttpRequest msgReq = HttpRequest.newBuilder()
                         .uri(URI.create(messagesUrl))
                         .header("Authorization", "Bearer " + accessToken)
