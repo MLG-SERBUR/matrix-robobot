@@ -1716,6 +1716,9 @@ public class MatrixHelloBot {
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
             String encodedUser = URLEncoder.encode(userId, StandardCharsets.UTF_8);
             
+            // Collect all receipts with their timestamps
+            java.util.Map<Long, java.util.List<String>> receiptsWithTimestamps = new java.util.TreeMap<>(java.util.Collections.reverseOrder());
+            
             // First, try to get the read receipt from the sync response
             String syncUrl = url + "/_matrix/client/v3/sync?timeout=0";
             HttpRequest syncReq = HttpRequest.newBuilder()
@@ -1727,68 +1730,53 @@ public class MatrixHelloBot {
             
             if (syncResp.statusCode() != 200) {
                 System.out.println("Failed to sync for read receipt: " + syncResp.statusCode());
-                return null;
-            }
-            
-            JsonNode root = mapper.readTree(syncResp.body());
-            JsonNode roomNode = root.path("rooms").path("join").path(roomId);
-            if (roomNode.isMissingNode()) {
-                return null;
-            }
-            
-            // Collect all receipts with their timestamps
-            java.util.Map<Long, java.util.List<String>> receiptsWithTimestamps = new java.util.TreeMap<>(java.util.Collections.reverseOrder());
-            
-            // Check ephemeral events for read receipts
-            JsonNode ephemeral = roomNode.path("ephemeral").path("events");
-            if (ephemeral.isArray()) {
-                for (JsonNode ev : ephemeral) {
-                    if ("m.receipt".equals(ev.path("type").asText(null))) {
-                        JsonNode content = ev.path("content");
-                        // content is a map of event_id -> { "m.read": { user_id: timestamp } }
-                        Iterator<String> eventIds = content.fieldNames();
-                        while (eventIds.hasNext()) {
-                            String eventId = eventIds.next();
-                            JsonNode receiptData = content.path(eventId).path("m.read");
-                            if (receiptData.has(userId)) {
-                                JsonNode timestampNode = receiptData.path(userId);
-                                long timestamp = 0;
-                                
-                                // Check if timestampNode is an object with "ts" field
-                                if (timestampNode.isObject() && timestampNode.has("ts")) {
-                                    timestamp = timestampNode.path("ts").asLong(0);
-                                } else {
-                                    // Fallback to direct long value
-                                    timestamp = timestampNode.asLong(0);
+                // Continue to account data check
+            } else {
+                JsonNode root = mapper.readTree(syncResp.body());
+                JsonNode roomNode = root.path("rooms").path("join").path(roomId);
+                if (!roomNode.isMissingNode()) {
+                    // Check ephemeral events for read receipts
+                    JsonNode ephemeral = roomNode.path("ephemeral").path("events");
+                    if (ephemeral.isArray()) {
+                        for (JsonNode ev : ephemeral) {
+                            if ("m.receipt".equals(ev.path("type").asText(null))) {
+                                JsonNode content = ev.path("content");
+                                // content is a map of event_id -> { "m.read": { user_id: timestamp } }
+                                Iterator<String> eventIds = content.fieldNames();
+                                while (eventIds.hasNext()) {
+                                    String eventId = eventIds.next();
+                                    JsonNode receiptData = content.path(eventId).path("m.read");
+                                    if (receiptData.has(userId)) {
+                                        JsonNode timestampNode = receiptData.path(userId);
+                                        long timestamp = 0;
+                                        
+                                        // Check if timestampNode is an object with "ts" field
+                                        if (timestampNode.isObject() && timestampNode.has("ts")) {
+                                            timestamp = timestampNode.path("ts").asLong(0);
+                                        } else {
+                                            // Fallback to direct long value
+                                            timestamp = timestampNode.asLong(0);
+                                        }
+                                        
+                                        System.out.println("Found receipt for event " + eventId + " with timestamp node: " + timestampNode + " and timestamp: " + timestamp);
+                                        
+                                        // If timestamp is still 0, use the event_id as a fallback to ensure we can still sort
+                                        if (timestamp == 0) {
+                                            timestamp = eventId.hashCode();
+                                            System.out.println("Using event_id hash as timestamp: " + timestamp);
+                                        }
+                                        
+                                        // Store all event_ids for the same timestamp
+                                        receiptsWithTimestamps.computeIfAbsent(timestamp, k -> new java.util.ArrayList<>()).add(eventId);
+                                    }
                                 }
-                                
-                                System.out.println("Found receipt for event " + eventId + " with timestamp node: " + timestampNode + " and timestamp: " + timestamp);
-                                
-                                // If timestamp is still 0, use the event_id as a fallback to ensure we can still sort
-                                if (timestamp == 0) {
-                                    timestamp = eventId.hashCode();
-                                    System.out.println("Using event_id hash as timestamp: " + timestamp);
-                                }
-                                
-                                // Store all event_ids for the same timestamp
-                                receiptsWithTimestamps.computeIfAbsent(timestamp, k -> new java.util.ArrayList<>()).add(eventId);
                             }
                         }
                     }
                 }
             }
             
-            // Return the most recent receipt (highest timestamp)
-            if (!receiptsWithTimestamps.isEmpty()) {
-                // Get the first entry in the map (highest timestamp due to reverse order)
-                java.util.Map.Entry<Long, java.util.List<String>> firstEntry = receiptsWithTimestamps.entrySet().iterator().next();
-                // Return the last event_id in the list (most recent for that timestamp)
-                String mostRecentEventId = firstEntry.getValue().get(firstEntry.getValue().size() - 1);
-                System.out.println("Returning most recent receipt: " + mostRecentEventId + " with timestamp " + firstEntry.getKey());
-                return mostRecentEventId;
-            }
-            
-            // If not found in ephemeral, try to get from room account data
+            // Always check room account data for the most recent read receipt
             String accountDataUrl = url + "/_matrix/client/v3/user/" + encodedUser + "/rooms/" + encodedRoom + "/account_data/m.read";
             HttpRequest accountReq = HttpRequest.newBuilder()
                     .uri(URI.create(accountDataUrl))
