@@ -1737,7 +1737,7 @@ public class MatrixHelloBot {
             }
             
             // Collect all receipts with their timestamps
-            java.util.Map<Long, String> receiptsWithTimestamps = new java.util.TreeMap<>(java.util.Collections.reverseOrder());
+            java.util.Map<Long, java.util.List<String>> receiptsWithTimestamps = new java.util.TreeMap<>(java.util.Collections.reverseOrder());
             
             // Check ephemeral events for read receipts
             JsonNode ephemeral = roomNode.path("ephemeral").path("events");
@@ -1751,8 +1751,27 @@ public class MatrixHelloBot {
                             String eventId = eventIds.next();
                             JsonNode receiptData = content.path(eventId).path("m.read");
                             if (receiptData.has(userId)) {
-                                long timestamp = receiptData.path(userId).asLong(0);
-                                receiptsWithTimestamps.put(timestamp, eventId);
+                                JsonNode timestampNode = receiptData.path(userId);
+                                long timestamp = 0;
+                                
+                                // Check if timestampNode is an object with "ts" field
+                                if (timestampNode.isObject() && timestampNode.has("ts")) {
+                                    timestamp = timestampNode.path("ts").asLong(0);
+                                } else {
+                                    // Fallback to direct long value
+                                    timestamp = timestampNode.asLong(0);
+                                }
+                                
+                                System.out.println("Found receipt for event " + eventId + " with timestamp node: " + timestampNode + " and timestamp: " + timestamp);
+                                
+                                // If timestamp is still 0, use the event_id as a fallback to ensure we can still sort
+                                if (timestamp == 0) {
+                                    timestamp = eventId.hashCode();
+                                    System.out.println("Using event_id hash as timestamp: " + timestamp);
+                                }
+                                
+                                // Store all event_ids for the same timestamp
+                                receiptsWithTimestamps.computeIfAbsent(timestamp, k -> new java.util.ArrayList<>()).add(eventId);
                             }
                         }
                     }
@@ -1761,7 +1780,12 @@ public class MatrixHelloBot {
             
             // Return the most recent receipt (highest timestamp)
             if (!receiptsWithTimestamps.isEmpty()) {
-                return receiptsWithTimestamps.values().iterator().next();
+                // Get the first entry in the map (highest timestamp due to reverse order)
+                java.util.Map.Entry<Long, java.util.List<String>> firstEntry = receiptsWithTimestamps.entrySet().iterator().next();
+                // Return the last event_id in the list (most recent for that timestamp)
+                String mostRecentEventId = firstEntry.getValue().get(firstEntry.getValue().size() - 1);
+                System.out.println("Returning most recent receipt: " + mostRecentEventId + " with timestamp " + firstEntry.getKey());
+                return mostRecentEventId;
             }
             
             // If not found in ephemeral, try to get from room account data
@@ -1777,10 +1801,24 @@ public class MatrixHelloBot {
                 JsonNode accountData = mapper.readTree(accountResp.body());
                 String lastRead = accountData.path("event_id").asText(null);
                 if (lastRead != null && !lastRead.isEmpty()) {
-                    return lastRead;
+                    System.out.println("Found last read receipt in account data: " + lastRead);
+                    // Add the account data receipt to our map with a high priority timestamp
+                    long accountDataTimestamp = Long.MAX_VALUE - 1;
+                    receiptsWithTimestamps.computeIfAbsent(accountDataTimestamp, k -> new java.util.ArrayList<>()).add(lastRead);
                 }
             }
             
+            // Return the most recent receipt (highest timestamp)
+            if (!receiptsWithTimestamps.isEmpty()) {
+                // Get the first entry in the map (highest timestamp due to reverse order)
+                java.util.Map.Entry<Long, java.util.List<String>> firstEntry = receiptsWithTimestamps.entrySet().iterator().next();
+                // Return the last event_id in the list (most recent for that timestamp)
+                String mostRecentEventId = firstEntry.getValue().get(firstEntry.getValue().size() - 1);
+                System.out.println("Returning most recent receipt: " + mostRecentEventId + " with timestamp " + firstEntry.getKey());
+                return mostRecentEventId;
+            }
+            
+            System.out.println("No read receipt found for user " + userId);
             return null;
             
         } catch (Exception e) {
