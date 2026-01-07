@@ -1606,10 +1606,10 @@ public class MatrixHelloBot {
             // Last message sent by sender
             if (lastMessageEventId != null) {
                 String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + lastMessageEventId;
-                response.append("Your last sent: ");
+                response.append("sent: ");
                 response.append(messageLink).append("\n");
             } else {
-                response.append("No message sent recently.\n\n");
+                response.append("No recently sent.\n");
             }
             
             // Last read message
@@ -1628,7 +1628,7 @@ public class MatrixHelloBot {
                     response.append(messageLink).append("\n");
                 }
             } else {
-                response.append("Your last read message: No read receipt found.\n");
+                response.append("No read receipt found.\n");
             }
             
             sendMarkdown(client, mapper, url, accessToken, responseRoomId, response.toString());
@@ -1668,9 +1668,9 @@ public class MatrixHelloBot {
                 return null;
             }
             
-            // Fetch recent messages going backwards
+            // First attempt: Fetch recent messages going backwards
             String messagesUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
-                    + "/messages?from=" + URLEncoder.encode(prevBatch, StandardCharsets.UTF_8) + "&dir=b&limit=100";
+                    + "/messages?from=" + URLEncoder.encode(prevBatch, StandardCharsets.UTF_8) + "&dir=b&limit=1000";
             HttpRequest msgReq = HttpRequest.newBuilder()
                     .uri(URI.create(messagesUrl))
                     .header("Authorization", "Bearer " + accessToken)
@@ -1706,6 +1706,33 @@ public class MatrixHelloBot {
                     String msgSender = ev.path("sender").asText(null);
                     if (sender.equals(msgSender)) {
                         return ev.path("event_id").asText(null);
+                    }
+                }
+            }
+            
+            // If no message found, try one more time with the end token from the first fetch
+            String endToken = msgRoot.path("end").asText(null);
+            if (endToken != null) {
+                String messagesUrl2 = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
+                        + "/messages?from=" + URLEncoder.encode(endToken, StandardCharsets.UTF_8) + "&dir=b&limit=1000";
+                HttpRequest msgReq2 = HttpRequest.newBuilder()
+                        .uri(URI.create(messagesUrl2))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .GET()
+                        .build();
+                HttpResponse<String> msgResp2 = client.send(msgReq2, HttpResponse.BodyHandlers.ofString());
+                
+                if (msgResp2.statusCode() == 200) {
+                    JsonNode msgRoot2 = mapper.readTree(msgResp2.body());
+                    JsonNode chunk2 = msgRoot2.path("chunk");
+                    if (chunk2.isArray()) {
+                        for (JsonNode ev : chunk2) {
+                            if (!"m.room.message".equals(ev.path("type").asText(null))) continue;
+                            String msgSender = ev.path("sender").asText(null);
+                            if (sender.equals(msgSender)) {
+                                return ev.path("event_id").asText(null);
+                            }
+                        }
                     }
                 }
             }
