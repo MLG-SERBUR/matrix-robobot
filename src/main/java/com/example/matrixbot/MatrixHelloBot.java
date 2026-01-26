@@ -34,14 +34,17 @@ public class MatrixHelloBot {
     // Track running search operations by user ID
     private static final java.util.Map<String, AtomicBoolean> runningOperations = new java.util.concurrent.ConcurrentHashMap<>();
     
+    // Auto-!last manager
+    private static AutoLastManager autoLastManager;
+    
     // Centralized prompt configuration
     private static class Prompts {
         public static final String SYSTEM_OVERVIEW = "You provide high level overview of a chat log.";
         
-        public static final String QUESTION_PREFIX = "Given the following chat logs, answer the question: '";
+        public static final String QUESTION_PREFIX = "Given the following chat logs, answer this prompt: '";
         public static final String QUESTION_SUFFIX = "'\\n\\n";
         
-        public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end:\\n\\n";
+        public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end. Your response must be able to be read significantly faster than skimming through the chatlog:\\n\\n";
     }
     
     // Helper method to build the user prompt
@@ -104,6 +107,10 @@ public class MatrixHelloBot {
         } catch (Exception e) {
             System.out.println("whoami failed: " + e.getMessage());
         }
+        
+        // Initialize AutoLastManager
+        autoLastManager = new AutoLastManager(client, mapper, url, config.accessToken, 
+            config.exportRoomId, config.commandRoomId, userId);
 
         String since = null;
         // Perform an initial short /sync to obtain a since token so we don't re-process
@@ -330,6 +337,11 @@ public class MatrixHelloBot {
                     } catch (Exception e) {
                         System.out.println("Error leaving room " + roomId + ": " + e.getMessage());
                     }
+                }
+
+                // Check for users reading the export room and send auto-!last in their DM
+                if (autoLastManager != null) {
+                    autoLastManager.checkAndSendAutoLast(root);
                 }
 
                 JsonNode rooms = root.path("rooms").path("join");
@@ -576,6 +588,18 @@ public class MatrixHelloBot {
                                 
                                 String response = "Pong! (ping took " + latencyMs + " ms to arrive)";
                                 sendText(client, mapper, url, config.accessToken, responseRoomId, response);
+                            } else if ("!autolast".equals(trimmed)) {
+                                if (userId != null && userId.equals(sender)) continue;
+                                System.out.println("Received !autolast command in " + roomId + " from " + sender);
+                                
+                                // Handle auto-!last toggle
+                                final String finalSender = sender;
+                                final String finalRoomId = roomId;
+                                new Thread(() -> {
+                                    if (autoLastManager != null) {
+                                        autoLastManager.handleAutoLastCommand(finalRoomId, finalSender);
+                                    }
+                                }).start();
                             } else if ("!help".equals(trimmed)) {
                                 if (userId != null && userId.equals(sender)) continue;
                                 System.out.println("Received help command in " + roomId + " from " + sender);
@@ -587,6 +611,9 @@ public class MatrixHelloBot {
                                     "**!last** - Print links to your last message and last read message in the export room\n" +
                                     "  - Shows your most recent message sent in the export room\n" +
                                     "  - Shows your last read message in the export room (if not caught up, shows the difference)\n\n" +
+                                    "**!autolast** - Toggle automatic !last reports in DMs (only works in DMs)\n" +
+                                    "  - When enabled, you'll receive automatic reports when you have significant unread content\n" +
+                                    "  - Threshold: 75+ unread messages, 1+ hour since last read\n\n" +
                                     "**!arliai <timezone> <duration>h [question]** - Query Arli AI with chat logs\n" +
                                     "  - Timezone: PST, PDT, MST, MDT, CST, CDT, EST, EDT, UTC, GMT\n" +
                                     "  - Duration: Number of hours of chat history\n" +
