@@ -156,6 +156,29 @@ public class MatrixHelloBot {
                     String roomId = inviteRoomIds.next();
                     System.out.println("Invited to room: " + roomId);
                     
+                    // Check if room is encrypted before joining
+                    boolean isEncrypted = false;
+                    try {
+                        // Try to get encryption state
+                        String stateUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/state/m.room.encryption/";
+                        HttpRequest stateReq = HttpRequest.newBuilder()
+                                .uri(URI.create(stateUrl))
+                                .header("Authorization", "Bearer " + config.accessToken)
+                                .GET()
+                                .build();
+                        HttpResponse<String> stateResp = client.send(stateReq, HttpResponse.BodyHandlers.ofString());
+                        System.out.println("Encryption check for " + roomId + ": status=" + stateResp.statusCode() + ", body=" + stateResp.body());
+                        if (stateResp.statusCode() == 200) {
+                            JsonNode encryptionState = mapper.readTree(stateResp.body());
+                            if (encryptionState.has("algorithm")) {
+                                isEncrypted = true;
+                                System.out.println("Room " + roomId + " is encrypted with algorithm: " + encryptionState.path("algorithm").asText());
+                            }
+                        }
+                    } catch (Exception e) {
+                        System.out.println("Error checking room encryption: " + e.getMessage());
+                    }
+                    
                     // Auto-join the room
                     String joinUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/join";
                     Map<String, Object> joinPayload = new java.util.HashMap<>();
@@ -171,6 +194,55 @@ public class MatrixHelloBot {
                     HttpResponse<String> joinResp = client.send(joinReq, HttpResponse.BodyHandlers.ofString());
                     if (joinResp.statusCode() == 200) {
                         System.out.println("Successfully joined room: " + roomId);
+                        
+                        // After joining, check if room is encrypted by trying to get encryption state
+                        // This is more reliable than checking before joining
+                        boolean roomIsEncrypted = false;
+                        try {
+                            String stateUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/state/m.room.encryption/";
+                            HttpRequest stateReq = HttpRequest.newBuilder()
+                                    .uri(URI.create(stateUrl))
+                                    .header("Authorization", "Bearer " + config.accessToken)
+                                    .GET()
+                                    .build();
+                            HttpResponse<String> stateResp = client.send(stateReq, HttpResponse.BodyHandlers.ofString());
+                            if (stateResp.statusCode() == 200) {
+                                JsonNode encryptionState = mapper.readTree(stateResp.body());
+                                if (encryptionState.has("algorithm")) {
+                                    roomIsEncrypted = true;
+                                    System.out.println("Room " + roomId + " is encrypted with algorithm: " + encryptionState.path("algorithm").asText());
+                                }
+                            }
+                        } catch (Exception e) {
+                            System.out.println("Error checking room encryption after join: " + e.getMessage());
+                        }
+                        
+                        // If room is encrypted, send a warning message
+                        if (roomIsEncrypted) {
+                            String warningMessage = "⚠️ **Warning**: This room is end-to-end encrypted. " +
+                                "I cannot read encrypted messages, so commands will not work. " +
+                                "Please create an unencrypted room with me for the bot to function properly.";
+                            
+                            String txnId = "m" + Instant.now().toEpochMilli();
+                            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+                            String endpoint = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
+                            
+                            Map<String, Object> payload = new java.util.HashMap<>();
+                            payload.put("msgtype", "m.text");
+                            payload.put("body", warningMessage);
+                            payload.put("m.mentions", Map.of());
+                            String warningJson = mapper.writeValueAsString(payload);
+                            
+                            HttpRequest warningReq = HttpRequest.newBuilder()
+                                    .uri(URI.create(endpoint))
+                                    .header("Authorization", "Bearer " + config.accessToken)
+                                    .header("Content-Type", "application/json")
+                                    .PUT(HttpRequest.BodyPublishers.ofString(warningJson))
+                                    .build();
+                            
+                            HttpResponse<String> warningResp = client.send(warningReq, HttpResponse.BodyHandlers.ofString());
+                            System.out.println("Sent encryption warning to " + roomId + " -> " + warningResp.statusCode());
+                        }
                     } else {
                         System.out.println("Failed to join room " + roomId + ": " + joinResp.statusCode() + " - " + joinResp.body());
                     }
