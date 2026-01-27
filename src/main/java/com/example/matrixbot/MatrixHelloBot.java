@@ -651,179 +651,28 @@ public class MatrixHelloBot {
         return null; // Config is passed directly
     }
 
+    // Helper methods that wrap MatrixClient
     private static void sendText(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String message) {
-        try {
-            String txnId = "m" + Instant.now().toEpochMilli();
-            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
-            
-            // Sanitize message to prevent user pings
-            String sanitizedMessage = sanitizeUserIds(message);
-            
-            Map<String, Object> payload = new java.util.HashMap<>();
-            payload.put("msgtype", "m.text");
-            payload.put("body", sanitizedMessage);
-            payload.put("m.mentions", Map.of()); // Add empty mentions object to prevent accidental mentions
-            String json = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .PUT(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
-            System.out.println("Sent reply to " + roomId + " -> " + resp.statusCode());
-        } catch (Exception e) {
-            System.out.println("Failed to send message: " + e.getMessage());
-        }
+        MatrixClient matrixClient = new MatrixClient(client, mapper, url, accessToken);
+        matrixClient.sendText(roomId, message);
     }
 
     private static String sendTextWithEventId(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String message) {
-        try {
-            String txnId = "m" + Instant.now().toEpochMilli();
-            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
-            
-            // Sanitize message to prevent user pings
-            String sanitizedMessage = sanitizeUserIds(message);
-            
-            Map<String, Object> payload = new java.util.HashMap<>();
-            payload.put("msgtype", "m.text");
-            payload.put("body", sanitizedMessage);
-            payload.put("m.mentions", Map.of());
-            String json = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .PUT(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200) {
-                JsonNode root = mapper.readTree(resp.body());
-                return root.path("event_id").asText(null);
-            }
-            System.out.println("Sent message to " + roomId + " -> " + resp.statusCode());
-            return null;
-        } catch (Exception e) {
-            System.out.println("Failed to send message: " + e.getMessage());
-            return null;
-        }
+        MatrixClient matrixClient = new MatrixClient(client, mapper, url, accessToken);
+        return matrixClient.sendTextWithEventId(roomId, message);
     }
 
     private static String updateTextMessage(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String originalEventId, String message) {
-        try {
-            String txnId = "m" + Instant.now().toEpochMilli();
-            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
-            
-            // Sanitize message to prevent user pings
-            String sanitizedMessage = sanitizeUserIds(message);
-            
-            Map<String, Object> payload = new java.util.HashMap<>();
-            payload.put("msgtype", "m.text");
-            payload.put("body", "* " + sanitizedMessage); // Asterisk prefix for edited messages
-            payload.put("m.mentions", Map.of());
-            
-            // Add new_content field
-            Map<String, Object> newContent = new java.util.HashMap<>();
-            newContent.put("msgtype", "m.text");
-            newContent.put("body", sanitizedMessage);
-            newContent.put("m.mentions", Map.of());
-            payload.put("m.new_content", newContent);
-            
-            // Add relation to replace the ORIGINAL message (not the previous update)
-            Map<String, Object> relatesTo = new java.util.HashMap<>();
-            relatesTo.put("event_id", originalEventId);
-            relatesTo.put("rel_type", "m.replace");
-            payload.put("m.relates_to", relatesTo);
-            
-            String json = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .PUT(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
-            System.out.println("Updated message " + originalEventId + " -> " + resp.statusCode());
-            
-            // Return the new event ID for future updates
-            if (resp.statusCode() == 200) {
-                JsonNode root = mapper.readTree(resp.body());
-                return root.path("event_id").asText(null);
-            }
-        } catch (Exception e) {
-            System.out.println("Failed to update message: " + e.getMessage());
-        }
-        return null;
+        MatrixClient matrixClient = new MatrixClient(client, mapper, url, accessToken);
+        return matrixClient.updateTextMessage(roomId, originalEventId, message);
     }
 
     private static void sendMarkdown(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, String message) {
-        try {
-            String txnId = "m" + Instant.now().toEpochMilli();
-            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = url + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
-            
-            // Sanitize message to prevent user pings by wrapping user IDs in code blocks
-            String sanitizedMessage = sanitizeUserIds(message);
-            
-            // Convert markdown to HTML for Matrix
-            String htmlBody = convertMarkdownToHtml(sanitizedMessage);
-            
-            Map<String, Object> payload = new java.util.HashMap<>();
-            payload.put("msgtype", "m.text");
-            payload.put("body", sanitizedMessage); // Plain text fallback
-            payload.put("format", "org.matrix.custom.html");
-            payload.put("formatted_body", htmlBody); // HTML with markdown formatting
-            payload.put("m.mentions", Map.of()); // Add empty mentions object to prevent accidental mentions
-            String json = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .PUT(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
-            System.out.println("Sent markdown reply to " + roomId + " -> " + resp.statusCode());
-        } catch (Exception e) {
-            System.out.println("Failed to send markdown message: " + e.getMessage());
-        }
+        MatrixClient matrixClient = new MatrixClient(client, mapper, url, accessToken);
+        matrixClient.sendMarkdown(roomId, message);
     }
 
-    private static String convertMarkdownToHtml(String markdown) {
-        // Configure parser and renderer
-        Parser parser = Parser.builder().build();
-        HtmlRenderer renderer = HtmlRenderer.builder().build();
-        
-        // Parse and render markdown to HTML
-        org.commonmark.node.Node document = parser.parse(markdown);
-        String html = renderer.render(document);
-        
-        // Clean up any extra newlines that might be added by the renderer
-        //html = html.replaceAll("\n", "");
-        
-        return html;
-    }
 
-    private static String sanitizeUserIds(String message) {
-        // Replace user IDs like @username:domain with `@username:domain` to prevent pings
-        // This regex matches Matrix user IDs: @localpart:domain that are NOT already in backticks
-        // Pattern: @ followed by alphanumeric/underscore/dot/equals/dash, then :, then domain
-        // The backticks prevent the user ID from being interpreted as a mention
-        // (?<!`) - not preceded by backtick
-        // (?<!`<) - not preceded by backtick+< (handles AI returning `<@user:domain>`)
-        // (?!`) - not followed by backtick
-        return message.replaceAll("(?<!`)(?<!`<)(@[a-zA-Z0-9._=-]+:[a-zA-Z0-9.-]+)(?!`)", "`$1`");
-    }
 
     private static void exportRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken) {
         try {
@@ -852,26 +701,6 @@ public class MatrixHelloBot {
         }
     }
 
-    private static class ChatLogsResult {
-        public java.util.List<String> logs;
-        public String firstEventId;
-        
-        ChatLogsResult(java.util.List<String> logs, String firstEventId) {
-            this.logs = logs;
-            this.firstEventId = firstEventId;
-        }
-    }
-
-    private static class ChatLogsWithIds {
-        public java.util.List<String> logs;
-        public java.util.List<String> eventIds;
-        
-        ChatLogsWithIds(java.util.List<String> logs, java.util.List<String> eventIds) {
-            this.logs = logs;
-            this.eventIds = eventIds;
-        }
-    }
-
     private static void queryArliAIWithChatLogs(HttpClient client, ObjectMapper mapper, String url, String accessToken, String responseRoomId, String exportRoomId, int hours, String fromToken, String question, Config config, long startTimestamp, String timezoneAbbr) {
         try {
             ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
@@ -890,7 +719,7 @@ public class MatrixHelloBot {
             // Calculate the UTC time range for filtering
             long endTime = startTimestamp > 0 ? startTimestamp + (long) hours * 3600L * 1000L : -1;
             
-            ChatLogsResult result = fetchRoomHistory(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTimestamp, endTime, zoneId);
+            RoomHistoryManager.ChatLogsResult result = fetchRoomHistory(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTimestamp, endTime, zoneId);
             if (result.logs.isEmpty()) {
                 sendMarkdown(client, mapper, url, accessToken, responseRoomId, "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
                 return;
@@ -961,7 +790,7 @@ public class MatrixHelloBot {
             // Calculate the UTC time range for filtering
             long endTime = startTimestamp > 0 ? startTimestamp + (long) hours * 3600L * 1000L : -1;
             
-            ChatLogsResult result = fetchRoomHistory(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTimestamp, endTime, zoneId);
+            RoomHistoryManager.ChatLogsResult result = fetchRoomHistory(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTimestamp, endTime, zoneId);
             if (result.logs.isEmpty()) {
                 sendMarkdown(client, mapper, url, accessToken, responseRoomId, "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
                 return;
@@ -1015,201 +844,18 @@ public class MatrixHelloBot {
     }
 
     private static java.util.List<String> fetchRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken) {
-        ChatLogsResult result = fetchRoomHistory(client, mapper, url, accessToken, roomId, hours, fromToken, -1, -1, ZoneId.of("America/Los_Angeles"));
-        return result.logs;
+        RoomHistoryManager manager = new RoomHistoryManager(client, mapper, url, accessToken);
+        return manager.fetchRoomHistory(roomId, hours, fromToken);
     }
 
-    private static ChatLogsWithIds fetchRoomHistoryWithIds(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken, long startTimestamp, long endTime, ZoneId zoneId) {
-        java.util.List<String> logs = new java.util.ArrayList<>();
-        java.util.List<String> eventIds = new java.util.ArrayList<>();
-        
-        // Calculate the time range
-        long startTime = (startTimestamp > 0) ? startTimestamp : System.currentTimeMillis() - (long) hours * 3600L * 1000L;
-        long calculatedEndTime = (endTime > 0) ? endTime : System.currentTimeMillis();
-        
-        // If we don't have a pagination token, try to get one via a short sync
-        if (fromToken == null) {
-            try {
-                HttpRequest syncReq = HttpRequest.newBuilder()
-                        .uri(URI.create(url + "/_matrix/client/v3/sync?timeout=0"))
-                        .header("Authorization", "Bearer " + accessToken)
-                        .GET()
-                        .build();
-                HttpResponse<String> syncResp = client.send(syncReq, HttpResponse.BodyHandlers.ofString());
-                if (syncResp.statusCode() == 200) {
-                    JsonNode root = mapper.readTree(syncResp.body());
-                    JsonNode roomNode = root.path("rooms").path("join").path(roomId);
-                    if (!roomNode.isMissingNode()) {
-                         fromToken = roomNode.path("timeline").path("prev_batch").asText(null);
-                    }
-                }
-            } catch (Exception ignore) {
-                // ignore errors here, we'll just start fetching from the latest available if sync fails
-            }
-        }
-
-        String token = fromToken;
-
-        while (token != null) {
-            try {
-                String messagesUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
-                        + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=1000";
-                HttpRequest msgReq = HttpRequest.newBuilder()
-                        .uri(URI.create(messagesUrl))
-                        .header("Authorization", "Bearer " + accessToken)
-                        .GET()
-                        .build();
-                HttpResponse<String> msgResp = client.send(msgReq, HttpResponse.BodyHandlers.ofString());
-                if (msgResp.statusCode() != 200) {
-                    System.out.println("Failed to fetch messages: " + msgResp.statusCode() + " - " + msgResp.body());
-                    break;
-                }
-                JsonNode root = mapper.readTree(msgResp.body());
-                JsonNode chunk = root.path("chunk");
-                if (!chunk.isArray() || chunk.size() == 0) break;
-
-                boolean reachedStart = false;
-                for (JsonNode ev : chunk) {
-                    if (!"m.room.message".equals(ev.path("type").asText(null))) continue;
-                    long originServerTs = ev.path("origin_server_ts").asLong(0);
-                    
-                    if (originServerTs > calculatedEndTime) {
-                        continue; // Skip messages newer than our range
-                    }
-
-                    // Stop if we've gone past our time range
-                    if (originServerTs < startTime) {
-                        reachedStart = true;
-                        break; // Stop when we reach messages older than start time
-                    }
-                    
-                    String body = ev.path("content").path("body").asText(null);
-                    String sender = ev.path("sender").asText(null);
-                    String eventId = ev.path("event_id").asText(null);
-                    if (body != null && sender != null && eventId != null) {
-                        // Format timestamp with timezone (convert UTC to user's timezone)
-                        String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
-                                .atZone(zoneId)
-                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                        logs.add("[" + timestamp + "] <" + sender + "> " + body);
-                        eventIds.add(eventId);
-                    }
-                }
-                
-                if (reachedStart) {
-                    break; // We've collected all messages in our time range
-                }
-                
-                if (token != null) {
-                     token = root.path("end").asText(null);
-                }
-
-            } catch (Exception e) {
-                System.out.println("Error fetching room history: " + e.getMessage());
-                break;
-            }
-        }
-        java.util.Collections.reverse(logs);
-        java.util.Collections.reverse(eventIds);
-        return new ChatLogsWithIds(logs, eventIds);
+    private static RoomHistoryManager.ChatLogsWithIds fetchRoomHistoryWithIds(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken, long startTimestamp, long endTime, ZoneId zoneId) {
+        RoomHistoryManager manager = new RoomHistoryManager(client, mapper, url, accessToken);
+        return manager.fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId);
     }
 
-    private static ChatLogsResult fetchRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken, long startTimestamp, long endTime, ZoneId zoneId) {
-        java.util.List<String> lines = new java.util.ArrayList<>();
-        String firstEventId = null;
-        
-        // Calculate the time range
-        // If startTimestamp is provided (arliai-ts), use it as start and add duration for end
-        // If startTimestamp is -1 (arliai), use current time minus duration as start, and current time as end
-        long startTime = (startTimestamp > 0) ? startTimestamp : System.currentTimeMillis() - (long) hours * 3600L * 1000L;
-        long calculatedEndTime = (endTime > 0) ? endTime : System.currentTimeMillis();
-        
-        // If we don't have a pagination token, try to get one via a short sync
-        if (fromToken == null) {
-            try {
-                HttpRequest syncReq = HttpRequest.newBuilder()
-                        .uri(URI.create(url + "/_matrix/client/v3/sync?timeout=0"))
-                        .header("Authorization", "Bearer " + accessToken)
-                        .GET()
-                        .build();
-                HttpResponse<String> syncResp = client.send(syncReq, HttpResponse.BodyHandlers.ofString());
-                if (syncResp.statusCode() == 200) {
-                    JsonNode root = mapper.readTree(syncResp.body());
-                    JsonNode roomNode = root.path("rooms").path("join").path(roomId);
-                    if (!roomNode.isMissingNode()) {
-                         fromToken = roomNode.path("timeline").path("prev_batch").asText(null);
-                    }
-                }
-            } catch (Exception ignore) {
-                // ignore errors here, we'll just start fetching from the latest available if sync fails
-            }
-        }
-
-        String token = fromToken;
-
-        while (token != null) {
-            try {
-                String messagesUrl = url + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
-                        + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=1000";
-                HttpRequest msgReq = HttpRequest.newBuilder()
-                        .uri(URI.create(messagesUrl))
-                        .header("Authorization", "Bearer " + accessToken)
-                        .GET()
-                        .build();
-                HttpResponse<String> msgResp = client.send(msgReq, HttpResponse.BodyHandlers.ofString());
-                if (msgResp.statusCode() != 200) {
-                    System.out.println("Failed to fetch messages: " + msgResp.statusCode() + " - " + msgResp.body());
-                    break;
-                }
-                JsonNode root = mapper.readTree(msgResp.body());
-                JsonNode chunk = root.path("chunk");
-                if (!chunk.isArray() || chunk.size() == 0) break;
-
-                boolean reachedStart = false;
-                for (JsonNode ev : chunk) {
-                    if (!"m.room.message".equals(ev.path("type").asText(null))) continue;
-                    long originServerTs = ev.path("origin_server_ts").asLong(0);
-                    
-                    // Stop if we've gone past our time range
-                    if (originServerTs > calculatedEndTime) {
-                        continue; // Skip messages newer than our range
-                    }
-                    if (originServerTs < startTime) {
-                        reachedStart = true;
-                        break; // Stop when we reach messages older than start time
-                    }
-                    
-                    String body = ev.path("content").path("body").asText(null);
-                    String sender = ev.path("sender").asText(null);
-                    String eventId = ev.path("event_id").asText(null);
-                    if (body != null && sender != null) {
-                        // Format timestamp with timezone (convert UTC to user's timezone)
-                        String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
-                                .atZone(zoneId)
-                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                        lines.add("[" + timestamp + "] <" + sender + "> " + body);
-                        
-                        // Track the event ID of the oldest message in the range
-                        // Since we're iterating newest to oldest, keep updating until we finish
-                        firstEventId = eventId;
-                    }
-                }
-                
-                if (reachedStart) {
-                    break; // We've collected all messages in our time range
-                }
-                
-                if (token != null) {
-                     token = root.path("end").asText(null);
-                }
-
-            } catch (Exception e) {
-                System.out.println("Error fetching room history: " + e.getMessage());
-                break;
-            }
-        }
-        java.util.Collections.reverse(lines);
-        return new ChatLogsResult(lines, firstEventId);
+    private static RoomHistoryManager.ChatLogsResult fetchRoomHistory(HttpClient client, ObjectMapper mapper, String url, String accessToken, String roomId, int hours, String fromToken, long startTimestamp, long endTime, ZoneId zoneId) {
+        RoomHistoryManager manager = new RoomHistoryManager(client, mapper, url, accessToken);
+        return manager.fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId);
     }
 
     private static ZoneId getZoneIdFromAbbr(String timezoneAbbr) {
@@ -1241,7 +887,7 @@ public class MatrixHelloBot {
             // Fetch chat history with event IDs
             long startTime = System.currentTimeMillis() - (long) hours * 3600L * 1000L;
             long endTime = System.currentTimeMillis();
-            ChatLogsWithIds result = fetchRoomHistoryWithIds(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTime, endTime, zoneId);
+            RoomHistoryManager.ChatLogsWithIds result = fetchRoomHistoryWithIds(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTime, endTime, zoneId);
             
             if (result.logs.isEmpty()) {
                 sendText(client, mapper, url, accessToken, responseRoomId, "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
@@ -1507,7 +1153,7 @@ public class MatrixHelloBot {
             
             // Use existing fetchRoomHistoryWithIds to get all messages first
             // Note: This method doesn't support abort during fetch, but we can check after
-            ChatLogsWithIds result = fetchRoomHistoryWithIds(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTime, endTime, zoneId);
+            RoomHistoryManager.ChatLogsWithIds result = fetchRoomHistoryWithIds(client, mapper, url, accessToken, exportRoomId, hours, fromToken, startTime, endTime, zoneId);
             
             // Check for abort after fetch
             if (abortFlag.get()) {
