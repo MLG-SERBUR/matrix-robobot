@@ -81,3 +81,4 @@ target/
 *.txt
 
 config.json
+autolast_enabled_users.json

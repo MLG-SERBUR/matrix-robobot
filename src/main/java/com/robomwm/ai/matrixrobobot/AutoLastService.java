@@ -3,10 +3,14 @@ package com.robomwm.ai.matrixrobobot;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -22,6 +26,7 @@ public class AutoLastService {
     private final ObjectMapper mapper;
     private final String homeserver;
     private final String accessToken;
+    private final Path persistenceFile;
 
     public AutoLastService(MatrixClient matrixClient, LastMessageService lastMessageService, 
                            HttpClient httpClient, ObjectMapper mapper, String homeserver, String accessToken) {
@@ -31,6 +36,10 @@ public class AutoLastService {
         this.mapper = mapper;
         this.homeserver = homeserver;
         this.accessToken = accessToken;
+        this.persistenceFile = Paths.get("autolast_enabled_users.json");
+        
+        // Load persisted enabled users
+        loadEnabledUsers();
     }
 
     /**
@@ -44,6 +53,7 @@ public class AutoLastService {
             enabledUsers.add(userId);
             matrixClient.sendText(roomId, "Auto-!last enabled. I will DM you a summary when you read the export room after being away.");
         }
+        saveEnabledUsers();
     }
 
     /**
@@ -220,5 +230,36 @@ public class AutoLastService {
             // ignore
         }
         return false;
+    }
+
+    /**
+     * Load enabled users from persistence file.
+     */
+    private void loadEnabledUsers() {
+        if (!Files.exists(persistenceFile)) {
+            return;
+        }
+        
+        try {
+            String content = Files.readString(persistenceFile);
+            String[] users = mapper.readValue(content, String[].class);
+            enabledUsers.addAll(Arrays.asList(users));
+            System.out.println("Loaded " + users.length + " autolast enabled users from persistence");
+        } catch (IOException e) {
+            System.err.println("Error loading autolast enabled users: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Save enabled users to persistence file.
+     */
+    private void saveEnabledUsers() {
+        try {
+            String[] users = enabledUsers.toArray(new String[0]);
+            String content = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(users);
+            Files.writeString(persistenceFile, content);
+        } catch (IOException e) {
+            System.err.println("Error saving autolast enabled users: " + e.getMessage());
+        }
     }
 }
