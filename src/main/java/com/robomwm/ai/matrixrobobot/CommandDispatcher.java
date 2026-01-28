@@ -1,11 +1,5 @@
 package com.robomwm.ai.matrixrobobot;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import java.net.http.HttpClient;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,20 +13,14 @@ import java.util.regex.Pattern;
 public class CommandDispatcher {
     private final MatrixClient matrixClient;
     private final RoomHistoryManager historyManager;
-    private final HttpClient httpClient;
-    private final ObjectMapper mapper;
-    private final String homeserverUrl;
-    private final MatrixRobobot.Config config;
     private final Map<String, AtomicBoolean> runningOperations;
+    private final AutoSummaryService autoSummaryService;
 
-    public CommandDispatcher(MatrixClient matrixClient, RoomHistoryManager historyManager, HttpClient httpClient, ObjectMapper mapper, String homeserverUrl, MatrixRobobot.Config config, Map<String, AtomicBoolean> runningOperations) {
+    public CommandDispatcher(MatrixClient matrixClient, RoomHistoryManager historyManager, Map<String, AtomicBoolean> runningOperations, AutoSummaryService autoSummaryService) {
         this.matrixClient = matrixClient;
         this.historyManager = historyManager;
-        this.httpClient = httpClient;
-        this.mapper = mapper;
-        this.homeserverUrl = homeserverUrl;
-        this.config = config;
         this.runningOperations = runningOperations;
+        this.autoSummaryService = autoSummaryService;
     }
 
     /**
@@ -71,6 +59,9 @@ public class CommandDispatcher {
             return true;
         } else if ("!abort".equals(trimmed)) {
             handleAbort(sender, responseRoomId);
+            return true;
+        } else if ("!autosummary".equals(trimmed)) {
+            handleAutoSummary(roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if ("!help".equals(trimmed)) {
             handleHelp(responseRoomId);
@@ -191,6 +182,11 @@ public class CommandDispatcher {
         }
     }
 
+    private void handleAutoSummary(String roomId, String sender, String prevBatch, String responseRoomId, String exportRoomId) {
+        System.out.println("Received autosummary command in " + roomId + " from " + sender);
+        new Thread(() -> autoSummaryService.executeAutoSummary(sender, responseRoomId, exportRoomId)).start();
+    }
+
     private void handleAbort(String sender, String responseRoomId) {
         System.out.println("Received abort command from " + sender);
         AtomicBoolean abortFlag = runningOperations.get(sender);
@@ -207,6 +203,7 @@ public class CommandDispatcher {
         String helpText = "**Matrix Bot Commands (Primary Use Case: !last)**\n\n" +
             "**!last** - Show your last message and read receipt status in export room (PRIMARY)\n\n" +
             "**Additional Commands:**\n\n" +
+            "**!autosummary** - Summarize unread messages (>100 messages, >6 hours old) using Arli AI\n\n" +
             "**!ping** - Measure and report ping latency\n\n" +
             "**!testcommand** - Test if the bot is responding\n\n" +
             "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +

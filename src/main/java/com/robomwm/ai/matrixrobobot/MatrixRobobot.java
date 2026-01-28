@@ -60,10 +60,14 @@ public class MatrixRobobot {
         RoomHistoryManager historyManager = new RoomHistoryManager(client, mapper, url, config.accessToken);
         LastMessageService lastMessageService = new LastMessageService(matrixClient, historyManager, client, mapper, url, config.accessToken);
         RoomManagementService roomMgmt = new RoomManagementService(matrixClient, client, mapper, url, config.accessToken);
-        CommandDispatcher dispatcher = new CommandDispatcher(matrixClient, historyManager, client, mapper, url, config, runningOperations);
         
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, client, mapper, url, config.accessToken);
+        
+        // NEW: AutoSummaryService for !autosummary command
+        AutoSummaryService autoSummaryService = new AutoSummaryService(matrixClient, client, mapper, url, config.accessToken, config.arliApiKey);
+        
+        CommandDispatcher dispatcher = new CommandDispatcher(matrixClient, historyManager, runningOperations, autoSummaryService);
 
         String userId = matrixClient.getUserId();
 
