@@ -16,6 +16,16 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Architecture:
+ * - MatrixHelloBot: Sync loop, !last command, room management
+ * - MatrixClient: Matrix protocol HTTP interactions
+ * - RoomHistoryManager: Chat history fetching and pagination
+ * - LastMessageService: !last command implementation
+ * - RoomManagementService: Join/leave/cleanup logic
+ * - CommandDispatcher: Routing for other commands (export, search, etc.)
+ */
+
 public class MatrixHelloBot {
     
     public static class Config {
