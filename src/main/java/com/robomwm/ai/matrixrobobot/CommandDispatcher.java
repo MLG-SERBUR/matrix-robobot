@@ -60,7 +60,7 @@ public class CommandDispatcher {
         } else if ("!abort".equals(trimmed)) {
             handleAbort(sender, responseRoomId);
             return true;
-        } else if ("!unreadarliai".equals(trimmed)) {
+        } else if ("!autosummary".equals(trimmed)) {
             handleAutoSummary(roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if ("!help".equals(trimmed)) {
