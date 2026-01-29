@@ -60,7 +60,7 @@ public class CommandDispatcher {
         } else if ("!abort".equals(trimmed)) {
             handleAbort(sender, responseRoomId);
             return true;
-        } else if ("!autosummary".equals(trimmed)) {
+        } else if ("!unreadarliai".equals(trimmed)) {
             handleAutoSummary(roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if ("!help".equals(trimmed)) {
@@ -203,7 +203,7 @@ public class CommandDispatcher {
         String helpText = "**Matrix Bot Commands (Primary Use Case: !last)**\n\n" +
             "**!last** - Show your last message and read receipt status in export room (PRIMARY)\n\n" +
             "**Additional Commands:**\n\n" +
-            "**!autosummary** - Summarize unread messages (>100 messages, >6 hours old) using Arli AI\n\n" +
+            "**!unreadarliai** - Summarize unread messages (>100 messages, >6 hours old) using Arli AI\n\n" +
             "**!ping** - Measure and report ping latency\n\n" +
             "**!testcommand** - Test if the bot is responding\n\n" +
             "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +

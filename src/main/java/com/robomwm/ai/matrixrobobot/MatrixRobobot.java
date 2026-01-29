@@ -143,6 +143,7 @@ public class MatrixRobobot {
                     // NEW: Process Ephemeral Events (Read Receipts)
                     JsonNode ephemeralEvents = roomNode.path("ephemeral").path("events");
                     autoLastService.processEphemeralEvents(roomId, ephemeralEvents, config.exportRoomId);
+                    autoSummaryService.processEphemeralEvents(roomId, ephemeralEvents, config.exportRoomId);
 
                     JsonNode timelineNode = roomNode.path("timeline");
                     String prevBatch = timelineNode.path("prev_batch").asText(null);

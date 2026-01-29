@@ -22,6 +22,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class AutoSummaryService {
 
+    private final Map<String, Long> lastTriggerTime = new ConcurrentHashMap<>();
+    private final Map<String, String> lastReadEventId = new ConcurrentHashMap<>();
+
     private final Set<String> enabledUsers = ConcurrentHashMap.newKeySet();
     private final MatrixClient matrixClient;
     private final HttpClient httpClient;
@@ -296,6 +299,188 @@ public class AutoSummaryService {
         } catch (IOException e) {
             System.err.println("Error loading autosummary enabled users: " + e.getMessage());
         }
+    }
+
+    /**
+     * Processes ephemeral events (read receipts) from the sync loop.
+     */
+    public void processEphemeralEvents(String roomId, JsonNode ephemeralEvents, String exportRoomId) {
+        // Only run logic if this is the export room
+        if (!roomId.equals(exportRoomId)) return;
+        
+        if (ephemeralEvents == null || !ephemeralEvents.isArray()) return;
+
+        for (JsonNode event : ephemeralEvents) {
+            if ("m.receipt".equals(event.path("type").asText())) {
+                processReceiptEvent(roomId, event.path("content"));
+            }
+        }
+    }
+
+    private void processReceiptEvent(String roomId, JsonNode content) {
+        // Content structure: { "$event_id": { "m.read": { "@user_id": { "ts": 1234 } } } }
+        Iterator<String> eventIds = content.fieldNames();
+        
+        while (eventIds.hasNext()) {
+            String eventId = eventIds.next();
+            JsonNode readNode = content.path(eventId).path("m.read");
+            
+            Iterator<String> userIds = readNode.fieldNames();
+            while (userIds.hasNext()) {
+                String userId = userIds.next();
+                
+                // 1. Check if user has automatic summarization enabled
+                if (!enabledUsers.contains(userId)) continue;
+
+                long now = System.currentTimeMillis();
+                long lastTrigger = lastTriggerTime.getOrDefault(userId, 0L);
+
+                // 2. Check debounce (6 hours) - prevents spamming the user
+                // We use the trigger time to ensure we don't spam if they read messages in a row.
+                if (now - lastTrigger < 21600000) { // 6 hours in milliseconds
+                    // Update the last known read event, but don't trigger
+                    lastReadEventId.put(userId, eventId);
+                    continue;
+                }
+
+                // 3. Check for at least 100 unread messages that are at least 6 hours old
+                String previousEventId = lastReadEventId.get(userId);
+                
+                // If we have a previous read state, check the gap
+                if (previousEventId != null && !previousEventId.equals(eventId)) {
+                    UnreadMessagesResult unreadMessages = fetchUnreadMessages(roomId, previousEventId);
+                    
+                    if (unreadMessages.logs.size() > 100) {
+                        long oldestMessageTime = unreadMessages.oldestTimestampMs;
+                        long ageHours = (now - oldestMessageTime) / (1000 * 60 * 60);
+                        
+                        if (ageHours >= 6) {
+                            triggerSummary(roomId, userId, unreadMessages.logs);
+                            lastTriggerTime.put(userId, now);
+                        }
+                    }
+                }
+
+                // Update state for next time
+                lastReadEventId.put(userId, eventId);
+            }
+        }
+    }
+
+    private void triggerSummary(String exportRoomId, String userId, List<String> messages) {
+        // Find a DM room with the user
+        String dmRoomId = findDirectMessageRoom(userId);
+        if (dmRoomId != null) {
+            System.out.println("Triggering Auto-Summary for " + userId);
+            // We run this in a separate thread to not block the sync loop
+            new Thread(() -> {
+                try {
+                    // Call Arli AI to generate summary
+                    if (arliApiKey == null || arliApiKey.isEmpty()) {
+                        matrixClient.sendText(dmRoomId, "Arli AI API key not configured.");
+                        return;
+                    }
+                    
+                    StringBuilder context = new StringBuilder();
+                    for (String msg : messages) {
+                        context.append(msg).append("\n");
+                    }
+                    
+                    String prompt = "Please provide a concise summary of the following chat messages in 2-3 paragraphs:\n\n" + context.toString();
+                    
+                    String arliUrl = "https://api.arliai.com/v1/chat/completions";
+                    String requestBody = "{" +
+                        "\"model\": \"arliai/v1\"," +
+                        "\"messages\": [{" +
+                        "\"role\": \"user\"," +
+                        "\"content\": " + escapeJson(prompt) +
+                        "}]," +
+                        "\"max_tokens\": 1000" +
+                        "}";
+                    
+                    HttpRequest arliReq = HttpRequest.newBuilder()
+                        .uri(URI.create(arliUrl))
+                        .header("Authorization", "Bearer " + arliApiKey)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                        .build();
+                    
+                    HttpResponse<String> arliResp = httpClient.send(arliReq, HttpResponse.BodyHandlers.ofString());
+                    
+                    if (arliResp.statusCode() == 200) {
+                        JsonNode responseJson = mapper.readTree(arliResp.body());
+                        String summary = responseJson.path("choices").path(0).path("message").path("content").asText(null);
+                        
+                        if (summary != null && !summary.isEmpty()) {
+                            matrixClient.sendMarkdown(dmRoomId, "**Automatic summary of " + messages.size() + " unread messages:**\n\n" + summary);
+                        } else {
+                            matrixClient.sendText(dmRoomId, "Arli AI returned an empty response.");
+                        }
+                    } else {
+                        System.out.println("Arli AI API error: " + arliResp.statusCode() + " - " + arliResp.body());
+                        matrixClient.sendText(dmRoomId, "Arli AI API error: " + arliResp.statusCode());
+                    }
+                    
+                } catch (Exception e) {
+                    System.out.println("Arli AI query failed: " + e.getMessage());
+                    matrixClient.sendText(dmRoomId, "Arli AI query failed: " + e.getMessage());
+                }
+            }).start();
+        } else {
+            System.out.println("Could not find DM room for auto-summary user: " + userId);
+        }
+    }
+
+    /**
+     * Helper to find a Room ID that is a DM with the specific user.
+     */
+    private String findDirectMessageRoom(String targetUserId) {
+        try {
+            String url = homeserver + "/_matrix/client/v3/joined_rooms";
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            // FIX: Use local httpClient instead of matrixClient.getClient()
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            JsonNode joined = mapper.readTree(resp.body()).path("joined_rooms");
+            
+            if (joined.isArray()) {
+                for (JsonNode roomNode : joined) {
+                    String rId = roomNode.asText();
+                    if (isDmWithUser(rId, targetUserId)) {
+                        return rId;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    private boolean isDmWithUser(String roomId, String targetUserId) {
+        try {
+            // Check members
+            String url = homeserver + "/_matrix/client/v3/rooms/" + roomId + "/joined_members";
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            // FIX: Use local httpClient instead of matrixClient.getClient()
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            JsonNode members = mapper.readTree(resp.body()).path("joined");
+            
+            // A DM usually has exactly 2 members: the bot and the target user
+            if (members.size() == 2 && members.has(targetUserId)) {
+                return true;
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+        return false;
     }
 
     /**
