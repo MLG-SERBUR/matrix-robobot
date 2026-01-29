@@ -94,7 +94,7 @@ public class AutoSummaryService {
             }
 
             // Check thresholds: > 100 messages and > 6 hours old
-            if (unreadMessages.logs.size() <= 5) {
+            if (unreadMessages.logs.size() <= 100) {
                 matrixClient.sendText(responseRoomId, "Not enough unread messages (" + unreadMessages.logs.size() + "/100+) for summary.");
                 return;
             }
@@ -103,7 +103,7 @@ public class AutoSummaryService {
             long now = System.currentTimeMillis();
             long ageHours = (now - oldestMessageTime) / (1000 * 60 * 60);
 
-            if (ageHours < 10) {
+            if (ageHours < 6) {
                 matrixClient.sendText(responseRoomId, "Unread messages too recent (" + ageHours + "/6+ hours). Need older messages.");
                 return;
             }
