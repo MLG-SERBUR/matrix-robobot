@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 
 public class MatrixRobobot {
-    
+
     public static class Config {
         public String homeserver;
         public String accessToken;
@@ -36,34 +36,40 @@ public class MatrixRobobot {
         public String arliApiKey;
         public String cerebrasApiKey;
     }
-    
+
     private static final Map<String, AtomicBoolean> runningOperations = new ConcurrentHashMap<>();
-    
+
     public static void main(String[] args) throws Exception {
         String configPath = args.length > 0 ? args[0] : "config.json";
         Config config = loadConfig(configPath);
-        
+
         if (config == null) {
             System.err.println("Failed to load configuration from: " + configPath);
             System.exit(2);
         }
 
-        String url = config.homeserver.endsWith("/") 
-            ? config.homeserver.substring(0, config.homeserver.length() - 1) 
-            : config.homeserver;
-        
+        String url = config.homeserver.endsWith("/")
+                ? config.homeserver.substring(0, config.homeserver.length() - 1)
+                : config.homeserver;
+
         HttpClient client = HttpClient.newHttpClient();
         ObjectMapper mapper = new ObjectMapper();
-        
+
         // Initialize services
         MatrixClient matrixClient = new MatrixClient(client, mapper, url, config.accessToken);
         RoomHistoryManager historyManager = new RoomHistoryManager(client, mapper, url, config.accessToken);
-        LastMessageService lastMessageService = new LastMessageService(matrixClient, historyManager, client, mapper, url, config.accessToken);
-        RoomManagementService roomMgmt = new RoomManagementService(matrixClient, client, mapper, url, config.accessToken);
-        CommandDispatcher dispatcher = new CommandDispatcher(matrixClient, historyManager, client, mapper, url, config, runningOperations);
-        
+        LastMessageService lastMessageService = new LastMessageService(matrixClient, historyManager, client, mapper,
+                url, config.accessToken);
+        RoomManagementService roomMgmt = new RoomManagementService(matrixClient, client, mapper, url,
+                config.accessToken);
+        TextSearchService textSearchService = new TextSearchService(matrixClient, historyManager, client, mapper, url,
+                config, runningOperations);
+        CommandDispatcher dispatcher = new CommandDispatcher(matrixClient, historyManager, client, mapper, url, config,
+                runningOperations, textSearchService);
+
         // NEW: AutoLastService with explicit HttpClient passed
-        AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, client, mapper, url, config.accessToken);
+        AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, client, mapper, url,
+                config.accessToken);
 
         String userId = matrixClient.getUserId();
 
@@ -87,14 +93,14 @@ public class MatrixRobobot {
         System.out.println("Starting /sync loop");
         System.out.println("Command room: " + config.commandRoomId);
         System.out.println("Export room: " + config.exportRoomId);
-        
+
         roomMgmt.cleanupAbandonedDMs(config.commandRoomId, config.exportRoomId);
 
         while (true) {
             try {
-                String syncUrl = url + "/_matrix/client/v3/sync?timeout=30000" 
-                    + (since != null ? "&since=" + URLEncoder.encode(since, StandardCharsets.UTF_8) : "");
-                
+                String syncUrl = url + "/_matrix/client/v3/sync?timeout=30000"
+                        + (since != null ? "&since=" + URLEncoder.encode(since, StandardCharsets.UTF_8) : "");
+
                 HttpRequest syncReq = HttpRequest.newBuilder()
                         .uri(URI.create(syncUrl))
                         .header("Authorization", "Bearer " + config.accessToken)
@@ -135,7 +141,7 @@ public class MatrixRobobot {
                 while (roomIds.hasNext()) {
                     String roomId = roomIds.next();
                     JsonNode roomNode = rooms.path(roomId);
-                    
+
                     // NEW: Process Ephemeral Events (Read Receipts)
                     JsonNode ephemeralEvents = roomNode.path("ephemeral").path("events");
                     autoLastService.processEphemeralEvents(roomId, ephemeralEvents, config.exportRoomId);
@@ -143,25 +149,29 @@ public class MatrixRobobot {
                     JsonNode timelineNode = roomNode.path("timeline");
                     String prevBatch = timelineNode.path("prev_batch").asText(null);
                     JsonNode timeline = timelineNode.path("events");
-                    
+
                     if (timeline.isArray()) {
                         for (JsonNode ev : timeline) {
-                            if (!"m.room.message".equals(ev.path("type").asText(null))) continue;
-                            
+                            if (!"m.room.message".equals(ev.path("type").asText(null)))
+                                continue;
+
                             String body = ev.path("content").path("body").asText(null);
                             String sender = ev.path("sender").asText(null);
-                            if (body == null) continue;
-                            
+                            if (body == null)
+                                continue;
+
                             String trimmed = body.trim();
                             String responseRoomId = roomId;
 
-                            if (userId != null && userId.equals(sender)) continue;
+                            if (userId != null && userId.equals(sender))
+                                continue;
 
                             // PRIMARY: !last command
                             if ("!last".equals(trimmed)) {
                                 System.out.println("Received !last command in " + roomId + " from " + sender);
                                 final String finalSender = sender;
-                                new Thread(() -> lastMessageService.sendLastMessageAndReadReceipt(config.exportRoomId, finalSender, responseRoomId)).start();
+                                new Thread(() -> lastMessageService.sendLastMessageAndReadReceipt(config.exportRoomId,
+                                        finalSender, responseRoomId)).start();
                             }
                             // NEW: !autolast command
                             else if ("!autolast".equals(trimmed)) {
@@ -177,7 +187,8 @@ public class MatrixRobobot {
                             }
                             // All other commands
                             else {
-                                dispatcher.dispatchCommand(trimmed, roomId, sender, prevBatch, responseRoomId, config.exportRoomId);
+                                dispatcher.dispatchCommand(trimmed, roomId, sender, prevBatch, responseRoomId,
+                                        config.exportRoomId);
                             }
                         }
                     }
@@ -189,11 +200,16 @@ public class MatrixRobobot {
             } catch (Exception e) {
                 System.out.println("Error during sync loop: " + e.getMessage());
                 e.printStackTrace();
-                try { Thread.sleep(2000); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); break; }
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
         }
     }
-    
+
     private static Config loadConfig(String configPath) {
         try {
             String content = new String(Files.readAllBytes(Paths.get(configPath)));
