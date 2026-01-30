@@ -17,15 +17,24 @@ public class CommandDispatcher {
     private final MatrixClient matrixClient;
     private final RoomHistoryManager historyManager;
     private final Map<String, AtomicBoolean> runningOperations;
+    private final String commandRoomId;
+    private final String exportRoomId;
     private final TextSearchService textSearchService;
+    private final AIService aiService;
+    private final SemanticSearchService semanticSearchService;
 
-    public CommandDispatcher(MatrixClient matrixClient, RoomHistoryManager historyManager, HttpClient httpClient,
-            ObjectMapper mapper, String homeserverUrl, MatrixRobobot.Config config,
-            Map<String, AtomicBoolean> runningOperations, TextSearchService textSearchService) {
-        this.matrixClient = matrixClient;
+    public CommandDispatcher(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
+            String commandRoomId, String exportRoomId, RoomHistoryManager historyManager,
+            Map<String, AtomicBoolean> runningOperations, TextSearchService textSearchService,
+            AIService aiService, SemanticSearchService semanticSearchService) {
+        this.matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         this.historyManager = historyManager;
         this.runningOperations = runningOperations;
+        this.commandRoomId = commandRoomId;
+        this.exportRoomId = exportRoomId;
         this.textSearchService = textSearchService;
+        this.aiService = aiService;
+        this.semanticSearchService = semanticSearchService;
     }
 
     /**
@@ -44,14 +53,14 @@ public class CommandDispatcher {
             return true;
         } else if (trimmed
                 .matches("!arliai-ts\\s+\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}\\s+[A-Z]{3}\\s+\\d+h(?:\\s+(.*))?")) {
-            handleArliAIWithTimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+            handleArliAITimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!cerebras\\s+[A-Z]{3}\\s+\\d+h(?:\\s+(.*))?")) {
             handleCerebras(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed
                 .matches("!cerebras-ts\\s+\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}\\s+[A-Z]{3}\\s+\\d+h(?:\\s+(.*))?")) {
-            handleCerebrasWithTimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+            handleCerebrasTimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!semantic\\s+[A-Z]{3}\\s+\\d+h\\s+(.+)")) {
             handleSemanticSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
@@ -62,7 +71,7 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!grep-slow\\s+[A-Z]{3}\\s+\\d+[dh]\\s+(.+)")) {
             handleGrepSlow(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!search\\s+[A-Z]{3}\\s+\\d+[dh]\\s+(.+)")) {
+        } else if (trimmed.matches("!search\\s+([A-Z]{3})\\s+(\\d+)([dh])\\s+(.+)")) {
             handleSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if ("!abort".equals(trimmed)) {
@@ -122,13 +131,12 @@ public class CommandDispatcher {
             int hours = Integer.parseInt(matcher.group(2));
             String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
             System.out.println("Received arliai command in " + roomId + " from " + sender);
-            new Thread(
-                    () -> executeArliQuery(hours, prevBatch, question, responseRoomId, exportRoomId, -1, timezoneAbbr))
-                    .start();
+            new Thread(() -> aiService.queryArliAI(responseRoomId, exportRoomId, hours, prevBatch, question, -1,
+                    timezoneAbbr)).start();
         }
     }
 
-    private void handleArliAIWithTimestamp(String trimmed, String roomId, String sender, String prevBatch,
+    private void handleArliAITimestamp(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
         Matcher matcher = Pattern
                 .compile("!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+([A-Z]{3})\\s+(\\d+)h(?:\\s+(.*))?")
@@ -147,43 +155,62 @@ public class CommandDispatcher {
                     .toInstant()
                     .toEpochMilli();
 
-            System.out.println("Received arliai-ts command in " + roomId + " from " + sender);
-            new Thread(() -> executeArliQuery(durationHours, prevBatch, question, responseRoomId, exportRoomId,
+            System.out.println("Received arli-ts command in " + roomId + " from " + sender);
+            new Thread(() -> aiService.queryArliAI(responseRoomId, exportRoomId, durationHours, prevBatch, question,
                     startTimestamp, timezoneAbbr)).start();
         }
-    }
-
-    private void executeArliQuery(int hours, String prevBatch, String question, String responseRoomId,
-            String exportRoomId, long startTimestamp, String timezoneAbbr) {
-        // This is a placeholder - integrate with actual Arli AI logic from original bot
-        matrixClient.sendMarkdown(responseRoomId,
-                "[ARLI AI command queued but implementation moved to separate service]");
     }
 
     private void handleCerebras(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
         Matcher matcher = Pattern.compile("!cerebras\\s+([A-Z]{3})\\s+(\\d+)h(?:\\s+(.*))?").matcher(trimmed);
         if (matcher.matches()) {
+            String timezoneAbbr = matcher.group(1);
+            int hours = Integer.parseInt(matcher.group(2));
+            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
+
             System.out.println("Received cerebras command in " + roomId + " from " + sender);
-            new Thread(() -> matrixClient.sendMarkdown(responseRoomId,
-                    "[CEREBRAS command queued but implementation moved to separate service]")).start();
+            new Thread(() -> aiService.queryCerebras(responseRoomId, exportRoomId, hours, prevBatch, question, -1,
+                    timezoneAbbr)).start();
         }
     }
 
-    private void handleCerebrasWithTimestamp(String trimmed, String roomId, String sender, String prevBatch,
+    private void handleCerebrasTimestamp(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
-        System.out.println("Received cerebras-ts command in " + roomId + " from " + sender);
-        new Thread(() -> matrixClient.sendMarkdown(responseRoomId,
-                "[CEREBRAS-TS command queued but implementation moved to separate service]")).start();
+        Matcher matcher = Pattern
+                .compile("!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+([A-Z]{3})\\s+(\\d+)h(?:\\s+(.*))?")
+                .matcher(trimmed);
+        if (matcher.matches()) {
+            String startDateStr = matcher.group(1);
+            String timezoneAbbr = matcher.group(2);
+            int durationHours = Integer.parseInt(matcher.group(3));
+            String question = matcher.group(4) != null ? matcher.group(4).trim() : null;
+
+            ZoneId userZone = getZoneIdFromAbbr(timezoneAbbr);
+            long startTimestamp = java.time.LocalDateTime
+                    .parse(startDateStr, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
+                    .atZone(userZone)
+                    .withZoneSameInstant(ZoneId.of("UTC"))
+                    .toInstant()
+                    .toEpochMilli();
+
+            System.out.println("Received cerebras-ts command in " + roomId + " from " + sender);
+            new Thread(() -> aiService.queryCerebras(responseRoomId, exportRoomId, durationHours, prevBatch, question,
+                    startTimestamp, timezoneAbbr)).start();
+        }
     }
 
     private void handleSemanticSearch(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
         Matcher matcher = Pattern.compile("!semantic\\s+([A-Z]{3})\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
         if (matcher.matches()) {
+            String timezoneAbbr = matcher.group(1);
+            int hours = Integer.parseInt(matcher.group(2));
+            String query = matcher.group(3).trim();
+
             System.out.println("Received semantic search command in " + roomId + " from " + sender);
-            new Thread(() -> matrixClient.sendMarkdown(responseRoomId,
-                    "[SEMANTIC command queued but implementation moved to separate service]")).start();
+            new Thread(() -> semanticSearchService.performSemanticSearch(responseRoomId, exportRoomId, hours, prevBatch,
+                    query, timezoneAbbr)).start();
         }
     }
 

@@ -64,8 +64,13 @@ public class MatrixRobobot {
                 config.accessToken);
         TextSearchService textSearchService = new TextSearchService(matrixClient, historyManager, client, mapper, url,
                 config, runningOperations);
-        CommandDispatcher dispatcher = new CommandDispatcher(matrixClient, historyManager, client, mapper, url, config,
-                runningOperations, textSearchService);
+        AIService aiService = new AIService(client, mapper, url, config.accessToken, config.arliApiKey,
+                config.cerebrasApiKey);
+        SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
+                config.accessToken);
+        CommandDispatcher dispatcher = new CommandDispatcher(client, mapper, url, config.accessToken,
+                config.commandRoomId, config.exportRoomId, historyManager, runningOperations, textSearchService,
+                aiService, semanticSearchService);
 
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, client, mapper, url,
