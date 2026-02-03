@@ -11,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -52,7 +53,9 @@ public class MatrixRobobot {
                 ? config.homeserver.substring(0, config.homeserver.length() - 1)
                 : config.homeserver;
 
-        HttpClient client = HttpClient.newHttpClient();
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(120))
+                .build();
         ObjectMapper mapper = new ObjectMapper();
 
         // Initialize services
@@ -101,6 +104,10 @@ public class MatrixRobobot {
 
         roomMgmt.cleanupAbandonedDMs(config.commandRoomId, config.exportRoomId);
 
+        long currentSleepMs = 2000;
+        final long initialBackoffMs = 60000;
+        final long maxBackoffMs = 300000;
+
         while (true) {
             try {
                 String syncUrl = url + "/_matrix/client/v3/sync?timeout=30000"
@@ -109,6 +116,7 @@ public class MatrixRobobot {
                 HttpRequest syncReq = HttpRequest.newBuilder()
                         .uri(URI.create(syncUrl))
                         .header("Authorization", "Bearer " + config.accessToken)
+                        .timeout(Duration.ofSeconds(120))
                         .GET()
                         .build();
 
@@ -198,15 +206,26 @@ public class MatrixRobobot {
                         }
                     }
                 }
+                currentSleepMs = 2000; // Reset backoff on success
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                System.out.println("Error during sync loop: " + e.getMessage());
+                System.err.println("Error during sync loop (" + e.getClass().getSimpleName() + "): " + e.getMessage());
+                if (e.getCause() != null) {
+                    System.err.println(
+                            "  Cause: " + e.getCause().getClass().getSimpleName() + ": " + e.getCause().getMessage());
+                }
                 e.printStackTrace();
                 try {
-                    Thread.sleep(2000);
+                    System.out.println("Sleeping for " + (currentSleepMs / 1000) + " seconds before retrying...");
+                    Thread.sleep(currentSleepMs);
+                    if (currentSleepMs < initialBackoffMs) {
+                        currentSleepMs = initialBackoffMs;
+                    } else {
+                        currentSleepMs = Math.min(maxBackoffMs, currentSleepMs * 2);
+                    }
                 } catch (InterruptedException ex) {
                     Thread.currentThread().interrupt();
                     break;

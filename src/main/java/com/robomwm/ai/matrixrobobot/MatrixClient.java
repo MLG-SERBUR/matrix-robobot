@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -28,9 +29,9 @@ public class MatrixClient {
     public MatrixClient(HttpClient httpClient, ObjectMapper mapper, String homeserverUrl, String accessToken) {
         this.httpClient = httpClient;
         this.mapper = mapper;
-        this.homeserverUrl = homeserverUrl.endsWith("/") 
-            ? homeserverUrl.substring(0, homeserverUrl.length() - 1) 
-            : homeserverUrl;
+        this.homeserverUrl = homeserverUrl.endsWith("/")
+                ? homeserverUrl.substring(0, homeserverUrl.length() - 1)
+                : homeserverUrl;
         this.accessToken = accessToken;
     }
 
@@ -42,6 +43,7 @@ public class MatrixClient {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(homeserverUrl + "/_matrix/client/v3/account/whoami"))
                     .header("Authorization", "Bearer " + accessToken)
+                    .timeout(Duration.ofSeconds(120))
                     .GET()
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -68,10 +70,11 @@ public class MatrixClient {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
-            
+            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
+                    + txnId;
+
             String sanitizedMessage = sanitizeUserIds(message);
-            
+
             Map<String, Object> payload = new HashMap<>();
             payload.put("msgtype", "m.text");
             payload.put("body", sanitizedMessage);
@@ -82,6 +85,7 @@ public class MatrixClient {
                     .uri(URI.create(endpoint))
                     .header("Authorization", "Bearer " + accessToken)
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(120))
                     .PUT(HttpRequest.BodyPublishers.ofString(json))
                     .build();
 
@@ -99,10 +103,11 @@ public class MatrixClient {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
-            
+            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
+                    + txnId;
+
             String sanitizedMessage = sanitizeUserIds(message);
-            
+
             Map<String, Object> payload = new HashMap<>();
             payload.put("msgtype", "m.text");
             payload.put("body", sanitizedMessage);
@@ -113,6 +118,7 @@ public class MatrixClient {
                     .uri(URI.create(endpoint))
                     .header("Authorization", "Bearer " + accessToken)
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(120))
                     .PUT(HttpRequest.BodyPublishers.ofString(json))
                     .build();
 
@@ -136,38 +142,40 @@ public class MatrixClient {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
-            
+            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
+                    + txnId;
+
             String sanitizedMessage = sanitizeUserIds(message);
-            
+
             Map<String, Object> payload = new HashMap<>();
             payload.put("msgtype", "m.text");
             payload.put("body", "* " + sanitizedMessage);
             payload.put("m.mentions", Map.of());
-            
+
             Map<String, Object> newContent = new HashMap<>();
             newContent.put("msgtype", "m.text");
             newContent.put("body", sanitizedMessage);
             newContent.put("m.mentions", Map.of());
             payload.put("m.new_content", newContent);
-            
+
             Map<String, Object> relatesTo = new HashMap<>();
             relatesTo.put("event_id", originalEventId);
             relatesTo.put("rel_type", "m.replace");
             payload.put("m.relates_to", relatesTo);
-            
+
             String json = mapper.writeValueAsString(payload);
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(endpoint))
                     .header("Authorization", "Bearer " + accessToken)
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(120))
                     .PUT(HttpRequest.BodyPublishers.ofString(json))
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             System.out.println("Updated message " + originalEventId + " -> " + response.statusCode());
-            
+
             if (response.statusCode() == 200) {
                 JsonNode root = mapper.readTree(response.body());
                 return root.path("event_id").asText(null);
@@ -185,11 +193,12 @@ public class MatrixClient {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/" + txnId;
-            
+            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
+                    + txnId;
+
             String sanitizedMessage = sanitizeUserIds(message);
             String htmlBody = convertMarkdownToHtml(sanitizedMessage);
-            
+
             Map<String, Object> payload = new HashMap<>();
             payload.put("msgtype", "m.text");
             payload.put("body", sanitizedMessage);
@@ -202,6 +211,7 @@ public class MatrixClient {
                     .uri(URI.create(endpoint))
                     .header("Authorization", "Bearer " + accessToken)
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(120))
                     .PUT(HttpRequest.BodyPublishers.ofString(json))
                     .build();
 
@@ -217,23 +227,26 @@ public class MatrixClient {
      */
     public boolean joinRoom(String roomId) {
         try {
-            String joinUrl = homeserverUrl + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/join";
+            String joinUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
+                    + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/join";
             Map<String, Object> payload = new HashMap<>();
             String jsonPayload = mapper.writeValueAsString(payload);
-            
+
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(joinUrl))
                     .header("Authorization", "Bearer " + accessToken)
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(120))
                     .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                     .build();
-            
+
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() == 200) {
                 System.out.println("Successfully joined room: " + roomId);
                 return true;
             } else {
-                System.out.println("Failed to join room " + roomId + ": " + response.statusCode() + " - " + response.body());
+                System.out.println(
+                        "Failed to join room " + roomId + ": " + response.statusCode() + " - " + response.body());
                 return false;
             }
         } catch (Exception e) {
@@ -247,17 +260,19 @@ public class MatrixClient {
      */
     public boolean leaveRoom(String roomId) {
         try {
-            String leaveUrl = homeserverUrl + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/leave";
+            String leaveUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
+                    + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/leave";
             Map<String, Object> payload = new HashMap<>();
             String jsonPayload = mapper.writeValueAsString(payload);
-            
+
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(leaveUrl))
                     .header("Authorization", "Bearer " + accessToken)
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(120))
                     .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                     .build();
-            
+
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             System.out.println("Bot left room " + roomId + " -> " + response.statusCode());
             return response.statusCode() == 200;
@@ -272,17 +287,20 @@ public class MatrixClient {
      */
     public boolean isRoomEncrypted(String roomId) {
         try {
-            String stateUrl = homeserverUrl + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/state/m.room.encryption/";
+            String stateUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
+                    + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/state/m.room.encryption/";
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(stateUrl))
                     .header("Authorization", "Bearer " + accessToken)
+                    .timeout(Duration.ofSeconds(120))
                     .GET()
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() == 200) {
                 JsonNode encryption = mapper.readTree(response.body());
                 if (encryption.has("algorithm")) {
-                    System.out.println("Room " + roomId + " is encrypted with algorithm: " + encryption.path("algorithm").asText());
+                    System.out.println("Room " + roomId + " is encrypted with algorithm: "
+                            + encryption.path("algorithm").asText());
                     return true;
                 }
             }
@@ -298,7 +316,8 @@ public class MatrixClient {
      */
     public int getRoomMemberCount(String roomId) {
         try {
-            String membersUrl = homeserverUrl + "/_matrix/client/v3/rooms/" + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/members";
+            String membersUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
+                    + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/members";
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(membersUrl))
                     .header("Authorization", "Bearer " + accessToken)
