@@ -47,6 +47,16 @@ public class RoomHistoryManager {
         }
     }
 
+    public static class EventInfo {
+        public String eventId;
+        public long timestamp;
+
+        public EventInfo(String eventId, long timestamp) {
+            this.eventId = eventId;
+            this.timestamp = timestamp;
+        }
+    }
+
     public RoomHistoryManager(HttpClient httpClient, ObjectMapper mapper, String homeserverUrl, String accessToken) {
         this.httpClient = httpClient;
         this.mapper = mapper;
@@ -221,7 +231,7 @@ public class RoomHistoryManager {
     /**
      * Get the last message sent by a user in a room
      */
-    public String getLastMessageFromSender(String roomId, String sender) {
+    public EventInfo getLastMessageFromSender(String roomId, String sender) {
         try {
             String token = getPaginationToken(roomId, null);
             if (token == null) {
@@ -254,7 +264,7 @@ public class RoomHistoryManager {
                     continue;
                 String msgSender = ev.path("sender").asText(null);
                 if (sender.equals(msgSender)) {
-                    return ev.path("event_id").asText(null);
+                    return new EventInfo(ev.path("event_id").asText(null), ev.path("origin_server_ts").asLong(0));
                 }
             }
 
@@ -281,7 +291,8 @@ public class RoomHistoryManager {
                                 continue;
                             String msgSender = ev.path("sender").asText(null);
                             if (sender.equals(msgSender)) {
-                                return ev.path("event_id").asText(null);
+                                return new EventInfo(ev.path("event_id").asText(null),
+                                        ev.path("origin_server_ts").asLong(0));
                             }
                         }
                     }
@@ -293,6 +304,61 @@ public class RoomHistoryManager {
         } catch (Exception e) {
             System.out.println("Error getting last message from sender: " + e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Count unread messages in a room from lastReadEventId to the latest message.
+     */
+    public int countUnreadMessages(String roomId, String lastReadEventId) {
+        if (lastReadEventId == null)
+            return -1;
+        try {
+            String token = getPaginationToken(roomId, null);
+            if (token == null)
+                return -1;
+
+            int count = 0;
+            boolean foundLastRead = false;
+
+            while (token != null && !foundLastRead) {
+                String url = homeserverUrl + "/_matrix/client/v3/rooms/"
+                        + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
+                        + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=100";
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .GET()
+                        .build();
+                HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200)
+                    break;
+
+                JsonNode root = mapper.readTree(resp.body());
+                JsonNode chunk = root.path("chunk");
+                if (!chunk.isArray() || chunk.size() == 0)
+                    break;
+
+                for (JsonNode ev : chunk) {
+                    String eventId = ev.path("event_id").asText("");
+                    if (eventId.equals(lastReadEventId)) {
+                        foundLastRead = true;
+                        break;
+                    }
+                    if ("m.room.message".equals(ev.path("type").asText(null))) {
+                        count++;
+                    }
+                }
+
+                if (foundLastRead || count > 1000)
+                    break; // Limit search
+                token = root.path("end").asText(null);
+            }
+
+            return foundLastRead ? count : -1;
+        } catch (Exception e) {
+            System.err.println("Error counting unread messages: " + e.getMessage());
+            return -1;
         }
     }
 

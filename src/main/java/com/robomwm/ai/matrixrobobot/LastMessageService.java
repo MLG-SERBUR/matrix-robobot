@@ -24,7 +24,8 @@ public class LastMessageService {
     private final String homeserverUrl;
     private final String accessToken;
 
-    public LastMessageService(MatrixClient matrixClient, RoomHistoryManager historyManager, HttpClient httpClient, ObjectMapper mapper, String homeserverUrl, String accessToken) {
+    public LastMessageService(MatrixClient matrixClient, RoomHistoryManager historyManager, HttpClient httpClient,
+            ObjectMapper mapper, String homeserverUrl, String accessToken) {
         this.matrixClient = matrixClient;
         this.historyManager = historyManager;
         this.httpClient = httpClient;
@@ -42,39 +43,66 @@ public class LastMessageService {
 
     /**
      * Execute the !last command
-     * @param exportRoomId The room to get info from
-     * @param sender The user to get info for
-     * @param responseRoomId The room to send the response to
-     * @param cachedPreviousReadEventId Optional cached previous read event ID (used by auto-last feature)
+     * 
+     * @param exportRoomId              The room to get info from
+     * @param sender                    The user to get info for
+     * @param responseRoomId            The room to send the response to
+     * @param cachedPreviousReadEventId Optional cached previous read event ID (used
+     *                                  by auto-last feature)
      */
-    public void sendLastMessageAndReadReceipt(String exportRoomId, String sender, String responseRoomId, String cachedPreviousReadEventId) {
+    public void sendLastMessageAndReadReceipt(String exportRoomId, String sender, String responseRoomId,
+            String cachedPreviousReadEventId) {
         try {
-            String lastMessageEventId = historyManager.getLastMessageFromSender(exportRoomId, sender);
-            // If we have a cached previous read event ID, use that instead of fetching current
-            String lastReadEventId = cachedPreviousReadEventId != null 
-                ? cachedPreviousReadEventId 
-                : getReadReceipt(exportRoomId, sender);
+            RoomHistoryManager.EventInfo lastMessageInfo = historyManager.getLastMessageFromSender(exportRoomId,
+                    sender);
+            // If we have a cached previous read event ID, use that instead of fetching
+            // current
+            RoomHistoryManager.EventInfo lastReadInfo = cachedPreviousReadEventId != null
+                    ? new RoomHistoryManager.EventInfo(cachedPreviousReadEventId, 0)
+                    : getReadReceipt(exportRoomId, sender);
 
             StringBuilder response = new StringBuilder();
 
-            if (lastMessageEventId != null) {
-                String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + lastMessageEventId;
+            if (lastMessageInfo != null) {
+                String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + lastMessageInfo.eventId;
                 response.append("sent: ");
-                response.append(messageLink).append("\n");
+                response.append(messageLink);
+                if (lastMessageInfo.timestamp > 0) {
+                    response.append(" (").append(formatRelativeTime(lastMessageInfo.timestamp)).append(")");
+                }
+                response.append("\n");
             } else {
                 response.append("No recently sent.\n");
             }
 
-            if (lastReadEventId != null) {
-                boolean isLatest = isLatestMessage(exportRoomId, lastReadEventId);
-                String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + lastReadEventId;
+            if (lastReadInfo != null) {
+                boolean isLatest = isLatestMessage(exportRoomId, lastReadInfo.eventId);
+                String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + lastReadInfo.eventId;
 
                 if (isLatest) {
                     response.append(" no unread. Latest: ");
-                    response.append(messageLink).append("\n");
+                    response.append(messageLink);
+                    if (lastReadInfo.timestamp > 0) {
+                        response.append(" (").append(formatRelativeTime(lastReadInfo.timestamp)).append(")");
+                    }
+                    response.append("\n");
                 } else {
+                    int unreadCount = historyManager.countUnreadMessages(exportRoomId, lastReadInfo.eventId);
                     response.append(" read: ");
-                    response.append(messageLink).append("\n");
+                    response.append(messageLink);
+                    if (lastReadInfo.timestamp > 0 || unreadCount >= 0) {
+                        response.append(" (");
+                        if (lastReadInfo.timestamp > 0) {
+                            response.append(formatRelativeTime(lastReadInfo.timestamp));
+                        }
+                        if (unreadCount >= 0) {
+                            if (lastReadInfo.timestamp > 0)
+                                response.append(", ");
+                            response.append(unreadCount).append(" unread");
+                        }
+                        response.append(")");
+                    }
+                    response.append("\n");
                 }
             } else {
                 response.append("No read receipt found.\n");
@@ -88,10 +116,27 @@ public class LastMessageService {
         }
     }
 
+    private String formatRelativeTime(long timestamp) {
+        long now = System.currentTimeMillis();
+        long diff = now - timestamp;
+        if (diff < 60000)
+            return "just now";
+        if (diff < 3600000) {
+            long mins = diff / 60000;
+            return mins + (mins == 1 ? " minute ago" : " minutes ago");
+        }
+        if (diff < 86400000) {
+            long hours = diff / 3600000;
+            return hours + (hours == 1 ? " hour ago" : " hours ago");
+        }
+        long days = diff / 86400000;
+        return days + (days == 1 ? " day ago" : " days ago");
+    }
+
     /**
      * Get read receipt for a user in a room
      */
-    private String getReadReceipt(String roomId, String userId) {
+    private RoomHistoryManager.EventInfo getReadReceipt(String roomId, String userId) {
         try {
             Map<Long, java.util.List<String>> receiptsWithTimestamps = new TreeMap<>(Collections.reverseOrder());
 
@@ -131,7 +176,9 @@ public class LastMessageService {
                                             timestamp = eventId.hashCode();
                                         }
 
-                                        receiptsWithTimestamps.computeIfAbsent(timestamp, k -> new java.util.ArrayList<>()).add(eventId);
+                                        receiptsWithTimestamps
+                                                .computeIfAbsent(timestamp, k -> new java.util.ArrayList<>())
+                                                .add(eventId);
                                     }
                                 }
                             }
@@ -143,7 +190,8 @@ public class LastMessageService {
             // Also check room account data for the most recent read receipt
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
             String encodedUser = URLEncoder.encode(userId, StandardCharsets.UTF_8);
-            String accountDataUrl = homeserverUrl + "/_matrix/client/v3/user/" + encodedUser + "/rooms/" + encodedRoom + "/account_data/m.read";
+            String accountDataUrl = homeserverUrl + "/_matrix/client/v3/user/" + encodedUser + "/rooms/" + encodedRoom
+                    + "/account_data/m.read";
             HttpRequest accountReq = HttpRequest.newBuilder()
                     .uri(URI.create(accountDataUrl))
                     .header("Authorization", "Bearer " + accessToken)
@@ -156,13 +204,19 @@ public class LastMessageService {
                 String lastRead = accountData.path("event_id").asText(null);
                 if (lastRead != null && !lastRead.isEmpty()) {
                     long accountDataTimestamp = Long.MAX_VALUE - 1;
-                    receiptsWithTimestamps.computeIfAbsent(accountDataTimestamp, k -> new java.util.ArrayList<>()).add(lastRead);
+                    receiptsWithTimestamps.computeIfAbsent(accountDataTimestamp, k -> new java.util.ArrayList<>())
+                            .add(lastRead);
                 }
             }
 
             if (!receiptsWithTimestamps.isEmpty()) {
-                Map.Entry<Long, java.util.List<String>> firstEntry = receiptsWithTimestamps.entrySet().iterator().next();
-                return firstEntry.getValue().get(firstEntry.getValue().size() - 1);
+                Map.Entry<Long, java.util.List<String>> firstEntry = receiptsWithTimestamps.entrySet().iterator()
+                        .next();
+                long ts = firstEntry.getKey();
+                if (ts == Long.MAX_VALUE - 1 || ts < 1000000000000L)
+                    ts = 0; // Ignore fake hash-based or sentinel timestamps
+                return new RoomHistoryManager.EventInfo(firstEntry.getValue().get(firstEntry.getValue().size() - 1),
+                        ts);
             }
 
             return null;
