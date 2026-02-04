@@ -42,12 +42,12 @@ if [ ! -f "$JAR_FILE" ]; then
 fi
 
 # 4. Prepare Service variables
-SERVICE_NAME="matrix-bot"
+SERVICE_NAME="matrix-robobot"
 USER_NAME=$(whoami)
 WORK_DIR=$(pwd)
 JAVA_BIN=$(which java)
 
-echo -e "${BLUE}Creating systemd service...${NC}"
+echo -e "${BLUE}Configuring systemd service: $SERVICE_NAME...${NC}"
 
 # 5. Create the service file content
 SERVICE_CONTENT="[Unit]
@@ -57,7 +57,7 @@ After=network.target
 [Service]
 User=$USER_NAME
 WorkingDirectory=$WORK_DIR
-ExecStart=$JAVA_BIN -jar $JAR_FILE
+ExecStart=$JAVA_BIN -jar $WORK_DIR/$JAR_FILE
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -66,15 +66,21 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target"
 
-# 6. Write to temporary file and move to systemd
+# 6. Check if service is running and stop it for update (if exists)
+if systemctl is-active --quiet "$SERVICE_NAME"; then
+    echo -e "${BLUE}Stopping existing service for update...${NC}"
+    sudo systemctl stop "$SERVICE_NAME"
+fi
+
+# 7. Write to temporary file and move to systemd
 echo "$SERVICE_CONTENT" > "$SERVICE_NAME.service"
 
 echo -e "${BLUE}Applying systemd configuration... (sudo required)${NC}"
 sudo mv "$SERVICE_NAME.service" "/etc/systemd/system/$SERVICE_NAME.service"
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
-sudo systemctl restart "$SERVICE_NAME"
+sudo systemctl start "$SERVICE_NAME"
 
-echo -e "${GREEN}=== Installation Complete! ===${NC}"
+echo -e "${GREEN}=== Installation/Update Complete! ===${NC}"
 echo -e "You can view the logs with: ${BLUE}journalctl -u $SERVICE_NAME -f${NC}"
 echo -e "The service will now start automatically on reboot."
