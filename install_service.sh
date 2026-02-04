@@ -46,6 +46,7 @@ SERVICE_NAME="matrix-robobot"
 USER_NAME=$(whoami)
 WORK_DIR=$(pwd)
 JAVA_BIN=$(which java)
+MVN_BIN=$(which mvn)
 
 echo -e "${BLUE}Configuring systemd service: $SERVICE_NAME...${NC}"
 
@@ -57,6 +58,8 @@ After=network.target
 [Service]
 User=$USER_NAME
 WorkingDirectory=$WORK_DIR
+# Build a new jar every time the service starts
+ExecStartPre=$MVN_BIN clean package -DskipTests
 ExecStart=$JAVA_BIN -jar $WORK_DIR/$JAR_FILE
 Restart=always
 RestartSec=10
