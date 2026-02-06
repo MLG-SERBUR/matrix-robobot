@@ -24,6 +24,11 @@ if ! command -v mvn &> /dev/null; then
     exit 1
 fi
 
+if ! command -v git &> /dev/null; then
+    echo -e "${RED}Error: git is not installed.${NC}"
+    exit 1
+fi
+
 # 2. Check for config.json
 if [ ! -f "config.json" ]; then
     echo -e "${RED}Error: config.json not found in the current directory.${NC}"
@@ -47,6 +52,7 @@ USER_NAME=$(whoami)
 WORK_DIR=$(pwd)
 JAVA_BIN=$(which java)
 MVN_BIN=$(which mvn)
+GIT_BIN=$(which git)
 
 echo -e "${BLUE}Configuring systemd service: $SERVICE_NAME...${NC}"
 
@@ -59,6 +65,8 @@ After=network.target
 User=$USER_NAME
 WorkingDirectory=$WORK_DIR
 # Build a new jar every time the service starts
+# Try to pull latest changes first (ignoring failure if offline)
+ExecStartPre=-$GIT_BIN pull
 ExecStartPre=$MVN_BIN clean package -DskipTests
 ExecStart=$JAVA_BIN -jar $WORK_DIR/$JAR_FILE
 Restart=always
