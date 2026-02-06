@@ -334,15 +334,18 @@ public class CommandDispatcher {
             matrixClient.sendMarkdown(responseRoomId, "Your current timezone is: "
                     + (current != null ? current.getId() : "Not set") +
                     "\nUse `!timezone <Abbreviation or ZoneId>` (e.g., `!timezone PST`) " +
-                    "or `!timezone <Your Local Time>` (e.g., `!timezone 14:30`) to set it.");
+                    "or `!timezone <Your Local Time>` (e.g., `!timezone 1:14am`) to set it.");
             return;
         }
 
-        String input = parts[1];
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i < parts.length; i++)
+            sb.append(parts[i]);
+        String input = sb.toString();
         ZoneId zoneId = null;
 
         // Try parsing as time first
-        if (input.contains(":") || input.matches("\\d+")) {
+        if (input.contains(":") || input.matches(".*\\d+.*")) {
             zoneId = timezoneService.guessZoneIdFromTime(input);
         }
 

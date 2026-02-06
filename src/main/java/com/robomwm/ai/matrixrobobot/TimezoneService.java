@@ -101,35 +101,23 @@ public class TimezoneService {
      * Supported formats: "yyyy-MM-dd HH:mm", "HH:mm" (assumes today)
      */
     public ZoneId guessZoneIdFromTime(String localTimeStr) {
-        LocalDateTime localTime = null;
-        DateTimeFormatter[] formatters = {
-                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),
-                DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"),
-                DateTimeFormatter.ofPattern("HH:mm"),
-                DateTimeFormatter.ofPattern("H:mm")
-        };
+        String input = localTimeStr.toLowerCase().replace(" ", "");
+        java.time.LocalTime time = null;
+        String[] patterns = { "H:mm", "HH:mm", "h:mma", "ha" };
 
-        for (DateTimeFormatter formatter : formatters) {
+        for (String pattern : patterns) {
             try {
-                if (formatter.toString().contains("HH:mm") || formatter.toString().contains("H:mm")) {
-                    if (localTimeStr.length() <= 5) {
-                        localTime = LocalDateTime.parse(
-                                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd ")) + localTimeStr,
-                                DateTimeFormatter.ofPattern("yyyy-MM-dd " + (localTimeStr.contains(":")
-                                        ? (localTimeStr.indexOf(":") == 1 ? "H:mm" : "HH:mm")
-                                        : "HH:mm")));
-                        break;
-                    }
-                }
-                localTime = LocalDateTime.parse(localTimeStr, formatter);
+                time = java.time.LocalTime.parse(input, DateTimeFormatter.ofPattern(pattern, java.util.Locale.US));
                 break;
             } catch (Exception ignore) {
             }
         }
 
-        if (localTime == null) {
+        if (time == null) {
             return null;
         }
+
+        LocalDateTime localTime = LocalDateTime.of(java.time.LocalDate.now(), time);
 
         // Current UTC time
         OffsetDateTime nowUtc = OffsetDateTime.now(ZoneOffset.UTC);
