@@ -16,6 +16,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.Iterator;
 
 /**
  * Manages fetching and processing room chat history from the Matrix server.
@@ -359,6 +362,211 @@ public class RoomHistoryManager {
         } catch (Exception e) {
             System.err.println("Error counting unread messages: " + e.getMessage());
             return -1;
+        }
+    }
+
+    /**
+     * Fetch all messages in a room from lastReadEventId to the latest message.
+     */
+    public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId) {
+        if (lastReadEventId == null)
+            return new ChatLogsResult(new ArrayList<>(), null);
+
+        List<String> logs = new ArrayList<>();
+        String firstEventId = null;
+
+        try {
+            String token = getPaginationToken(roomId, null);
+            if (token == null)
+                return new ChatLogsResult(logs, null);
+
+            boolean foundLastRead = false;
+
+            while (token != null && !foundLastRead) {
+                String url = homeserverUrl + "/_matrix/client/v3/rooms/"
+                        + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
+                        + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=100";
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .GET()
+                        .build();
+                HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200)
+                    break;
+
+                JsonNode root = mapper.readTree(resp.body());
+                JsonNode chunk = root.path("chunk");
+                if (!chunk.isArray() || chunk.size() == 0)
+                    break;
+
+                for (JsonNode ev : chunk) {
+                    String eventId = ev.path("event_id").asText("");
+                    if (eventId.equals(lastReadEventId)) {
+                        foundLastRead = true;
+                        break;
+                    }
+                    if ("m.room.message".equals(ev.path("type").asText(null))) {
+                        String body = ev.path("content").path("body").asText(null);
+                        String sender = ev.path("sender").asText(null);
+                        long originServerTs = ev.path("origin_server_ts").asLong(0);
+
+                        if (body != null && sender != null) {
+                            String timestamp = Instant.ofEpochMilli(originServerTs)
+                                    .atZone(zoneId)
+                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                            logs.add("[" + timestamp + "] <" + sender + "> " + body);
+                            firstEventId = eventId;
+                        }
+                    }
+                }
+
+                if (foundLastRead || logs.size() > 500)
+                    break; // Safety limit
+                token = root.path("end").asText(null);
+            }
+
+            Collections.reverse(logs);
+            return new ChatLogsResult(logs, firstEventId);
+        } catch (Exception e) {
+            System.err.println("Error fetching unread messages: " + e.getMessage());
+            return new ChatLogsResult(logs, null);
+        }
+    }
+
+    /**
+     * Get read receipt for a user in a room
+     */
+    public EventInfo getReadReceipt(String roomId, String userId) {
+        try {
+            Map<Long, List<String>> receiptsWithTimestamps = new TreeMap<>(Collections.reverseOrder());
+
+            // Try to get the read receipt from the sync response first
+            String syncUrl = homeserverUrl + "/_matrix/client/v3/sync?timeout=0";
+            HttpRequest syncReq = HttpRequest.newBuilder()
+                    .uri(URI.create(syncUrl))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> syncResp = httpClient.send(syncReq, HttpResponse.BodyHandlers.ofString());
+
+            if (syncResp.statusCode() == 200) {
+                JsonNode root = mapper.readTree(syncResp.body());
+                JsonNode roomNode = root.path("rooms").path("join").path(roomId);
+                if (!roomNode.isMissingNode()) {
+                    JsonNode ephemeral = roomNode.path("ephemeral").path("events");
+                    if (ephemeral.isArray()) {
+                        for (JsonNode ev : ephemeral) {
+                            if ("m.receipt".equals(ev.path("type").asText(null))) {
+                                JsonNode content = ev.path("content");
+                                Iterator<String> eventIds = content.fieldNames();
+                                while (eventIds.hasNext()) {
+                                    String eventId = eventIds.next();
+                                    JsonNode receiptData = content.path(eventId).path("m.read");
+                                    if (receiptData.has(userId)) {
+                                        JsonNode timestampNode = receiptData.path(userId);
+                                        long timestamp = 0;
+
+                                        if (timestampNode.isObject() && timestampNode.has("ts")) {
+                                            timestamp = timestampNode.path("ts").asLong(0);
+                                        } else {
+                                            timestamp = timestampNode.asLong(0);
+                                        }
+
+                                        if (timestamp == 0) {
+                                            timestamp = eventId.hashCode();
+                                        }
+
+                                        receiptsWithTimestamps
+                                                .computeIfAbsent(timestamp, k -> new ArrayList<>())
+                                                .add(eventId);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also check room account data for the most recent read receipt
+            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+            String encodedUser = URLEncoder.encode(userId, StandardCharsets.UTF_8);
+            String accountDataUrl = homeserverUrl + "/_matrix/client/v3/user/" + encodedUser + "/rooms/" + encodedRoom
+                    + "/account_data/m.read";
+            HttpRequest accountReq = HttpRequest.newBuilder()
+                    .uri(URI.create(accountDataUrl))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> accountResp = httpClient.send(accountReq, HttpResponse.BodyHandlers.ofString());
+
+            if (accountResp.statusCode() == 200) {
+                JsonNode accountData = mapper.readTree(accountResp.body());
+                String lastRead = accountData.path("event_id").asText(null);
+                if (lastRead != null && !lastRead.isEmpty()) {
+                    long accountDataTimestamp = Long.MAX_VALUE - 1;
+                    receiptsWithTimestamps.computeIfAbsent(accountDataTimestamp, k -> new ArrayList<>())
+                            .add(lastRead);
+                }
+            }
+
+            if (!receiptsWithTimestamps.isEmpty()) {
+                Map.Entry<Long, List<String>> firstEntry = receiptsWithTimestamps.entrySet().iterator()
+                        .next();
+                long ts = firstEntry.getKey();
+                if (ts == Long.MAX_VALUE - 1 || ts < 1000000000000L)
+                    ts = 0; // Ignore fake hash-based or sentinel timestamps
+                return new EventInfo(firstEntry.getValue().get(firstEntry.getValue().size() - 1),
+                        ts);
+            }
+
+            return null;
+
+        } catch (Exception e) {
+            System.out.println("Error getting read receipt: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Check if a message is the latest in the room
+     */
+    public boolean isLatestMessage(String roomId, String eventId) {
+        try {
+            String syncUrl = homeserverUrl + "/_matrix/client/v3/sync?timeout=0";
+            HttpRequest syncReq = HttpRequest.newBuilder()
+                    .uri(URI.create(syncUrl))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> syncResp = httpClient.send(syncReq, HttpResponse.BodyHandlers.ofString());
+
+            if (syncResp.statusCode() != 200) {
+                return false;
+            }
+
+            JsonNode root = mapper.readTree(syncResp.body());
+            JsonNode roomNode = root.path("rooms").path("join").path(roomId);
+            if (roomNode.isMissingNode()) {
+                return false;
+            }
+
+            JsonNode timeline = roomNode.path("timeline").path("events");
+            if (timeline.isArray() && timeline.size() > 0) {
+                for (int i = timeline.size() - 1; i >= 0; i--) {
+                    JsonNode ev = timeline.get(i);
+                    if ("m.room.message".equals(ev.path("type").asText(null))) {
+                        String latestEventId = ev.path("event_id").asText(null);
+                        return eventId.equals(latestEventId);
+                    }
+                }
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            System.out.println("Error checking if message is latest: " + e.getMessage());
+            return false;
         }
     }
 

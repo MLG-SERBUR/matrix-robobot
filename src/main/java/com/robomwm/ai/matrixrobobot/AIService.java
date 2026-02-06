@@ -113,6 +113,78 @@ public class AIService {
         }
     }
 
+    public void queryArliAIUnread(String responseRoomId, String exportRoomId, String sender, String timezoneAbbr,
+            String question) {
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        try {
+            ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
+            RoomHistoryManager.EventInfo lastRead = historyManager.getReadReceipt(exportRoomId, sender);
+
+            if (lastRead == null) {
+                matrixClient.sendMarkdown(responseRoomId, "No read receipt found for you in " + exportRoomId + ".");
+                return;
+            }
+
+            matrixClient.sendMarkdown(responseRoomId, "Fetching unread messages for you in " + exportRoomId + "...");
+
+            RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
+                    lastRead.eventId,
+                    zoneId);
+
+            if (result.logs.isEmpty()) {
+                matrixClient.sendMarkdown(responseRoomId, "No unread messages found for you in " + exportRoomId + ".");
+                return;
+            }
+
+            matrixClient.sendMarkdown(responseRoomId, "Summarizing " + result.logs.size() + " unread messages"
+                    + (question != null ? " with question: " + question : "") + "...");
+
+            String prompt = buildPrompt(question, result.logs);
+
+            String arliApiUrl = "https://api.arliai.com";
+
+            if (arliApiKey == null || arliApiKey.isEmpty()) {
+                matrixClient.sendMarkdown(responseRoomId, "ARLI_API_KEY is not configured.");
+                return;
+            }
+
+            List<Map<String, String>> messages = buildMessages(prompt);
+
+            Map<String, Object> arliPayload = Map.of(
+                    "model", "Gemma-3-27B-it",
+                    "messages", messages,
+                    "stream", false);
+            String jsonPayload = mapper.writeValueAsString(arliPayload);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(arliApiUrl + "/v1/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + arliApiKey)
+                    .timeout(Duration.ofSeconds(120))
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                JsonNode arliResponse = mapper.readTree(response.body());
+                String arliAnswer = arliResponse.path("choices").get(0).path("message").path("content")
+                        .asText("No response from Arli AI.");
+
+                arliAnswer = appendMessageLink(arliAnswer, exportRoomId, result.firstEventId);
+
+                matrixClient.sendMarkdown(responseRoomId, arliAnswer);
+            } else {
+                matrixClient.sendMarkdown(responseRoomId, "Failed to get response from Arli AI. Status: "
+                        + response.statusCode() + ", Body: " + response.body());
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            matrixClient.sendMarkdown(responseRoomId, "Error summarizing unread messages: " + e.getMessage());
+        }
+    }
+
     public void queryCerebras(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
             long startTimestamp, String timezoneAbbr) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);

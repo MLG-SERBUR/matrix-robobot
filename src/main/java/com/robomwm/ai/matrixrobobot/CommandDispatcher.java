@@ -48,6 +48,9 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!export\\d+h")) {
             handleExport(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
+        } else if (trimmed.matches("!lastsummary\\s+[A-Z]{3}(?:\\s+(.*))?")) {
+            handleLastSummary(trimmed, roomId, sender, responseRoomId, exportRoomId);
+            return true;
         } else if (trimmed.matches("!arliai\\s+[A-Z]{3}\\s+\\d+h(?:\\s+(.*))?")) {
             handleArliAI(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
@@ -121,6 +124,18 @@ public class CommandDispatcher {
                 }
             }
         }).start();
+    }
+
+    private void handleLastSummary(String trimmed, String roomId, String sender, String responseRoomId,
+            String exportRoomId) {
+        Matcher matcher = Pattern.compile("!lastsummary\\s+([A-Z]{3})(?:\\s+(.*))?").matcher(trimmed);
+        if (matcher.matches()) {
+            String timezoneAbbr = matcher.group(1);
+            String question = matcher.group(2) != null ? matcher.group(2).trim() : null;
+            System.out.println("Received lastsummary command in " + roomId + " from " + sender);
+            new Thread(() -> aiService.queryArliAIUnread(responseRoomId, exportRoomId, sender, timezoneAbbr, question))
+                    .start();
+        }
     }
 
     private void handleArliAI(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
@@ -293,6 +308,7 @@ public class CommandDispatcher {
                 "**!ping** - Measure and report ping latency\n\n" +
                 "**!testcommand** - Test if the bot is responding\n\n" +
                 "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
+                "**!lastsummary <TZ> [question]** - Summarize all unread messages\n\n" +
                 "**!arliai, !cerebras** - Query AI with chat logs\n\n" +
                 "**!semantic** - AI-free semantic search using local embeddings\n\n" +
                 "**!grep, !grep-slow, !search** - Pattern and term-based searches\n\n" +
