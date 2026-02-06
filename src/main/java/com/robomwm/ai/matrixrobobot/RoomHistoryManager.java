@@ -72,7 +72,7 @@ public class RoomHistoryManager {
      */
     public List<String> fetchRoomHistory(String roomId, int hours, String fromToken) {
         ChatLogsResult result = fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1,
-                ZoneId.of("America/Los_Angeles"));
+                ZoneId.of("America/Los_Angeles"), -1);
         return result.logs;
     }
 
@@ -158,12 +158,12 @@ public class RoomHistoryManager {
      * Fetch room history with first event ID tracking
      */
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
-            long endTime, ZoneId zoneId) {
+            long endTime, ZoneId zoneId, int maxMessages) {
         List<String> lines = new ArrayList<>();
         String firstEventId = null;
 
         long startTime = (startTimestamp > 0) ? startTimestamp
-                : System.currentTimeMillis() - (long) hours * 3600L * 1000L;
+                : (hours > 0 ? System.currentTimeMillis() - (long) hours * 3600L * 1000L : -1);
         long calculatedEndTime = (endTime > 0) ? endTime : System.currentTimeMillis();
 
         String token = getPaginationToken(roomId, fromToken);
@@ -198,7 +198,7 @@ public class RoomHistoryManager {
                     if (originServerTs > calculatedEndTime) {
                         continue;
                     }
-                    if (originServerTs < startTime) {
+                    if (startTime > 0 && originServerTs < startTime) {
                         reachedStart = true;
                         break;
                     }
@@ -213,6 +213,11 @@ public class RoomHistoryManager {
                         lines.add("[" + timestamp + "] <" + sender + "> " + body);
 
                         firstEventId = eventId;
+
+                        if (maxMessages > 0 && lines.size() >= maxMessages) {
+                            reachedStart = true;
+                            break;
+                        }
                     }
                 }
 

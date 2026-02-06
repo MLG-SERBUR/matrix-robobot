@@ -41,7 +41,7 @@ public class AIService {
     }
 
     public void queryArliAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
-            long startTimestamp, ZoneId zoneId) {
+            long startTimestamp, ZoneId zoneId, int maxMessages) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             String timeInfo = "";
@@ -49,9 +49,14 @@ public class AIService {
                 String dateStr = java.time.Instant.ofEpochMilli(startTimestamp)
                         .atZone(zoneId)
                         .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                timeInfo = "starting at " + dateStr + " (next " + hours + "h)";
+                timeInfo = "starting at " + dateStr + " (next "
+                        + (maxMessages > 0 ? maxMessages + " messages" : hours + "h") + ")";
             } else {
-                timeInfo = "last " + (hours > 0 ? hours + "h" : "all history");
+                if (maxMessages > 0) {
+                    timeInfo = "last " + maxMessages + " messages";
+                } else {
+                    timeInfo = "last " + (hours > 0 ? hours + "h" : "all history");
+                }
             }
             matrixClient.sendMarkdown(responseRoomId, "Querying Arli AI with chat logs from " + exportRoomId + " ("
                     + timeInfo + (question != null ? " and question: " + question : "") + ")...");
@@ -59,7 +64,7 @@ public class AIService {
             long endTime = startTimestamp > 0 ? startTimestamp + (long) hours * 3600L * 1000L : -1;
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(exportRoomId, hours,
-                    fromToken, startTimestamp, endTime, zoneId);
+                    fromToken, startTimestamp, endTime, zoneId, maxMessages);
             if (result.logs.isEmpty()) {
                 matrixClient.sendMarkdown(responseRoomId,
                         "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
@@ -184,7 +189,7 @@ public class AIService {
     }
 
     public void queryCerebras(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
-            long startTimestamp, ZoneId zoneId) {
+            long startTimestamp, ZoneId zoneId, int maxMessages) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             String timeInfo = "";
@@ -192,9 +197,14 @@ public class AIService {
                 String dateStr = java.time.Instant.ofEpochMilli(startTimestamp)
                         .atZone(zoneId)
                         .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                timeInfo = "starting at " + dateStr + " (next " + hours + "h)";
+                timeInfo = "starting at " + dateStr + " (next "
+                        + (maxMessages > 0 ? maxMessages + " messages" : hours + "h") + ")";
             } else {
-                timeInfo = "last " + (hours > 0 ? hours + "h" : "all history");
+                if (maxMessages > 0) {
+                    timeInfo = "last " + maxMessages + " messages";
+                } else {
+                    timeInfo = "last " + (hours > 0 ? hours + "h" : "all history");
+                }
             }
             matrixClient.sendMarkdown(responseRoomId, "Querying Cerebras AI with chat logs from " + exportRoomId + " ("
                     + timeInfo + (question != null ? " and question: " + question : "") + ")...");
@@ -202,7 +212,7 @@ public class AIService {
             long endTime = startTimestamp > 0 ? startTimestamp + (long) hours * 3600L * 1000L : -1;
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(exportRoomId, hours,
-                    fromToken, startTimestamp, endTime, zoneId);
+                    fromToken, startTimestamp, endTime, zoneId, maxMessages);
             if (result.logs.isEmpty()) {
                 matrixClient.sendMarkdown(responseRoomId,
                         "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");

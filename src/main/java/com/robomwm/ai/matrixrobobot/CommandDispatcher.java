@@ -56,16 +56,16 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!lastsummary(?:\\s+(.*))?")) {
             handleLastSummary(trimmed, roomId, sender, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!arliai\\s+(\\d+)h(?:\\s+(.*))?")) {
+        } else if (trimmed.matches("!arliai\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
             handleArliAI(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)h(?:\\s+(.*))?")) {
+        } else if (trimmed.matches("!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
             handleArliAITimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!cerebras\\s+(\\d+)h(?:\\s+(.*))?")) {
+        } else if (trimmed.matches("!cerebras\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
             handleCerebras(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)h(?:\\s+(.*))?")) {
+        } else if (trimmed.matches("!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
             handleCerebrasTimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!semantic\\s+(\\d+)h\\s+(.+)")) {
@@ -147,10 +147,13 @@ public class CommandDispatcher {
 
     private void handleArliAI(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
-        Matcher matcher = Pattern.compile("!arliai\\s+(\\d+)h(?:\\s+(.*))?").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!arliai\\s+(\\d+)(h)?(?:\\s+(.*))?").matcher(trimmed);
         if (matcher.matches()) {
-            int hours = Integer.parseInt(matcher.group(1));
-            String question = matcher.group(2) != null ? matcher.group(2).trim() : null;
+            int value = Integer.parseInt(matcher.group(1));
+            boolean isDuration = matcher.group(2) != null;
+            int hours = isDuration ? value : -1;
+            int maxMessages = isDuration ? -1 : value;
+            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
 
             ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
@@ -158,19 +161,22 @@ public class CommandDispatcher {
 
             System.out.println("Received arliai command in " + roomId + " from " + sender);
             new Thread(() -> aiService.queryArliAI(responseRoomId, exportRoomId, hours, prevBatch, question, -1,
-                    zoneId)).start();
+                    zoneId, maxMessages)).start();
         }
     }
 
     private void handleArliAITimestamp(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
         Matcher matcher = Pattern
-                .compile("!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)h(?:\\s+(.*))?")
+                .compile("!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")
                 .matcher(trimmed);
         if (matcher.matches()) {
             String startDateStr = matcher.group(1);
-            int durationHours = Integer.parseInt(matcher.group(2));
-            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
+            int value = Integer.parseInt(matcher.group(2));
+            boolean isDuration = matcher.group(3) != null;
+            int durationHours = isDuration ? value : -1;
+            int maxMessages = isDuration ? -1 : value;
+            String question = matcher.group(4) != null ? matcher.group(4).trim() : null;
 
             ZoneId userZone = resolveZoneId(sender, responseRoomId);
             if (userZone == null)
@@ -185,16 +191,19 @@ public class CommandDispatcher {
 
             System.out.println("Received arli-ts command in " + roomId + " from " + sender);
             new Thread(() -> aiService.queryArliAI(responseRoomId, exportRoomId, durationHours, prevBatch, question,
-                    startTimestamp, userZone)).start();
+                    startTimestamp, userZone, maxMessages)).start();
         }
     }
 
     private void handleCerebras(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
-        Matcher matcher = Pattern.compile("!cerebras\\s+(\\d+)h(?:\\s+(.*))?").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!cerebras\\s+(\\d+)(h)?(?:\\s+(.*))?").matcher(trimmed);
         if (matcher.matches()) {
-            int hours = Integer.parseInt(matcher.group(1));
-            String question = matcher.group(2) != null ? matcher.group(2).trim() : null;
+            int value = Integer.parseInt(matcher.group(1));
+            boolean isDuration = matcher.group(2) != null;
+            int hours = isDuration ? value : -1;
+            int maxMessages = isDuration ? -1 : value;
+            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
 
             ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
@@ -202,19 +211,22 @@ public class CommandDispatcher {
 
             System.out.println("Received cerebras command in " + roomId + " from " + sender);
             new Thread(() -> aiService.queryCerebras(responseRoomId, exportRoomId, hours, prevBatch, question, -1,
-                    zoneId)).start();
+                    zoneId, maxMessages)).start();
         }
     }
 
     private void handleCerebrasTimestamp(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
         Matcher matcher = Pattern
-                .compile("!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)h(?:\\s+(.*))?")
+                .compile("!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")
                 .matcher(trimmed);
         if (matcher.matches()) {
             String startDateStr = matcher.group(1);
-            int durationHours = Integer.parseInt(matcher.group(2));
-            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
+            int value = Integer.parseInt(matcher.group(2));
+            boolean isDuration = matcher.group(3) != null;
+            int durationHours = isDuration ? value : -1;
+            int maxMessages = isDuration ? -1 : value;
+            String question = matcher.group(4) != null ? matcher.group(4).trim() : null;
 
             ZoneId userZone = resolveZoneId(sender, responseRoomId);
             if (userZone == null)
@@ -229,7 +241,7 @@ public class CommandDispatcher {
 
             System.out.println("Received cerebras-ts command in " + roomId + " from " + sender);
             new Thread(() -> aiService.queryCerebras(responseRoomId, exportRoomId, durationHours, prevBatch, question,
-                    startTimestamp, userZone)).start();
+                    startTimestamp, userZone, maxMessages)).start();
         }
     }
 
@@ -385,7 +397,8 @@ public class CommandDispatcher {
                 +
                 "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
-                "**!arliai, !cerebras <hours>h [question]** - Query AI with chat logs\n\n" +
+                "**!arliai, !cerebras <count or hours> [question]** - Query AI with chat logs (e.g. `!arliai 50` or `!arliai 24h`)破\n"
+                +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!grep, !grep-slow, !search <hours>h <pattern>** - Pattern and term-based searches\n\n" +
                 "**!abort** - Abort currently running operations";
