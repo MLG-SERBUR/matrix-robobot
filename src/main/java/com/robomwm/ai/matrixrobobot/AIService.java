@@ -37,7 +37,7 @@ public class AIService {
         public static final String SYSTEM_OVERVIEW = "You provide high level overview of a chat log.";
         public static final String QUESTION_PREFIX = "Given the following chat logs, answer the question: '";
         public static final String QUESTION_SUFFIX = "'\n\n";
-        public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end:\n\n";
+        public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end; no complete sentences required, this should be brief:\n\n";
         public static final String TLDR_PREFIX = "Provide a very concise summary of the following chat logs that can be read in 15 seconds or less. Make use of bullet points of key topics with timestamp; be extremely brief, no need for complete sentences. Then directly include the best chat message verbatim; have bias towards one that is informative towards a discovered solution or an interesting resource:\n\n";
     }
 
