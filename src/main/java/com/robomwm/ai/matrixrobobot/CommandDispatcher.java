@@ -53,35 +53,31 @@ public class CommandDispatcher {
         } else if (trimmed.startsWith("!timezone")) {
             handleTimezone(trimmed, responseRoomId, sender);
             return true;
-        } else if (trimmed.matches("!lastsummary(?:\\s+([A-Z]{3}))?(?:\\s+(.*))?")) {
+        } else if (trimmed.matches("!lastsummary(?:\\s+(.*))?")) {
             handleLastSummary(trimmed, roomId, sender, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!arliai(?:\\s+([A-Z]{3}))?\\s+(\\d+)h(?:\\s+(.*))?")) {
+        } else if (trimmed.matches("!arliai\\s+(\\d+)h(?:\\s+(.*))?")) {
             handleArliAI(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed
-                .matches(
-                        "!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})(?:\\s+([A-Z]{3}))?\\s+(\\d+)h(?:\\s+(.*))?")) {
+        } else if (trimmed.matches("!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)h(?:\\s+(.*))?")) {
             handleArliAITimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!cerebras(?:\\s+([A-Z]{3}))?\\s+(\\d+)h(?:\\s+(.*))?")) {
+        } else if (trimmed.matches("!cerebras\\s+(\\d+)h(?:\\s+(.*))?")) {
             handleCerebras(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed
-                .matches(
-                        "!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})(?:\\s+([A-Z]{3}))?\\s+(\\d+)h(?:\\s+(.*))?")) {
+        } else if (trimmed.matches("!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)h(?:\\s+(.*))?")) {
             handleCerebrasTimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!semantic(?:\\s+([A-Z]{3}))?\\s+(\\d+)h\\s+(.+)")) {
+        } else if (trimmed.matches("!semantic\\s+(\\d+)h\\s+(.+)")) {
             handleSemanticSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!grep(?:\\s+([A-Z]{3}))?\\s+(\\d+)([dh])\\s+(.+)")) {
+        } else if (trimmed.matches("!grep\\s+(\\d+)([dh])\\s+(.+)")) {
             handleGrep(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!grep-slow(?:\\s+([A-Z]{3}))?\\s+(\\d+)([dh])\\s+(.+)")) {
+        } else if (trimmed.matches("!grep-slow\\s+(\\d+)([dh])\\s+(.+)")) {
             handleGrepSlow(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!search(?:\\s+([A-Z]{3}))?\\s+(\\d+)([dh])\\s+(.+)")) {
+        } else if (trimmed.matches("!search\\s+(\\d+)([dh])\\s+(.+)")) {
             handleSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if ("!abort".equals(trimmed)) {
@@ -135,12 +131,11 @@ public class CommandDispatcher {
 
     private void handleLastSummary(String trimmed, String roomId, String sender, String responseRoomId,
             String exportRoomId) {
-        Matcher matcher = Pattern.compile("!lastsummary(?:\\s+([A-Z]{3}))?(?:\\s+(.*))?").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!lastsummary(?:\\s+(.*))?").matcher(trimmed);
         if (matcher.matches()) {
-            String timezoneAbbr = matcher.group(1);
-            String question = matcher.group(2) != null ? matcher.group(2).trim() : null;
+            String question = matcher.group(1) != null ? matcher.group(1).trim() : null;
 
-            ZoneId zoneId = resolveZoneId(sender, timezoneAbbr, responseRoomId);
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
                 return;
 
@@ -152,13 +147,12 @@ public class CommandDispatcher {
 
     private void handleArliAI(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
-        Matcher matcher = Pattern.compile("!arliai(?:\\s+([A-Z]{3}))?\\s+(\\d+)h(?:\\s+(.*))?").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!arliai\\s+(\\d+)h(?:\\s+(.*))?").matcher(trimmed);
         if (matcher.matches()) {
-            String timezoneAbbr = matcher.group(1);
-            int hours = Integer.parseInt(matcher.group(2));
-            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
+            int hours = Integer.parseInt(matcher.group(1));
+            String question = matcher.group(2) != null ? matcher.group(2).trim() : null;
 
-            ZoneId zoneId = resolveZoneId(sender, timezoneAbbr, responseRoomId);
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
                 return;
 
@@ -171,16 +165,14 @@ public class CommandDispatcher {
     private void handleArliAITimestamp(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
         Matcher matcher = Pattern
-                .compile(
-                        "!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})(?:\\s+([A-Z]{3}))?\\s+(\\d+)h(?:\\s+(.*))?")
+                .compile("!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)h(?:\\s+(.*))?")
                 .matcher(trimmed);
         if (matcher.matches()) {
             String startDateStr = matcher.group(1);
-            String timezoneAbbr = matcher.group(2);
-            int durationHours = Integer.parseInt(matcher.group(3));
-            String question = matcher.group(4) != null ? matcher.group(4).trim() : null;
+            int durationHours = Integer.parseInt(matcher.group(2));
+            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
 
-            ZoneId userZone = resolveZoneId(sender, timezoneAbbr, responseRoomId);
+            ZoneId userZone = resolveZoneId(sender, responseRoomId);
             if (userZone == null)
                 return;
 
@@ -199,13 +191,12 @@ public class CommandDispatcher {
 
     private void handleCerebras(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
-        Matcher matcher = Pattern.compile("!cerebras(?:\\s+([A-Z]{3}))?\\s+(\\d+)h(?:\\s+(.*))?").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!cerebras\\s+(\\d+)h(?:\\s+(.*))?").matcher(trimmed);
         if (matcher.matches()) {
-            String timezoneAbbr = matcher.group(1);
-            int hours = Integer.parseInt(matcher.group(2));
-            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
+            int hours = Integer.parseInt(matcher.group(1));
+            String question = matcher.group(2) != null ? matcher.group(2).trim() : null;
 
-            ZoneId zoneId = resolveZoneId(sender, timezoneAbbr, responseRoomId);
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
                 return;
 
@@ -218,16 +209,14 @@ public class CommandDispatcher {
     private void handleCerebrasTimestamp(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
         Matcher matcher = Pattern
-                .compile(
-                        "!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})(?:\\s+([A-Z]{3}))?\\s+(\\d+)h(?:\\s+(.*))?")
+                .compile("!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)h(?:\\s+(.*))?")
                 .matcher(trimmed);
         if (matcher.matches()) {
             String startDateStr = matcher.group(1);
-            String timezoneAbbr = matcher.group(2);
-            int durationHours = Integer.parseInt(matcher.group(3));
-            String question = matcher.group(4) != null ? matcher.group(4).trim() : null;
+            int durationHours = Integer.parseInt(matcher.group(2));
+            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
 
-            ZoneId userZone = resolveZoneId(sender, timezoneAbbr, responseRoomId);
+            ZoneId userZone = resolveZoneId(sender, responseRoomId);
             if (userZone == null)
                 return;
 
@@ -246,13 +235,12 @@ public class CommandDispatcher {
 
     private void handleSemanticSearch(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
-        Matcher matcher = Pattern.compile("!semantic(?:\\s+([A-Z]{3}))?\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!semantic\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
         if (matcher.matches()) {
-            String timezoneAbbr = matcher.group(1);
-            int hours = Integer.parseInt(matcher.group(2));
-            String query = matcher.group(3).trim();
+            int hours = Integer.parseInt(matcher.group(1));
+            String query = matcher.group(2).trim();
 
-            ZoneId zoneId = resolveZoneId(sender, timezoneAbbr, responseRoomId);
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
                 return;
 
@@ -264,14 +252,13 @@ public class CommandDispatcher {
 
     private void handleGrep(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
-        Matcher matcher = Pattern.compile("!grep(?:\\s+([A-Z]{3}))?\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!grep\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
         if (matcher.matches()) {
-            String timezoneAbbr = matcher.group(1);
-            int duration = Integer.parseInt(matcher.group(2));
-            String unit = matcher.group(3);
-            String pattern = matcher.group(4).trim();
+            int duration = Integer.parseInt(matcher.group(1));
+            String unit = matcher.group(2);
+            String pattern = matcher.group(3).trim();
 
-            ZoneId zoneId = resolveZoneId(sender, timezoneAbbr, responseRoomId);
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
                 return;
 
@@ -287,14 +274,13 @@ public class CommandDispatcher {
 
     private void handleGrepSlow(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
-        Matcher matcher = Pattern.compile("!grep-slow(?:\\s+([A-Z]{3}))?\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!grep-slow\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
         if (matcher.matches()) {
-            String timezoneAbbr = matcher.group(1);
-            int duration = Integer.parseInt(matcher.group(2));
-            String unit = matcher.group(3);
-            String pattern = matcher.group(4).trim();
+            int duration = Integer.parseInt(matcher.group(1));
+            String unit = matcher.group(2);
+            String pattern = matcher.group(3).trim();
 
-            ZoneId zoneId = resolveZoneId(sender, timezoneAbbr, responseRoomId);
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
                 return;
 
@@ -310,14 +296,13 @@ public class CommandDispatcher {
 
     private void handleSearch(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
-        Matcher matcher = Pattern.compile("!search(?:\\s+([A-Z]{3}))?\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!search\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
         if (matcher.matches()) {
-            String timezoneAbbr = matcher.group(1);
-            int duration = Integer.parseInt(matcher.group(2));
-            String unit = matcher.group(3);
-            String query = matcher.group(4).trim();
+            int duration = Integer.parseInt(matcher.group(1));
+            String unit = matcher.group(2);
+            String query = matcher.group(3).trim();
 
-            ZoneId zoneId = resolveZoneId(sender, timezoneAbbr, responseRoomId);
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
                 return;
 
@@ -348,15 +333,27 @@ public class CommandDispatcher {
             ZoneId current = timezoneService.getZoneIdForUser(sender);
             matrixClient.sendMarkdown(responseRoomId, "Your current timezone is: "
                     + (current != null ? current.getId() : "Not set") +
-                    "\nUse `!timezone <Abbreviation or ZoneId>` to set it (e.g., `!timezone PST` or `!timezone America/Los_Angeles`).");
+                    "\nUse `!timezone <Abbreviation or ZoneId>` (e.g., `!timezone PST`) " +
+                    "or `!timezone <Your Local Time>` (e.g., `!timezone 14:30`) to set it.");
             return;
         }
 
-        String tz = parts[1];
-        ZoneId zoneId = timezoneService.getZoneIdFromAbbr(tz);
+        String input = parts[1];
+        ZoneId zoneId = null;
+
+        // Try parsing as time first
+        if (input.contains(":") || input.matches("\\d+")) {
+            zoneId = timezoneService.guessZoneIdFromTime(input);
+        }
+
+        // If not a time, try as abbreviation or ZoneId
         if (zoneId == null) {
-            matrixClient.sendMarkdown(responseRoomId, "Invalid timezone: " + tz
-                    + ". Please use a common abbreviation like PST, EST, UTC or a full ZoneId like America/Los_Angeles.");
+            zoneId = timezoneService.getZoneIdFromAbbr(input);
+        }
+
+        if (zoneId == null) {
+            matrixClient.sendMarkdown(responseRoomId, "Invalid timezone or time format: " + input
+                    + ". Please use an abbreviation like PST, a full ZoneId like America/Los_Angeles, or your current local time like 14:30.");
             return;
         }
 
@@ -364,19 +361,13 @@ public class CommandDispatcher {
         matrixClient.sendMarkdown(responseRoomId, "Your timezone has been set to: " + zoneId.getId());
     }
 
-    private ZoneId resolveZoneId(String sender, String timezoneAbbr, String responseRoomId) {
-        if (timezoneAbbr != null) {
-            ZoneId zoneId = timezoneService.getZoneIdFromAbbr(timezoneAbbr);
-            if (zoneId != null)
-                return zoneId;
-        }
-
+    private ZoneId resolveZoneId(String sender, String responseRoomId) {
         ZoneId saved = timezoneService.getZoneIdForUser(sender);
         if (saved != null)
             return saved;
 
-        matrixClient.sendMarkdown(responseRoomId, "Timezone not specified and not set for your account. " +
-                "Please specify it (e.g., `!arliai PST 24h`) or set it permanently with `!timezone <TZ>`.");
+        matrixClient.sendMarkdown(responseRoomId, "Timezone not set for your account. " +
+                "Please set it permanently with `!timezone <TZ>` or by providing your current time: `!timezone 14:30`.");
         return null;
     }
 
@@ -387,13 +378,13 @@ public class CommandDispatcher {
                 "**Additional Commands:**\n\n" +
                 "**!ping** - Measure and report ping latency\n\n" +
                 "**!testcommand** - Test if the bot is responding\n\n" +
-                "**!timezone <TZ>** - Set your preferred timezone (e.g. `!timezone PST`)\n\n" +
-                "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
-                "**!lastsummary [TZ] [question]** - Summarize all unread messages. TZ is optional if set via !timezone.\n\n"
+                "**!timezone <TZ or Time>** - Set your preferred timezone (e.g. `!timezone PST` or `!timezone 14:30`)\n\n"
                 +
-                "**!arliai, !cerebras [TZ] <hours>h [question]** - Query AI with chat logs\n\n" +
-                "**!semantic [TZ] <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
-                "**!grep, !grep-slow, !search [TZ] <hours>h <pattern>** - Pattern and term-based searches\n\n" +
+                "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
+                "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
+                "**!arliai, !cerebras <hours>h [question]** - Query AI with chat logs\n\n" +
+                "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
+                "**!grep, !grep-slow, !search <hours>h <pattern>** - Pattern and term-based searches\n\n" +
                 "**!abort** - Abort currently running operations";
         matrixClient.sendMarkdown(responseRoomId, helpText);
     }

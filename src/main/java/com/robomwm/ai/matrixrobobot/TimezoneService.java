@@ -10,7 +10,6 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -102,16 +101,33 @@ public class TimezoneService {
      * Supported formats: "yyyy-MM-dd HH:mm", "HH:mm" (assumes today)
      */
     public ZoneId guessZoneIdFromTime(String localTimeStr) {
-        LocalDateTime localTime;
-        try {
-            if (localTimeStr.contains("-")) {
-                localTime = LocalDateTime.parse(localTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
-            } else {
-                localTime = LocalDateTime.parse(
-                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd ")) + localTimeStr,
-                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+        LocalDateTime localTime = null;
+        DateTimeFormatter[] formatters = {
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),
+                DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"),
+                DateTimeFormatter.ofPattern("HH:mm"),
+                DateTimeFormatter.ofPattern("H:mm")
+        };
+
+        for (DateTimeFormatter formatter : formatters) {
+            try {
+                if (formatter.toString().contains("HH:mm") || formatter.toString().contains("H:mm")) {
+                    if (localTimeStr.length() <= 5) {
+                        localTime = LocalDateTime.parse(
+                                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd ")) + localTimeStr,
+                                DateTimeFormatter.ofPattern("yyyy-MM-dd " + (localTimeStr.contains(":")
+                                        ? (localTimeStr.indexOf(":") == 1 ? "H:mm" : "HH:mm")
+                                        : "HH:mm")));
+                        break;
+                    }
+                }
+                localTime = LocalDateTime.parse(localTimeStr, formatter);
+                break;
+            } catch (Exception ignore) {
             }
-        } catch (DateTimeParseException e) {
+        }
+
+        if (localTime == null) {
             return null;
         }
 
