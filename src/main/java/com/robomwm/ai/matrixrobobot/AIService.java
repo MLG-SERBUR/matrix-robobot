@@ -33,15 +33,16 @@ public class AIService {
         this.historyManager = new RoomHistoryManager(client, mapper, homeserver, accessToken);
     }
 
-    private static class Prompts {
+    public static class Prompts {
         public static final String SYSTEM_OVERVIEW = "You provide high level overview of a chat log.";
         public static final String QUESTION_PREFIX = "Given the following chat logs, answer the question: '";
         public static final String QUESTION_SUFFIX = "'\n\n";
         public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end:\n\n";
+        public static final String TLDR_PREFIX = "Provide a very concise summary of the following chat logs that can be read in 15 seconds or less. Make use of bullet points for key topics with timestamp and a final one-sentence takeaway. Be extremely brief:\n\n";
     }
 
     public void queryArliAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
-            long startTimestamp, ZoneId zoneId, int maxMessages) {
+            long startTimestamp, ZoneId zoneId, int maxMessages, String promptPrefix) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             String timeInfo = "";
@@ -71,7 +72,7 @@ public class AIService {
                 return;
             }
 
-            String prompt = buildPrompt(question, result.logs);
+            String prompt = buildPrompt(question, result.logs, promptPrefix);
 
             String arliApiUrl = "https://api.arliai.com";
 
@@ -118,7 +119,7 @@ public class AIService {
     }
 
     public void queryArliAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
-            String question) {
+            String question, String promptPrefix) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             RoomHistoryManager.EventInfo lastRead = historyManager.getReadReceipt(exportRoomId, sender);
@@ -142,7 +143,7 @@ public class AIService {
             matrixClient.sendMarkdown(responseRoomId, "Summarizing " + result.logs.size() + " unread messages"
                     + (question != null ? " with question: " + question : "") + "...");
 
-            String prompt = buildPrompt(question, result.logs);
+            String prompt = buildPrompt(question, result.logs, promptPrefix);
 
             String arliApiUrl = "https://api.arliai.com";
 
@@ -219,7 +220,7 @@ public class AIService {
                 return;
             }
 
-            String prompt = buildPrompt(question, result.logs);
+            String prompt = buildPrompt(question, result.logs, Prompts.OVERVIEW_PREFIX);
 
             String cerebrasApiUrl = "https://api.cerebras.ai";
 
@@ -265,12 +266,12 @@ public class AIService {
         }
     }
 
-    private String buildPrompt(String question, List<String> logs) {
+    private String buildPrompt(String question, List<String> logs, String promptPrefix) {
         String logsStr = String.join("\n", logs);
         if (question != null && !question.isEmpty()) {
             return Prompts.QUESTION_PREFIX + question + Prompts.QUESTION_SUFFIX + logsStr;
         } else {
-            return Prompts.OVERVIEW_PREFIX + logsStr;
+            return promptPrefix + logsStr;
         }
     }
 
