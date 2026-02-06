@@ -6,10 +6,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -98,16 +101,20 @@ public class TimezoneService {
 
     /**
      * Guesses ZoneId based on provided local time string.
-     * Supported formats: "yyyy-MM-dd HH:mm", "HH:mm" (assumes today)
+     * Supported formats: "HH:mm", "h:mma", "1pm", etc.
      */
     public ZoneId guessZoneIdFromTime(String localTimeStr) {
-        String input = localTimeStr.toLowerCase().replace(" ", "");
-        java.time.LocalTime time = null;
-        String[] patterns = { "H:mm", "HH:mm", "h:mma", "ha" };
+        String input = localTimeStr.toLowerCase().replace(" ", "").replace(".", "");
+        LocalTime time = null;
+        String[] patterns = { "H:mm", "HH:mm", "h:mma", "ha", "h:mm a", "h a" };
 
         for (String pattern : patterns) {
             try {
-                time = java.time.LocalTime.parse(input, DateTimeFormatter.ofPattern(pattern, java.util.Locale.US));
+                DateTimeFormatter dtf = new DateTimeFormatterBuilder()
+                        .parseCaseInsensitive()
+                        .appendPattern(pattern)
+                        .toFormatter(Locale.US);
+                time = LocalTime.parse(input, dtf);
                 break;
             } catch (Exception ignore) {
             }
@@ -123,11 +130,6 @@ public class TimezoneService {
         OffsetDateTime nowUtc = OffsetDateTime.now(ZoneOffset.UTC);
 
         // Calculate offset: localTime - nowUtc
-        // We assume the user is reporting their time "now".
-        // localTime is what they say it is. nowUtc is what it is in UTC.
-        // Duration duration = Duration.between(nowUtc.toLocalDateTime(), localTime);
-        // This is tricky because we don't know the exact second.
-
         long diffMinutes = java.time.Duration.between(nowUtc.toLocalDateTime(), localTime).toMinutes();
 
         // Round to nearest 15 minutes as offsets are usually in 15/30/60 min increments

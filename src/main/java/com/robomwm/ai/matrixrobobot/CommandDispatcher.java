@@ -334,7 +334,7 @@ public class CommandDispatcher {
             matrixClient.sendMarkdown(responseRoomId, "Your current timezone is: "
                     + (current != null ? current.getId() : "Not set") +
                     "\nUse `!timezone <Abbreviation or ZoneId>` (e.g., `!timezone PST`) " +
-                    "or `!timezone <Your Local Time>` (e.g., `!timezone 1:14am`) to set it.");
+                    "or `!timezone <Your Local Time>` (e.g., `!timezone 1:14am` or `!timezone 14:30`) to set it.");
             return;
         }
 
@@ -356,7 +356,7 @@ public class CommandDispatcher {
 
         if (zoneId == null) {
             matrixClient.sendMarkdown(responseRoomId, "Invalid timezone or time format: " + input
-                    + ". Please use an abbreviation like PST, a full ZoneId like America/Los_Angeles, or your current local time like 14:30.");
+                    + ". Please use an abbreviation like PST, a full ZoneId like America/Los_Angeles, or your current local time like 1:14am or 14:30.");
             return;
         }
 
@@ -370,7 +370,7 @@ public class CommandDispatcher {
             return saved;
 
         matrixClient.sendMarkdown(responseRoomId, "Timezone not set for your account. " +
-                "Please set it permanently with `!timezone <TZ>` or by providing your current time: `!timezone 14:30`.");
+                "Please set it permanently with `!timezone <TZ>` or by providing your current time: `!timezone 1:14am` or `!timezone 14:30`.");
         return null;
     }
 
@@ -381,7 +381,7 @@ public class CommandDispatcher {
                 "**Additional Commands:**\n\n" +
                 "**!ping** - Measure and report ping latency\n\n" +
                 "**!testcommand** - Test if the bot is responding\n\n" +
-                "**!timezone <TZ or Time>** - Set your preferred timezone (e.g. `!timezone PST` or `!timezone 14:30`)\n\n"
+                "**!timezone <TZ or Time>** - Set your preferred timezone (e.g. `!timezone PST`, `!timezone 1:14am` or `!timezone 14:30`)\n\n"
                 +
                 "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
