@@ -18,8 +18,8 @@ public class AutoLastService {
 
     private final Set<String> enabledUsers = ConcurrentHashMap.newKeySet();
     private final Map<String, Long> lastTriggerTime = new ConcurrentHashMap<>();
-    private final Map<String, String> lastReadEventId = new ConcurrentHashMap<>();
-    
+    private final Map<String, RoomHistoryManager.EventInfo> lastReadInfo = new ConcurrentHashMap<>();
+
     private final MatrixClient matrixClient;
     private final LastMessageService lastMessageService;
     private final HttpClient httpClient; // Added HttpClient
@@ -28,8 +28,8 @@ public class AutoLastService {
     private final String accessToken;
     private final Path persistenceFile;
 
-    public AutoLastService(MatrixClient matrixClient, LastMessageService lastMessageService, 
-                           HttpClient httpClient, ObjectMapper mapper, String homeserver, String accessToken) {
+    public AutoLastService(MatrixClient matrixClient, LastMessageService lastMessageService,
+            HttpClient httpClient, ObjectMapper mapper, String homeserver, String accessToken) {
         this.matrixClient = matrixClient;
         this.lastMessageService = lastMessageService;
         this.httpClient = httpClient; // Store HttpClient
@@ -37,7 +37,7 @@ public class AutoLastService {
         this.homeserver = homeserver;
         this.accessToken = accessToken;
         this.persistenceFile = Paths.get("autolast_enabled_users.json");
-        
+
         // Load persisted enabled users
         loadEnabledUsers();
     }
@@ -51,7 +51,8 @@ public class AutoLastService {
             matrixClient.sendText(roomId, "Auto-!last disabled.");
         } else {
             enabledUsers.add(userId);
-            matrixClient.sendText(roomId, "Auto-!last enabled. I will DM you a summary when you read the export room after being away.");
+            matrixClient.sendText(roomId,
+                    "Auto-!last enabled. I will DM you a summary when you read the export room after being away.");
         }
         saveEnabledUsers();
     }
@@ -61,9 +62,11 @@ public class AutoLastService {
      */
     public void processEphemeralEvents(String roomId, JsonNode ephemeralEvents, String exportRoomId) {
         // Only run logic if this is the export room
-        if (!roomId.equals(exportRoomId)) return;
-        
-        if (ephemeralEvents == null || !ephemeralEvents.isArray()) return;
+        if (!roomId.equals(exportRoomId))
+            return;
+
+        if (ephemeralEvents == null || !ephemeralEvents.isArray())
+            return;
 
         for (JsonNode event : ephemeralEvents) {
             if ("m.receipt".equals(event.path("type").asText())) {
@@ -73,44 +76,50 @@ public class AutoLastService {
     }
 
     private void processReceiptEvent(String roomId, JsonNode content) {
-        // Content structure: { "$event_id": { "m.read": { "@user_id": { "ts": 1234 } } } }
+        // Content structure: { "$event_id": { "m.read": { "@user_id": { "ts": 1234 } }
+        // } }
         Iterator<String> eventIds = content.fieldNames();
-        
+
         while (eventIds.hasNext()) {
             String eventId = eventIds.next();
             JsonNode readNode = content.path(eventId).path("m.read");
-            
+
             Iterator<String> userIds = readNode.fieldNames();
             while (userIds.hasNext()) {
                 String userId = userIds.next();
-                
+
                 // 1. Check if user is enabled
-                if (!enabledUsers.contains(userId)) continue;
+                if (!enabledUsers.contains(userId))
+                    continue;
 
                 long now = System.currentTimeMillis();
                 long lastTrigger = lastTriggerTime.getOrDefault(userId, 0L);
 
                 // 2. Check debounce (30 minutes) - "last read was more than half an hour ago"
-                // We use the trigger time to ensure we don't spam if they read messages in a row.
+                // We use the trigger time to ensure we don't spam if they read messages in a
+                // row.
                 if (now - lastTrigger < 1800000) {
-                    // Update the last known read event, but don't trigger
-                    lastReadEventId.put(userId, eventId);
+                    // Update the last known read info, but don't trigger
+                    long ts = readNode.path(userId).path("ts").asLong(0);
+                    lastReadInfo.put(userId, new RoomHistoryManager.EventInfo(eventId, ts));
                     continue;
                 }
 
                 // 3. Check for at least 30 unread messages
-                String previousEventId = lastReadEventId.get(userId);
-                
+                RoomHistoryManager.EventInfo previousReadInfo = lastReadInfo.get(userId);
+                long ts = readNode.path(userId).path("ts").asLong(0);
+                RoomHistoryManager.EventInfo currentReadInfo = new RoomHistoryManager.EventInfo(eventId, ts);
+
                 // If we have a previous read state, check the gap
-                if (previousEventId != null && !previousEventId.equals(eventId)) {
-                    if (hasAtLeast30Messages(roomId, previousEventId, eventId)) {
+                if (previousReadInfo != null && !previousReadInfo.eventId.equals(eventId)) {
+                    if (hasAtLeast30Messages(roomId, previousReadInfo.eventId, eventId)) {
                         triggerLastMessage(roomId, userId);
                         lastTriggerTime.put(userId, now);
                     }
                 }
 
                 // Update state for next time
-                lastReadEventId.put(userId, eventId);
+                lastReadInfo.put(userId, currentReadInfo);
             }
         }
     }
@@ -120,17 +129,23 @@ public class AutoLastService {
         String dmRoomId = findDirectMessageRoom(userId);
         if (dmRoomId != null) {
             System.out.println("Triggering Auto-Last for " + userId);
-            // Get the cached previous read event ID before updating it
-            String previousReadEventId = lastReadEventId.get(userId);
+            // Get the cached previous read info before updating it (wait, it was already
+            // updated above)
+            // Actually, we want the info from BEFORE they read the new messages to show
+            // what they MISSED.
+            // Wait, lastMessageService uses this to show where they WERE.
+            RoomHistoryManager.EventInfo previousReadInfo = lastReadInfo.get(userId);
             // We run this in a separate thread to not block the sync loop
-            new Thread(() -> lastMessageService.sendLastMessageAndReadReceipt(exportRoomId, userId, dmRoomId, previousReadEventId)).start();
+            new Thread(() -> lastMessageService.sendLastMessageAndReadReceipt(exportRoomId, userId, dmRoomId,
+                    previousReadInfo)).start();
         } else {
             System.out.println("Could not find DM room for auto-last user: " + userId);
         }
     }
 
     /**
-     * Checks if there are >= 30 messages between fromEventId and toEventId (exclusive of from, inclusive of to).
+     * Checks if there are >= 30 messages between fromEventId and toEventId
+     * (exclusive of from, inclusive of to).
      */
     private boolean hasAtLeast30Messages(String roomId, String previousReadId, String currentReadId) {
         try {
@@ -141,21 +156,22 @@ public class AutoLastService {
                     .header("Authorization", "Bearer " + accessToken)
                     .GET()
                     .build();
-            
+
             // FIX: Use local httpClient instead of matrixClient.getClient()
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return false;
+            if (resp.statusCode() != 200)
+                return false;
 
             JsonNode root = mapper.readTree(resp.body());
             JsonNode chunk = root.path("chunk");
-            
+
             int messagesFound = 0;
             boolean foundCurrent = false;
 
             for (JsonNode event : chunk) {
                 String id = event.path("event_id").asText();
                 String type = event.path("type").asText();
-                
+
                 // Only count actual messages
                 boolean isMessage = "m.room.message".equals(type);
 
@@ -171,7 +187,7 @@ public class AutoLastService {
                     break;
                 }
             }
-            
+
             return messagesFound >= 30;
 
         } catch (Exception e) {
@@ -194,7 +210,7 @@ public class AutoLastService {
             // FIX: Use local httpClient instead of matrixClient.getClient()
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             JsonNode joined = mapper.readTree(resp.body()).path("joined_rooms");
-            
+
             if (joined.isArray()) {
                 for (JsonNode roomNode : joined) {
                     String rId = roomNode.asText();
@@ -221,12 +237,12 @@ public class AutoLastService {
             // FIX: Use local httpClient instead of matrixClient.getClient()
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             JsonNode members = mapper.readTree(resp.body()).path("joined");
-            
+
             // A DM usually has exactly 2 members: the bot and the target user
             if (members.size() == 2 && members.has(targetUserId)) {
                 return true;
             }
-        } catch (Exception e) { 
+        } catch (Exception e) {
             // ignore
         }
         return false;
@@ -239,7 +255,7 @@ public class AutoLastService {
         if (!Files.exists(persistenceFile)) {
             return;
         }
-        
+
         try {
             String content = Files.readString(persistenceFile);
             String[] users = mapper.readValue(content, String[].class);

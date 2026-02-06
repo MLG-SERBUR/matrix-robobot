@@ -44,21 +44,21 @@ public class LastMessageService {
     /**
      * Execute the !last command
      * 
-     * @param exportRoomId              The room to get info from
-     * @param sender                    The user to get info for
-     * @param responseRoomId            The room to send the response to
-     * @param cachedPreviousReadEventId Optional cached previous read event ID (used
-     *                                  by auto-last feature)
+     * @param exportRoomId           The room to get info from
+     * @param sender                 The user to get info for
+     * @param responseRoomId         The room to send the response to
+     * @param cachedPreviousReadInfo Optional cached previous read info (used
+     *                               by auto-last feature)
      */
     public void sendLastMessageAndReadReceipt(String exportRoomId, String sender, String responseRoomId,
-            String cachedPreviousReadEventId) {
+            RoomHistoryManager.EventInfo cachedPreviousReadInfo) {
         try {
             RoomHistoryManager.EventInfo lastMessageInfo = historyManager.getLastMessageFromSender(exportRoomId,
                     sender);
-            // If we have a cached previous read event ID, use that instead of fetching
+            // If we have a cached previous read info, use that instead of fetching
             // current
-            RoomHistoryManager.EventInfo lastReadInfo = cachedPreviousReadEventId != null
-                    ? new RoomHistoryManager.EventInfo(cachedPreviousReadEventId, 0)
+            RoomHistoryManager.EventInfo lastReadInfo = cachedPreviousReadInfo != null
+                    ? cachedPreviousReadInfo
                     : getReadReceipt(exportRoomId, sender);
 
             StringBuilder response = new StringBuilder();
