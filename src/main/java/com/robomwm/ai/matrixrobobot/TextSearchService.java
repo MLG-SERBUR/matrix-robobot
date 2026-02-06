@@ -39,13 +39,12 @@ public class TextSearchService {
     }
 
     public void performGrep(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
-            String fromToken, String pattern, String timezoneAbbr) {
+            String fromToken, String pattern, ZoneId zoneId) {
         try {
             // Register this operation for abort capability
             AtomicBoolean abortFlag = new AtomicBoolean(false);
             runningOperations.put(sender, abortFlag);
 
-            ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "last " + hours + "h";
 
             // Send initial message and get event ID for updates
@@ -244,13 +243,12 @@ public class TextSearchService {
     }
 
     public void performGrepSlow(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
-            String fromToken, String pattern, String timezoneAbbr) {
+            String fromToken, String pattern, ZoneId zoneId) {
         try {
             // Register this operation for abort capability
             AtomicBoolean abortFlag = new AtomicBoolean(false);
             runningOperations.put(sender, abortFlag);
 
-            ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "last " + hours + "h";
 
             matrixClient.sendText(responseRoomId, "Performing slow grep search in " + exportRoomId + " for: \""
@@ -333,13 +331,12 @@ public class TextSearchService {
     }
 
     public void performSearch(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
-            String fromToken, String query, String timezoneAbbr) {
+            String fromToken, String query, ZoneId zoneId) {
         try {
             // Register this operation for abort capability
             AtomicBoolean abortFlag = new AtomicBoolean(false);
             runningOperations.put(sender, abortFlag);
 
-            ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "last " + hours + "h";
 
             // Send initial message and get event ID for updates
@@ -544,39 +541,6 @@ public class TextSearchService {
             System.out.println("Failed to perform search: " + e.getMessage());
             matrixClient.sendText(responseRoomId, "Error performing search: " + e.getMessage());
             runningOperations.remove(sender);
-        }
-    }
-
-    private ZoneId getZoneIdFromAbbr(String timezoneAbbr) {
-        switch (timezoneAbbr.toUpperCase()) {
-            case "PST":
-                return ZoneId.of("America/Los_Angeles");
-            case "PDT":
-                return ZoneId.of("America/Los_Angeles");
-            case "EST":
-                return ZoneId.of("America/New_York");
-            case "EDT":
-                return ZoneId.of("America/New_York");
-            case "CST":
-                return ZoneId.of("America/Chicago");
-            case "CDT":
-                return ZoneId.of("America/Chicago");
-            case "MST":
-                return ZoneId.of("America/Denver");
-            case "MDT":
-                return ZoneId.of("America/Denver");
-            case "GMT":
-                return ZoneId.of("GMT");
-            case "UTC":
-                return ZoneId.of("UTC");
-            case "CET":
-                return ZoneId.of("Europe/Paris");
-            case "CEST":
-                return ZoneId.of("Europe/Paris");
-            case "JST":
-                return ZoneId.of("Asia/Tokyo");
-            default:
-                return ZoneId.of("UTC");
         }
     }
 }

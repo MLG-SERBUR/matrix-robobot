@@ -70,9 +70,10 @@ public class MatrixRobobot {
                 config.cerebrasApiKey);
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
+        TimezoneService timezoneService = new TimezoneService(mapper);
         CommandDispatcher dispatcher = new CommandDispatcher(client, mapper, url, config.accessToken,
                 config.commandRoomId, config.exportRoomId, historyManager, runningOperations, textSearchService,
-                aiService, semanticSearchService);
+                aiService, semanticSearchService, timezoneService);
 
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, client, mapper, url,

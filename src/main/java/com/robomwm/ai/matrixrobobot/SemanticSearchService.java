@@ -3,7 +3,6 @@ package com.robomwm.ai.matrixrobobot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.http.HttpClient;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -48,10 +47,9 @@ public class SemanticSearchService {
     }
 
     public void performSemanticSearch(String responseRoomId, String exportRoomId, int hours, String fromToken,
-            String query, String timezoneAbbr) {
+            String query, ZoneId zoneId) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "last " + hours + "h";
 
             matrixClient.sendText(responseRoomId,
@@ -164,34 +162,5 @@ public class SemanticSearchService {
         results.sort((a, b) -> Double.compare(b.embedding[0], a.embedding[0]));
 
         return results.subList(0, Math.min(topK, results.size()));
-    }
-
-    private ZoneId getZoneIdFromAbbr(String timezoneAbbr) {
-        if (timezoneAbbr == null)
-            return ZoneId.of("America/Los_Angeles");
-        switch (timezoneAbbr.toUpperCase()) {
-            case "PST":
-                return ZoneId.of("America/Los_Angeles");
-            case "PDT":
-                return ZoneId.of("America/Los_Angeles");
-            case "MST":
-                return ZoneId.of("America/Denver");
-            case "MDT":
-                return ZoneId.of("America/Denver");
-            case "CST":
-                return ZoneId.of("America/Chicago");
-            case "CDT":
-                return ZoneId.of("America/Chicago");
-            case "EST":
-                return ZoneId.of("America/New_York");
-            case "EDT":
-                return ZoneId.of("America/New_York");
-            case "UTC":
-                return ZoneId.of("UTC");
-            case "GMT":
-                return ZoneId.of("GMT");
-            default:
-                return ZoneId.of("America/Los_Angeles");
-        }
     }
 }

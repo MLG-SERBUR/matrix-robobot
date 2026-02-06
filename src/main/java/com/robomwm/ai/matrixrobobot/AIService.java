@@ -36,15 +36,14 @@ public class AIService {
     private static class Prompts {
         public static final String SYSTEM_OVERVIEW = "You provide high level overview of a chat log.";
         public static final String QUESTION_PREFIX = "Given the following chat logs, answer the question: '";
-        public static final String QUESTION_SUFFIX = "'\\n\\n";
-        public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end:\\n\\n";
+        public static final String QUESTION_SUFFIX = "'\n\n";
+        public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end:\n\n";
     }
 
     public void queryArliAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
-            long startTimestamp, String timezoneAbbr) {
+            long startTimestamp, ZoneId zoneId) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "";
             if (startTimestamp > 0) {
                 String dateStr = java.time.Instant.ofEpochMilli(startTimestamp)
@@ -113,11 +112,10 @@ public class AIService {
         }
     }
 
-    public void queryArliAIUnread(String responseRoomId, String exportRoomId, String sender, String timezoneAbbr,
+    public void queryArliAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
             String question) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             RoomHistoryManager.EventInfo lastRead = historyManager.getReadReceipt(exportRoomId, sender);
 
             if (lastRead == null) {
@@ -186,10 +184,9 @@ public class AIService {
     }
 
     public void queryCerebras(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
-            long startTimestamp, String timezoneAbbr) {
+            long startTimestamp, ZoneId zoneId) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            ZoneId zoneId = getZoneIdFromAbbr(timezoneAbbr);
             String timeInfo = "";
             if (startTimestamp > 0) {
                 String dateStr = java.time.Instant.ofEpochMilli(startTimestamp)
@@ -259,7 +256,7 @@ public class AIService {
     }
 
     private String buildPrompt(String question, List<String> logs) {
-        String logsStr = String.join("\\n", logs);
+        String logsStr = String.join("\n", logs);
         if (question != null && !question.isEmpty()) {
             return Prompts.QUESTION_PREFIX + question + Prompts.QUESTION_SUFFIX + logsStr;
         } else {
@@ -280,34 +277,5 @@ public class AIService {
             return aiAnswer + "\n\n" + messageLink;
         }
         return aiAnswer;
-    }
-
-    private ZoneId getZoneIdFromAbbr(String timezoneAbbr) {
-        if (timezoneAbbr == null)
-            return ZoneId.of("America/Los_Angeles");
-        switch (timezoneAbbr.toUpperCase()) {
-            case "PST":
-                return ZoneId.of("America/Los_Angeles");
-            case "PDT":
-                return ZoneId.of("America/Los_Angeles");
-            case "MST":
-                return ZoneId.of("America/Denver");
-            case "MDT":
-                return ZoneId.of("America/Denver");
-            case "CST":
-                return ZoneId.of("America/Chicago");
-            case "CDT":
-                return ZoneId.of("America/Chicago");
-            case "EST":
-                return ZoneId.of("America/New_York");
-            case "EDT":
-                return ZoneId.of("America/New_York");
-            case "UTC":
-                return ZoneId.of("UTC");
-            case "GMT":
-                return ZoneId.of("GMT");
-            default:
-                return ZoneId.of("America/Los_Angeles");
-        }
     }
 }
