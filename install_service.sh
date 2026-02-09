@@ -66,8 +66,8 @@ User=$USER_NAME
 WorkingDirectory=$WORK_DIR
 # Build a new jar every time the service starts
 # Try to pull latest changes first (ignoring failure if offline)
-ExecStartPre=-$GIT_BIN pull
-ExecStartPre=$MVN_BIN clean package -DskipTests
+# ExecStartPre=-$GIT_BIN pull
+# ExecStartPre=$MVN_BIN clean package -DskipTests
 ExecStart=$JAVA_BIN -jar $WORK_DIR/$JAR_FILE
 Restart=always
 RestartSec=10

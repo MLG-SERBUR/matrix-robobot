@@ -56,23 +56,21 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!lastsummary(?:\\s+(.*))?")) {
             handleLastSummary(trimmed, roomId, sender, responseRoomId, exportRoomId);
             return true;
-        } else if (trimmed.matches("!arliai\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
-            handleArliAI(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+        } else if (trimmed.matches("!arliai(?:\\s+.*)?") || trimmed.matches("!arliai-ts(?:\\s+.*)?")) {
+            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!arliai",
+                    AIService.Backend.ARLIAI, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
-        } else if (trimmed.matches("!tldr\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
-            handleTLDR(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+        } else if (trimmed.matches("!tldr(?:\\s+.*)?") || trimmed.matches("!tldr-ts(?:\\s+.*)?")) {
+            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!tldr",
+                    AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
             return true;
-        } else if (trimmed.matches("!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
-            handleArliAITimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+        } else if (trimmed.matches("!summary(?:\\s+.*)?")) {
+            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summary",
+                    AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
-        } else if (trimmed.matches("!tldr-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
-            handleTLDRTimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
-            return true;
-        } else if (trimmed.matches("!cerebras\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
-            handleCerebras(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
-            return true;
-        } else if (trimmed.matches("!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")) {
-            handleCerebrasTimestamp(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+        } else if (trimmed.matches("!cerebras(?:\\s+.*)?") || trimmed.matches("!cerebras-ts(?:\\s+.*)?")) {
+            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!cerebras",
+                    AIService.Backend.CEREBRAS, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
         } else if (trimmed.matches("!semantic\\s+(\\d+)h\\s+(.+)")) {
             handleSemanticSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
@@ -145,161 +143,127 @@ public class CommandDispatcher {
             if (zoneId == null)
                 return;
 
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+
             System.out.println("Received lastsummary command in " + roomId + " from " + sender);
-            new Thread(() -> aiService.queryArliAIUnread(responseRoomId, exportRoomId, sender, zoneId, question,
-                    AIService.Prompts.OVERVIEW_PREFIX))
-                    .start();
+            new Thread(() -> {
+                try {
+                    aiService.queryArliAIUnread(responseRoomId, exportRoomId, sender, zoneId, question,
+                            AIService.Prompts.OVERVIEW_PREFIX, abortFlag);
+                } finally {
+                    runningOperations.remove(sender);
+                }
+            }).start();
         }
     }
 
-    private void handleArliAI(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-            String exportRoomId) {
-        Matcher matcher = Pattern.compile("!arliai\\s+(\\d+)(h)?(?:\\s+(.*))?").matcher(trimmed);
-        if (matcher.matches()) {
-            int value = Integer.parseInt(matcher.group(1));
-            boolean isDuration = matcher.group(2) != null;
-            int hours = isDuration ? value : -1;
-            int maxMessages = isDuration ? -1 : value;
-            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
+    private void handleAICommand(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
+            String exportRoomId, String commandName, AIService.Backend backend, String promptPrefix) {
 
-            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
+        // Remove command name prefix (handle both !cmd and !cmd-ts for backward
+        // compatibility in regex)
+        String args = trimmed.replaceFirst("^" + commandName + "(?:-ts)?\\s*", "").trim();
+
+        // Default values
+        int hours = -1;
+        int maxMessages = -1;
+        long startTimestamp = -1;
+        String question = null;
+
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+        if (zoneId == null)
+            return;
+
+        // Parse Args
+        // Pattern 1: Timestamp (YYYY-MM-DD-HH-mm) [Duration/Count] [Question]
+        // Pattern 2: Duration/Count [Question]
+
+        String[] parts = args.split("\\s+", 2);
+        String firstArg = parts.length > 0 ? parts[0] : "";
+        String remaining = parts.length > 1 ? parts[1] : "";
+
+        if (firstArg.matches("\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}")) {
+            // Timestamp mode
+            try {
+                startTimestamp = java.time.LocalDateTime
+                        .parse(firstArg, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
+                        .atZone(zoneId)
+                        .withZoneSameInstant(ZoneId.of("UTC"))
+                        .toInstant()
+                        .toEpochMilli();
+
+                // Check if next arg is duration/limit
+                String[] subParts = remaining.split("\\s+", 2);
+                String possibleLimit = subParts.length > 0 ? subParts[0] : "";
+
+                if (possibleLimit.matches("\\d+(h)?")) {
+                    if (possibleLimit.endsWith("h")) {
+                        hours = Integer.parseInt(possibleLimit.replace("h", ""));
+                    } else {
+                        maxMessages = Integer.parseInt(possibleLimit);
+                    }
+                    question = subParts.length > 1 ? subParts[1].trim() : null;
+                } else {
+                    // Default limit if not provided? Or treat as question?
+                    // Previous logic required duration/limit for timestamp commands.
+                    // Let's default to 24h if not specified? Or error out?
+                    // Original regex: !cmd-ts <ts> <limit> [question]
+                    // So limit was mandatory.
+                    // We can assume if no limit is parsable, it's missing or part of question?
+                    // Let's default to 24h if missing for now, or assume it's mandatory.
+                    // To be safe and compatible:
+                    maxMessages = 100; // Default count
+                    question = remaining.trim();
+                }
+
+            } catch (Exception e) {
+                matrixClient.sendText(responseRoomId, "Invalid timestamp format. Use YYYY-MM-DD-HH-mm");
                 return;
+            }
+        } else if (firstArg.matches("\\d+(h)?")) {
+            // Count/Duration mode
+            if (firstArg.endsWith("h")) {
+                hours = Integer.parseInt(firstArg.replace("h", ""));
+            } else {
+                maxMessages = Integer.parseInt(firstArg);
+            }
+            question = remaining.trim().isEmpty() ? null : remaining.trim();
+        } else {
+            // No valid first arg? Maybe just question?
+            // Existing commands required at least one arg (count/hours).
+            // "silly" !summary why did the chicken... -> assume 24h?
+            // Let's enforce providing a limit for now to match strictness of previous cmds,
+            // OR default to 24h if only text is provided.
 
-            System.out.println("Received arliai command in " + roomId + " from " + sender);
-            new Thread(() -> aiService.queryArliAI(responseRoomId, exportRoomId, hours, prevBatch, question, -1,
-                    zoneId, maxMessages, AIService.Prompts.OVERVIEW_PREFIX)).start();
-        }
-    }
-
-    private void handleTLDR(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-            String exportRoomId) {
-        Matcher matcher = Pattern.compile("!tldr\\s+(\\d+)(h)?(?:\\s+(.*))?").matcher(trimmed);
-        if (matcher.matches()) {
-            int value = Integer.parseInt(matcher.group(1));
-            boolean isDuration = matcher.group(2) != null;
-            int hours = isDuration ? value : -1;
-            int maxMessages = isDuration ? -1 : value;
-            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
-
-            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
+            // If we want !summary [question] to work (defaulting to last 24h or something):
+            if (!firstArg.isEmpty()) {
+                hours = 24;
+                question = args;
+            } else {
+                matrixClient.sendText(responseRoomId, "Usage: " + commandName + " <count|hours|timestamp> [question]");
                 return;
-
-            System.out.println("Received tldr command in " + roomId + " from " + sender);
-            new Thread(() -> aiService.queryArliAI(responseRoomId, exportRoomId, hours, prevBatch, question, -1,
-                    zoneId, maxMessages, AIService.Prompts.TLDR_PREFIX)).start();
+            }
         }
-    }
 
-    private void handleArliAITimestamp(String trimmed, String roomId, String sender, String prevBatch,
-            String responseRoomId, String exportRoomId) {
-        Matcher matcher = Pattern
-                .compile("!arliai-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")
-                .matcher(trimmed);
-        if (matcher.matches()) {
-            String startDateStr = matcher.group(1);
-            int value = Integer.parseInt(matcher.group(2));
-            boolean isDuration = matcher.group(3) != null;
-            int durationHours = isDuration ? value : -1;
-            int maxMessages = isDuration ? -1 : value;
-            String question = matcher.group(4) != null ? matcher.group(4).trim() : null;
+        System.out.println("Received " + commandName + " command in " + roomId + " from " + sender);
 
-            ZoneId userZone = resolveZoneId(sender, responseRoomId);
-            if (userZone == null)
-                return;
+        AtomicBoolean abortFlag = new AtomicBoolean(false);
+        runningOperations.put(sender, abortFlag);
 
-            long startTimestamp = java.time.LocalDateTime
-                    .parse(startDateStr, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
-                    .atZone(userZone)
-                    .withZoneSameInstant(ZoneId.of("UTC"))
-                    .toInstant()
-                    .toEpochMilli();
+        final int fHours = hours;
+        final int fMax = maxMessages;
+        final long fStart = startTimestamp;
+        final String fQuestion = question;
 
-            System.out.println("Received arli-ts command in " + roomId + " from " + sender);
-            new Thread(() -> aiService.queryArliAI(responseRoomId, exportRoomId, durationHours, prevBatch, question,
-                    startTimestamp, userZone, maxMessages, AIService.Prompts.OVERVIEW_PREFIX)).start();
-        }
-    }
-
-    private void handleTLDRTimestamp(String trimmed, String roomId, String sender, String prevBatch,
-            String responseRoomId, String exportRoomId) {
-        Matcher matcher = Pattern
-                .compile("!tldr-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")
-                .matcher(trimmed);
-        if (matcher.matches()) {
-            String startDateStr = matcher.group(1);
-            int value = Integer.parseInt(matcher.group(2));
-            boolean isDuration = matcher.group(3) != null;
-            int durationHours = isDuration ? value : -1;
-            int maxMessages = isDuration ? -1 : value;
-            String question = matcher.group(4) != null ? matcher.group(4).trim() : null;
-
-            ZoneId userZone = resolveZoneId(sender, responseRoomId);
-            if (userZone == null)
-                return;
-
-            long startTimestamp = java.time.LocalDateTime
-                    .parse(startDateStr, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
-                    .atZone(userZone)
-                    .withZoneSameInstant(ZoneId.of("UTC"))
-                    .toInstant()
-                    .toEpochMilli();
-
-            System.out.println("Received tldr-ts command in " + roomId + " from " + sender);
-            new Thread(() -> aiService.queryArliAI(responseRoomId, exportRoomId, durationHours, prevBatch, question,
-                    startTimestamp, userZone, maxMessages, AIService.Prompts.TLDR_PREFIX)).start();
-        }
-    }
-
-    private void handleCerebras(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-            String exportRoomId) {
-        Matcher matcher = Pattern.compile("!cerebras\\s+(\\d+)(h)?(?:\\s+(.*))?").matcher(trimmed);
-        if (matcher.matches()) {
-            int value = Integer.parseInt(matcher.group(1));
-            boolean isDuration = matcher.group(2) != null;
-            int hours = isDuration ? value : -1;
-            int maxMessages = isDuration ? -1 : value;
-            String question = matcher.group(3) != null ? matcher.group(3).trim() : null;
-
-            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return;
-
-            System.out.println("Received cerebras command in " + roomId + " from " + sender);
-            new Thread(() -> aiService.queryCerebras(responseRoomId, exportRoomId, hours, prevBatch, question, -1,
-                    zoneId, maxMessages)).start();
-        }
-    }
-
-    private void handleCerebrasTimestamp(String trimmed, String roomId, String sender, String prevBatch,
-            String responseRoomId, String exportRoomId) {
-        Matcher matcher = Pattern
-                .compile("!cerebras-ts\\s+(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\s+(\\d+)(h)?(?:\\s+(.*))?")
-                .matcher(trimmed);
-        if (matcher.matches()) {
-            String startDateStr = matcher.group(1);
-            int value = Integer.parseInt(matcher.group(2));
-            boolean isDuration = matcher.group(3) != null;
-            int durationHours = isDuration ? value : -1;
-            int maxMessages = isDuration ? -1 : value;
-            String question = matcher.group(4) != null ? matcher.group(4).trim() : null;
-
-            ZoneId userZone = resolveZoneId(sender, responseRoomId);
-            if (userZone == null)
-                return;
-
-            long startTimestamp = java.time.LocalDateTime
-                    .parse(startDateStr, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
-                    .atZone(userZone)
-                    .withZoneSameInstant(ZoneId.of("UTC"))
-                    .toInstant()
-                    .toEpochMilli();
-
-            System.out.println("Received cerebras-ts command in " + roomId + " from " + sender);
-            new Thread(() -> aiService.queryCerebras(responseRoomId, exportRoomId, durationHours, prevBatch, question,
-                    startTimestamp, userZone, maxMessages)).start();
-        }
+        new Thread(() -> {
+            try {
+                aiService.queryAI(responseRoomId, exportRoomId, fHours, prevBatch, fQuestion, fStart,
+                        zoneId, fMax, promptPrefix, abortFlag, backend);
+            } finally {
+                runningOperations.remove(sender);
+            }
+        }).start();
     }
 
     private void handleSemanticSearch(String trimmed, String roomId, String sender, String prevBatch,
@@ -454,9 +418,11 @@ public class CommandDispatcher {
                 +
                 "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
-                "**!arliai, !cerebras <count or hours> [question]** - Query AI with chat logs (e.g. `!arliai 50` or `!arliai 24h`)\n"
+                "**!summary <count or hours or timestamp> [question]** - Detailed summary with auto-fallback (ArliAI -> Cerebras)\n"
                 +
-                "**!tldr <count or hours> [question]** - Query AI with chat logs for a quick 15s summary\n"
+                "**!arliai, !cerebras <count or hours> [question]** - Query specific AI backend (debug)\n"
+                +
+                "**!tldr <count or hours or timestamp> [question]** - Quick 15s summary with auto-fallback\n"
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!grep, !grep-slow, !search <hours>h <pattern>** - Pattern and term-based searches\n\n" +
