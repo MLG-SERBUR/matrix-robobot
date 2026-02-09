@@ -60,6 +60,16 @@ public class RoomHistoryManager {
         }
     }
 
+    public static class TokenResult {
+        public String token;
+        public long timestamp;
+
+        public TokenResult(String token, long timestamp) {
+            this.token = token;
+            this.timestamp = timestamp;
+        }
+    }
+
     public RoomHistoryManager(HttpClient httpClient, ObjectMapper mapper, String homeserverUrl, String accessToken) {
         this.httpClient = httpClient;
         this.mapper = mapper;
@@ -152,6 +162,140 @@ public class RoomHistoryManager {
         Collections.reverse(logs);
         Collections.reverse(eventIds);
         return new ChatLogsWithIds(logs, eventIds);
+    }
+
+    /**
+     * Fetch room history starting from a specific event ID or latest if null.
+     */
+    public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
+            boolean forward, ZoneId zoneId, int maxMessages) {
+        if (startEventId == null) {
+            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages);
+        }
+
+        List<String> lines = new ArrayList<>();
+        String firstEventId = null;
+
+        TokenResult tokenRes = getTokenForEvent(roomId, startEventId, forward);
+        if (tokenRes == null) {
+            return new ChatLogsResult(lines, null);
+        }
+
+        String token = tokenRes.token;
+        long eventTs = tokenRes.timestamp;
+
+        // If forward: end time = eventTs + hours
+        // If backward: start time = eventTs - hours
+        long searchFloor = -1;
+        long searchCeiling = -1;
+
+        if (hours > 0) {
+            if (forward) {
+                searchCeiling = eventTs + (long) hours * 3600L * 1000L;
+            } else {
+                searchFloor = eventTs - (long) hours * 3600L * 1000L;
+            }
+        }
+
+        String dir = forward ? "f" : "b";
+
+        while (token != null) {
+            try {
+                String messagesUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
+                        + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
+                        + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8)
+                        + "&dir=" + dir + "&limit=1000";
+                HttpRequest msgReq = HttpRequest.newBuilder()
+                        .uri(URI.create(messagesUrl))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .timeout(Duration.ofSeconds(120))
+                        .GET()
+                        .build();
+                HttpResponse<String> msgResp = httpClient.send(msgReq, HttpResponse.BodyHandlers.ofString());
+                if (msgResp.statusCode() != 200) {
+                    System.out.println("Failed to fetch messages: " + msgResp.statusCode() + " - " + msgResp.body());
+                    break;
+                }
+                JsonNode root = mapper.readTree(msgResp.body());
+                JsonNode chunk = root.path("chunk");
+                if (!chunk.isArray() || chunk.size() == 0)
+                    break;
+
+                boolean stop = false;
+                for (JsonNode ev : chunk) {
+                    if (!"m.room.message".equals(ev.path("type").asText(null)))
+                        continue;
+                    long originServerTs = ev.path("origin_server_ts").asLong(0);
+
+                    if (!forward && searchFloor > 0 && originServerTs < searchFloor) {
+                        stop = true;
+                        break;
+                    }
+                    if (forward && searchCeiling > 0 && originServerTs > searchCeiling) {
+                        stop = true;
+                        break;
+                    }
+
+                    String body = ev.path("content").path("body").asText(null);
+                    String sender = ev.path("sender").asText(null);
+                    String eventId = ev.path("event_id").asText(null);
+                    if (body != null && sender != null) {
+                        String timestamp = Instant.ofEpochMilli(originServerTs)
+                                .atZone(zoneId)
+                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                        lines.add("[" + timestamp + "] <" + sender + "> " + body);
+
+                        if (firstEventId == null)
+                            firstEventId = eventId;
+
+                        if (maxMessages > 0 && lines.size() >= maxMessages) {
+                            stop = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (stop) {
+                    break;
+                }
+
+                token = root.path("end").asText(null);
+
+            } catch (Exception e) {
+                System.out.println("Error fetching room history relative: " + e.getMessage());
+                break;
+            }
+        }
+        
+        if (!forward) {
+            Collections.reverse(lines);
+        }
+        
+        return new ChatLogsResult(lines, firstEventId);
+    }
+
+    private TokenResult getTokenForEvent(String roomId, String eventId, boolean forward) {
+        try {
+            String url = homeserverUrl + "/_matrix/client/v3/rooms/"
+                    + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
+                    + "/context/" + URLEncoder.encode(eventId, StandardCharsets.UTF_8) + "?limit=0";
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                JsonNode root = mapper.readTree(resp.body());
+                String token = root.path(forward ? "end" : "start").asText(null);
+                long ts = root.path("event").path("origin_server_ts").asLong(0);
+                return new TokenResult(token, ts);
+            }
+            System.out.println("Failed to get token for event " + eventId + ": " + resp.statusCode());
+        } catch (Exception e) {
+            System.out.println("Error getting token for event: " + e.getMessage());
+        }
+        return null;
     }
 
     /**

@@ -176,72 +176,74 @@ public class CommandDispatcher {
             return;
 
         // Parse Args
-        // Pattern 1: Timestamp (YYYY-MM-DD-HH-mm) [Duration/Count] [Question]
+        // Pattern 1: Matrix Link [Duration/Count] [Question]
         // Pattern 2: Duration/Count [Question]
 
         String[] parts = args.split("\\s+", 2);
         String firstArg = parts.length > 0 ? parts[0] : "";
         String remaining = parts.length > 1 ? parts[1] : "";
 
-        if (firstArg.matches("\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}")) {
-            // Timestamp mode
-            try {
-                startTimestamp = java.time.LocalDateTime
-                        .parse(firstArg, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
-                        .atZone(zoneId)
-                        .withZoneSameInstant(ZoneId.of("UTC"))
-                        .toInstant()
-                        .toEpochMilli();
+        String startEventId = null;
+        boolean forward = false;
 
+        // Check for Matrix link
+        // Examples: 
+        // https://matrix.to/#/!roomId:server/$eventId
+        // https://matrix.to/#/!roomId:server/$eventId?via=server
+        if (firstArg.contains("/$") || firstArg.contains("/e/")) {
+            String eventId = null;
+            if (firstArg.contains("/$")) {
+                int start = firstArg.indexOf("/$") + 1;
+                int end = firstArg.indexOf("?", start);
+                if (end == -1) end = firstArg.length();
+                eventId = firstArg.substring(start, end);
+            } else if (firstArg.contains("/e/")) {
+                int start = firstArg.indexOf("/e/") + 3;
+                int end = firstArg.indexOf("/", start);
+                if (end == -1) end = firstArg.length();
+                eventId = firstArg.substring(start, end);
+            }
+
+            if (eventId != null && eventId.startsWith("$")) {
+                startEventId = eventId;
+                
                 // Check if next arg is duration/limit
                 String[] subParts = remaining.split("\\s+", 2);
                 String possibleLimit = subParts.length > 0 ? subParts[0] : "";
 
-                if (possibleLimit.matches("\\d+(h)?")) {
-                    if (possibleLimit.endsWith("h")) {
-                        hours = Integer.parseInt(possibleLimit.replace("h", ""));
+                if (possibleLimit.matches("[+-]?\\d+(h)?")) {
+                    if (possibleLimit.startsWith("+")) forward = true;
+                    String cleanLimit = possibleLimit.replace("+", "").replace("-", "");
+                    
+                    if (cleanLimit.endsWith("h")) {
+                        hours = Integer.parseInt(cleanLimit.replace("h", ""));
                     } else {
-                        maxMessages = Integer.parseInt(possibleLimit);
+                        maxMessages = Integer.parseInt(cleanLimit);
                     }
                     question = subParts.length > 1 ? subParts[1].trim() : null;
                 } else {
-                    // Default limit if not provided? Or treat as question?
-                    // Previous logic required duration/limit for timestamp commands.
-                    // Let's default to 24h if not specified? Or error out?
-                    // Original regex: !cmd-ts <ts> <limit> [question]
-                    // So limit was mandatory.
-                    // We can assume if no limit is parsable, it's missing or part of question?
-                    // Let's default to 24h if missing for now, or assume it's mandatory.
-                    // To be safe and compatible:
                     maxMessages = 100; // Default count
                     question = remaining.trim();
                 }
-
-            } catch (Exception e) {
-                matrixClient.sendText(responseRoomId, "Invalid timestamp format. Use YYYY-MM-DD-HH-mm");
-                return;
             }
-        } else if (firstArg.matches("\\d+(h)?")) {
+        } else if (firstArg.matches("[+-]?\\d+(h)?")) {
             // Count/Duration mode
-            if (firstArg.endsWith("h")) {
-                hours = Integer.parseInt(firstArg.replace("h", ""));
+            if (firstArg.startsWith("+")) forward = true;
+            String cleanArg = firstArg.replace("+", "").replace("-", "");
+
+            if (cleanArg.endsWith("h")) {
+                hours = Integer.parseInt(cleanArg.replace("h", ""));
             } else {
-                maxMessages = Integer.parseInt(firstArg);
+                maxMessages = Integer.parseInt(cleanArg);
             }
             question = remaining.trim().isEmpty() ? null : remaining.trim();
         } else {
             // No valid first arg? Maybe just question?
-            // Existing commands required at least one arg (count/hours).
-            // "silly" !summary why did the chicken... -> assume 24h?
-            // Let's enforce providing a limit for now to match strictness of previous cmds,
-            // OR default to 24h if only text is provided.
-
-            // If we want !summary [question] to work (defaulting to last 24h or something):
             if (!firstArg.isEmpty()) {
                 hours = 24;
                 question = args;
             } else {
-                matrixClient.sendText(responseRoomId, "Usage: " + commandName + " <count|hours|timestamp> [question]");
+                matrixClient.sendText(responseRoomId, "Usage: " + commandName + " <link|count|hours> [question]");
                 return;
             }
         }
@@ -253,12 +255,13 @@ public class CommandDispatcher {
 
         final int fHours = hours;
         final int fMax = maxMessages;
-        final long fStart = startTimestamp;
+        final String fEventId = startEventId;
+        final boolean fForward = forward;
         final String fQuestion = question;
 
         new Thread(() -> {
             try {
-                aiService.queryAI(responseRoomId, exportRoomId, fHours, prevBatch, fQuestion, fStart,
+                aiService.queryAI(responseRoomId, exportRoomId, fHours, prevBatch, fQuestion, fEventId, fForward,
                         zoneId, fMax, promptPrefix, abortFlag, backend);
             } finally {
                 runningOperations.remove(sender);
@@ -418,11 +421,11 @@ public class CommandDispatcher {
                 +
                 "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
-                "**!summary <count or hours or timestamp> [question]** - Detailed summary with auto-fallback (ArliAI -> Cerebras)\n"
+                "**!summary <link or count or hours> [question]** - Detailed summary with auto-fallback (ArliAI -> Cerebras)\n"
                 +
-                "**!arliai, !cerebras <count or hours> [question]** - Query specific AI backend (debug)\n"
+                "**!arliai, !cerebras <link or count or hours> [question]** - Query specific AI backend (debug)\n"
                 +
-                "**!tldr <count or hours or timestamp> [question]** - Quick 15s summary with auto-fallback\n"
+                "**!tldr <link or count or hours> [question]** - Quick 15s summary with auto-fallback\n"
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!grep, !grep-slow, !search <hours>h <pattern>** - Pattern and term-based searches\n\n" +

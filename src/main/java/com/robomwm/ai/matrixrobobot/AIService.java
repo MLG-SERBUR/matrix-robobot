@@ -46,16 +46,13 @@ public class AIService {
     }
 
     public void queryAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
-            long startTimestamp, ZoneId zoneId, int maxMessages, String promptPrefix,
+            String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             String timeInfo = "";
-            if (startTimestamp > 0) {
-                String dateStr = java.time.Instant.ofEpochMilli(startTimestamp)
-                        .atZone(zoneId)
-                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                timeInfo = "starting at " + dateStr + " (next "
+            if (startEventId != null) {
+                timeInfo = (forward ? "after " : "before ") + "message " + startEventId + " (limit "
                         + (maxMessages > 0 ? maxMessages + " messages" : hours + "h") + ")";
             } else {
                 if (maxMessages > 0) {
@@ -75,13 +72,11 @@ public class AIService {
             if (eventId == null)
                 return; // Failed to send status
 
-            long endTime = startTimestamp > 0 ? startTimestamp + (long) hours * 3600L * 1000L : -1;
-
             if (abortFlag != null && abortFlag.get())
                 return;
 
-            RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(exportRoomId, hours,
-                    fromToken, startTimestamp, endTime, zoneId, maxMessages);
+            RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryRelative(exportRoomId, hours,
+                    fromToken, startEventId, forward, zoneId, maxMessages);
             if (result.logs.isEmpty()) {
                 matrixClient.sendMarkdown(responseRoomId,
                         "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
