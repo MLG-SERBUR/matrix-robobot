@@ -65,9 +65,12 @@ public class AIService {
                 }
             }
 
-            String statusMsg = "Querying AI (" + (preferredBackend == Backend.AUTO ? "Auto" : preferredBackend)
-                    + ") with chat logs from " + exportRoomId + " ("
-                    + timeInfo + (question != null ? " and question: " + question : "") + ")...";
+            String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
+            
+            String backendName = preferredBackend == Backend.AUTO ? "Arli AI" : preferredBackend.toString(); // Start with Arli if AUTO
+            String statusMsg = "Querying " + backendName
+                    + " with chat logs from " + exportRoomId + " ("
+                    + timeInfo + questionPart + ")...";
             String eventId = matrixClient.sendTextWithEventId(responseRoomId, statusMsg);
             if (eventId == null)
                 return; // Failed to send status
@@ -102,6 +105,8 @@ public class AIService {
             // If explicit Arli, only try Arli.
             // If AUTO, try Arli, then Cerebras.
 
+            boolean msgEdited = false;
+
             if (tryArli) {
                 try {
                     String answer = callArliAI(prompt);
@@ -109,10 +114,15 @@ public class AIService {
                     matrixClient.sendMarkdown(responseRoomId, answer);
                     return; // Success
                 } catch (Exception e) {
+                    System.out.println("ArliAI Error: " + e.getMessage()); // Log for debugging
+                    e.printStackTrace();
+                    
                     // Check for specific 403 context limit error
                     if (e.getMessage().contains("exceeded the maximum context length")) {
+                        String contextInfo = extractContextInfo(e.getMessage());
                         matrixClient.updateTextMessage(responseRoomId, eventId,
-                                "Arli AI context exceeded. Querying Cerebras with " + timeInfo + "...");
+                                "Arli AI context exceeded" + contextInfo + ". Querying Cerebras with " + timeInfo + questionPart + "...");
+                        msgEdited = true;
                     } else {
                         matrixClient.sendText(responseRoomId, "ArliAI failed: " + e.getMessage());
                     }
@@ -131,10 +141,10 @@ public class AIService {
                 // If we are here in AUTO mode, it means Arli failed or we skipped it.
                 // If failed, we might want to announce we are trying Cerebras (if not already
                 // done via edit).
-                if (preferredBackend == Backend.AUTO && !eventId.isEmpty()) {
+                if (preferredBackend == Backend.AUTO && !eventId.isEmpty() && !msgEdited) {
                     // The edit above handles the context limit case. For other errors, we already
                     // printed "ArliAI failed".
-                    // Maybe print "Trying Cerebras..."?
+                    // Maybe print "Querying Cerebras..."?
                     // The user request said: "keep the error message it prints in chat and logs"
                     // except for 403.
                     matrixClient.sendText(responseRoomId, "Querying Cerebras...");
@@ -215,8 +225,10 @@ public class AIService {
                 return;
             }
 
+            String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
+            
             String summarizingMsg = "Summarizing " + result.logs.size() + " unread messages"
-                    + (question != null ? " with question: " + question : "") + "...";
+                    + questionPart + "...";
             if (eventId != null) {
                 matrixClient.updateTextMessage(responseRoomId, eventId, summarizingMsg);
             } else {
@@ -240,9 +252,14 @@ public class AIService {
                 answer = appendMessageLink(answer, exportRoomId, result.firstEventId);
                 matrixClient.sendMarkdown(responseRoomId, answer);
             } catch (Exception e) {
+                System.out.println("ArliAI Unread Error: " + e.getMessage());
+                e.printStackTrace();
+                
                 if (e.getMessage().contains("exceeded the maximum context length")) {
+                    String contextInfo = extractContextInfo(e.getMessage());
                     matrixClient.updateTextMessage(responseRoomId, eventId,
-                            "Arli AI context exceeded. Querying Cerebras...");
+                            "Arli AI context exceeded" + contextInfo + ". Querying Cerebras with " + result.logs.size()
+                                    + " unread messages...");
                 } else {
                     matrixClient.sendText(responseRoomId, "ArliAI failed: " + e.getMessage());
                     matrixClient.sendText(responseRoomId, "Querying Cerebras...");
@@ -319,5 +336,22 @@ public class AIService {
             return aiAnswer + "\n\n" + messageLink;
         }
         return aiAnswer;
+    }
+
+    private String extractContextInfo(String errorMessage) {
+        try {
+            int flags = java.util.regex.Pattern.DOTALL | java.util.regex.Pattern.CASE_INSENSITIVE;
+            
+            // Pattern: "exceeded the maximum context length ... (used/limit)"
+            // Matches: "exceeded the maximum context length for FREE (33117/16384)"
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile("exceeded.*?context.*?\\((\\d+)/(\\d+)\\)", flags);
+            java.util.regex.Matcher m = p.matcher(errorMessage);
+            if (m.find()) {
+                return " (" + m.group(1) + "/" + m.group(2) + ")"; // Used/Limit
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+        return "";
     }
 }
