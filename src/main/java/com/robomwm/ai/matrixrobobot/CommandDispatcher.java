@@ -238,14 +238,12 @@ public class CommandDispatcher {
             }
             question = remaining.trim().isEmpty() ? null : remaining.trim();
         } else {
-            // No valid first arg? Maybe just question?
-            if (!firstArg.isEmpty()) {
-                hours = 24;
-                question = args;
-            } else {
-                matrixClient.sendText(responseRoomId, "Usage: " + commandName + " <link|count|hours> [question]");
-                return;
-            }
+            // No valid first arg? Show usage.
+            matrixClient.sendText(responseRoomId, "Usage: " + commandName + " <link|count|duration> [question]\n" +
+                    "Example: !summary 1h what happened?\n" +
+                    "Example: !summary 50 summarize this\n" +
+                    "Example: !summary https://matrix.to/#/... 10 what is this about?");
+            return;
         }
 
         System.out.println("Received " + commandName + " command in " + roomId + " from " + sender);
@@ -421,11 +419,11 @@ public class CommandDispatcher {
                 +
                 "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
-                "**!summary <link or count or hours> [question]** - Detailed summary with auto-fallback (ArliAI -> Cerebras)\n"
+                "**!summary <link or count or duration> [question]** - Detailed summary with auto-fallback (ArliAI -> Cerebras)\n"
                 +
-                "**!arliai, !cerebras <link or count or hours> [question]** - Query specific AI backend (debug)\n"
+                "**!arliai, !cerebras <link or count or duration> [question]** - Query specific AI backend (debug)\n"
                 +
-                "**!tldr <link or count or hours> [question]** - Quick 15s summary with auto-fallback\n"
+                "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n"
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!grep, !grep-slow, !search <hours>h <pattern>** - Pattern and term-based searches\n\n" +

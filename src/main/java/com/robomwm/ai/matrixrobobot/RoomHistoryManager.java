@@ -33,10 +33,16 @@ public class RoomHistoryManager {
     public static class ChatLogsResult {
         public List<String> logs;
         public String firstEventId;
+        public String errorMessage;
 
         public ChatLogsResult(List<String> logs, String firstEventId) {
+            this(logs, firstEventId, null);
+        }
+
+        public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage) {
             this.logs = logs;
             this.firstEventId = firstEventId;
+            this.errorMessage = errorMessage;
         }
     }
 
@@ -63,10 +69,20 @@ public class RoomHistoryManager {
     public static class TokenResult {
         public String token;
         public long timestamp;
+        public String errorMessage;
 
         public TokenResult(String token, long timestamp) {
+            this(token, timestamp, null);
+        }
+
+        public TokenResult(String token, long timestamp, String errorMessage) {
             this.token = token;
             this.timestamp = timestamp;
+            this.errorMessage = errorMessage;
+        }
+
+        public static TokenResult error(String message) {
+            return new TokenResult(null, 0, message);
         }
     }
 
@@ -177,8 +193,8 @@ public class RoomHistoryManager {
         String firstEventId = null;
 
         TokenResult tokenRes = getTokenForEvent(roomId, startEventId, forward);
-        if (tokenRes == null) {
-            return new ChatLogsResult(lines, null);
+        if (tokenRes == null || tokenRes.errorMessage != null) {
+            return new ChatLogsResult(lines, null, tokenRes != null ? tokenRes.errorMessage : "Failed to get token for event " + startEventId);
         }
 
         String token = tokenRes.token;
@@ -291,11 +307,14 @@ public class RoomHistoryManager {
                 long ts = root.path("event").path("origin_server_ts").asLong(0);
                 return new TokenResult(token, ts);
             }
-            System.out.println("Failed to get token for event " + eventId + ": " + resp.statusCode());
+            String errorMsg = "Failed to get token for event " + eventId + ": " + resp.statusCode();
+            System.out.println(errorMsg);
+            return TokenResult.error(errorMsg);
         } catch (Exception e) {
-            System.out.println("Error getting token for event: " + e.getMessage());
+            String errorMsg = "Error getting token for event " + eventId + ": " + e.getMessage();
+            System.out.println(errorMsg);
+            return TokenResult.error(errorMsg);
         }
-        return null;
     }
 
     /**

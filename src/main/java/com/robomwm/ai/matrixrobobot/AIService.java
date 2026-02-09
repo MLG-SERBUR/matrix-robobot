@@ -77,6 +77,10 @@ public class AIService {
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryRelative(exportRoomId, hours,
                     fromToken, startEventId, forward, zoneId, maxMessages);
+            if (result.errorMessage != null) {
+                matrixClient.sendMarkdown(responseRoomId, result.errorMessage);
+                return;
+            }
             if (result.logs.isEmpty()) {
                 matrixClient.sendMarkdown(responseRoomId,
                         "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
