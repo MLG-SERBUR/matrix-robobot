@@ -185,7 +185,7 @@ public class AutoLastService {
 
             new Thread(() -> {
                 try {
-                    aiService.queryArliAIUnread(dmRoomId, exportRoomId, userId, zoneId, null,
+                    aiService.queryAIUnread(dmRoomId, exportRoomId, userId, zoneId, null,
                             AIService.Prompts.OVERVIEW_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false));
                 } catch (Exception e) {
                     System.err.println("Error running auto-summary: " + e.getMessage());

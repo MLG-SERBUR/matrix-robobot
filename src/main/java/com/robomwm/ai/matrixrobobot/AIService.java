@@ -63,103 +63,90 @@ public class AIService {
             }
 
             String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
-            
-            String backendName = preferredBackend == Backend.AUTO ? "Arli AI" : preferredBackend.toString(); // Start with Arli if AUTO
+            String backendName = preferredBackend == Backend.AUTO ? "Arli AI" : preferredBackend.toString();
             String statusMsg = "Querying " + backendName
                     + " with chat logs from " + exportRoomId + " ("
                     + timeInfo + questionPart + ")...";
-            String eventId = matrixClient.sendTextWithEventId(responseRoomId, statusMsg);
-            if (eventId == null)
-                return; // Failed to send status
 
-            if (abortFlag != null && abortFlag.get())
-                return;
-
-            RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryRelative(exportRoomId, hours,
+            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryRelative(exportRoomId, hours,
                     fromToken, startEventId, forward, zoneId, maxMessages);
-            if (result.errorMessage != null) {
-                matrixClient.sendMarkdown(responseRoomId, result.errorMessage);
+
+            if (history.errorMessage != null) {
+                matrixClient.sendMarkdown(responseRoomId, history.errorMessage);
                 return;
             }
-            if (result.logs.isEmpty()) {
+            if (history.logs.isEmpty()) {
                 matrixClient.sendMarkdown(responseRoomId,
                         "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
                 return;
             }
 
-            if (abortFlag != null && abortFlag.get())
-                return;
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, statusMsg, timeInfo + questionPart);
 
-            String prompt = buildPrompt(question, result.logs, promptPrefix);
+        } catch (Exception e) {
+            e.printStackTrace();
+            matrixClient.sendMarkdown(responseRoomId, "Error querying AI: " + e.getMessage());
+        }
+    }
+
+    private void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
+                                String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+                                Backend preferredBackend, String initialStatusMsg, String queryDescription) {
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        try {
+            String eventId = matrixClient.sendTextWithEventId(responseRoomId, initialStatusMsg);
+            if (eventId == null) return;
+
+            if (abortFlag != null && abortFlag.get()) return;
+
+            String prompt = buildPrompt(question, history.logs, promptPrefix);
 
             // Fallback Logic
             boolean tryArli = preferredBackend == Backend.AUTO || preferredBackend == Backend.ARLIAI;
-            boolean tryCerebras = preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS; // If AUTO,
-                                                                                                            // we try
-                                                                                                            // Cerebras
-                                                                                                            // if Arli
-                                                                                                            // fails.
-
-            // If explicit Cerebras, only try Cerebras.
-            // If explicit Arli, only try Arli.
-            // If AUTO, try Arli, then Cerebras.
+            boolean tryCerebras = preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS;
 
             boolean msgEdited = false;
 
             if (tryArli) {
                 try {
                     String answer = callArliAI(prompt);
-                    answer = appendMessageLink(answer, exportRoomId, result.firstEventId);
+                    answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
                     matrixClient.sendMarkdown(responseRoomId, answer);
                     return; // Success
                 } catch (Exception e) {
-                    System.out.println("ArliAI Error: " + e.getMessage()); // Log for debugging
-                    
-                    // Check for specific 403 context limit error
+                    System.out.println("ArliAI Error: " + e.getMessage());
+
                     if (e.getMessage().contains("exceeded the maximum context length")) {
                         String contextInfo = extractContextInfo(e.getMessage());
                         matrixClient.updateTextMessage(responseRoomId, eventId,
-                                "Arli AI context exceeded" + contextInfo + ". Querying Cerebras with " + timeInfo + questionPart + "...");
+                                "Arli AI context exceeded" + contextInfo + ". Querying Cerebras with " + queryDescription + "...");
                         msgEdited = true;
                     } else {
                         matrixClient.sendText(responseRoomId, "ArliAI failed: " + e.getMessage());
                     }
 
-                    if (preferredBackend == Backend.ARLIAI) {
-                        return; // Done if only Arli was requested
-                    }
-                    // else continue to Cerebras if AUTO
+                    if (preferredBackend == Backend.ARLIAI) return;
                 }
             }
 
-            if (abortFlag != null && abortFlag.get())
-                return;
+            if (abortFlag != null && abortFlag.get()) return;
 
             if (tryCerebras) {
-                // If we are here in AUTO mode, it means Arli failed or we skipped it.
-                // If failed, we might want to announce we are trying Cerebras (if not already
-                // done via edit).
                 if (preferredBackend == Backend.AUTO && !eventId.isEmpty() && !msgEdited) {
-                    // The edit above handles the context limit case. For other errors, we already
-                    // printed "ArliAI failed".
-                    // Maybe print "Querying Cerebras..."?
-                    // The user request said: "keep the error message it prints in chat and logs"
-                    // except for 403.
                     matrixClient.sendText(responseRoomId, "Querying Cerebras...");
                 }
 
                 try {
                     String answer = callCerebras(prompt);
-                    answer = appendMessageLink(answer, exportRoomId, result.firstEventId);
+                    answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
                     matrixClient.sendMarkdown(responseRoomId, answer);
                 } catch (Exception e) {
                     matrixClient.sendMarkdown(responseRoomId, "Cerebras AI failed: " + e.getMessage());
                 }
             }
-
         } catch (Exception e) {
             e.printStackTrace();
-            matrixClient.sendMarkdown(responseRoomId, "Error querying AI: " + e.getMessage());
+            matrixClient.sendMarkdown(responseRoomId, "Error performing AI query: " + e.getMessage());
         }
     }
 
@@ -197,7 +184,7 @@ public class AIService {
         }
     }
 
-    public void queryArliAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
+    public void queryAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
             String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
@@ -207,12 +194,6 @@ public class AIService {
                 matrixClient.sendMarkdown(responseRoomId, "No read receipt found for you in " + exportRoomId + ".");
                 return;
             }
-
-            String statusMsg = "Fetching unread messages for you in " + exportRoomId + "...";
-            String eventId = matrixClient.sendTextWithEventId(responseRoomId, statusMsg);
-
-            if (abortFlag != null && abortFlag.get())
-                return;
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
                     lastRead.eventId,
@@ -224,53 +205,10 @@ public class AIService {
             }
 
             String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
-            
-            String summarizingMsg = "Summarizing " + result.logs.size() + " unread messages"
-                    + questionPart + "...";
-            if (eventId != null) {
-                matrixClient.updateTextMessage(responseRoomId, eventId, summarizingMsg);
-            } else {
-                eventId = matrixClient.sendTextWithEventId(responseRoomId, summarizingMsg);
-            }
+            String statusMsg = "Summarizing " + result.logs.size() + " unread messages" + questionPart + "...";
+            String queryDescription = result.logs.size() + " unread messages" + questionPart;
 
-            String prompt = buildPrompt(question, result.logs, promptPrefix);
-
-            if (abortFlag != null && abortFlag.get())
-                return;
-
-            // Trigger fallback logic manually or reuse callArliAI/callCerebras
-            // Since this is specifically "queryArliAIUnread", historically it was Arli
-            // only.
-            // But user said "automatically try using cerberus... Allow for !summary
-            // command... fallback logic the new normal"
-            // So we should probably try fallback here too.
-
-            try {
-                String answer = callArliAI(prompt);
-                answer = appendMessageLink(answer, exportRoomId, result.firstEventId);
-                matrixClient.sendMarkdown(responseRoomId, answer);
-            } catch (Exception e) {
-                System.out.println("ArliAI Unread Error: " + e.getMessage());
-                e.printStackTrace();
-                
-                if (e.getMessage().contains("exceeded the maximum context length")) {
-                    String contextInfo = extractContextInfo(e.getMessage());
-                    matrixClient.updateTextMessage(responseRoomId, eventId,
-                            "Arli AI context exceeded" + contextInfo + ". Querying Cerebras with " + result.logs.size()
-                                    + " unread messages...");
-                } else {
-                    matrixClient.sendText(responseRoomId, "ArliAI failed: " + e.getMessage());
-                    matrixClient.sendText(responseRoomId, "Querying Cerebras...");
-                }
-
-                try {
-                    String answer = callCerebras(prompt);
-                    answer = appendMessageLink(answer, exportRoomId, result.firstEventId);
-                    matrixClient.sendMarkdown(responseRoomId, answer);
-                } catch (Exception ex) {
-                    matrixClient.sendMarkdown(responseRoomId, "Cerebras AI failed: " + ex.getMessage());
-                }
-            }
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, statusMsg, queryDescription);
 
         } catch (Exception e) {
             e.printStackTrace();

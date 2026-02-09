@@ -83,3 +83,4 @@ target/
 config.json
 autolast_enabled_users.json
 user_timezones.json
+autosummary_enabled_users.json

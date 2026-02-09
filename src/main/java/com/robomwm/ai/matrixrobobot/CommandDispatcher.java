@@ -149,7 +149,7 @@ public class CommandDispatcher {
             System.out.println("Received lastsummary command in " + roomId + " from " + sender);
             new Thread(() -> {
                 try {
-                    aiService.queryArliAIUnread(responseRoomId, exportRoomId, sender, zoneId, question,
+                    aiService.queryAIUnread(responseRoomId, exportRoomId, sender, zoneId, question,
                             AIService.Prompts.OVERVIEW_PREFIX, abortFlag);
                 } finally {
                     runningOperations.remove(sender);
