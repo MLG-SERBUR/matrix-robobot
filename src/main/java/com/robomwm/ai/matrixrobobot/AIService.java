@@ -114,7 +114,6 @@ public class AIService {
                     return; // Success
                 } catch (Exception e) {
                     System.out.println("ArliAI Error: " + e.getMessage()); // Log for debugging
-                    e.printStackTrace();
                     
                     // Check for specific 403 context limit error
                     if (e.getMessage().contains("exceeded the maximum context length")) {
