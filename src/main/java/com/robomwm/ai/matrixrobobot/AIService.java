@@ -114,15 +114,20 @@ public class AIService {
                     matrixClient.sendMarkdown(responseRoomId, answer);
                     return; // Success
                 } catch (Exception e) {
-                    System.out.println("ArliAI Error: " + e.getMessage());
+                    String errorMsg = e.getMessage();
+                    System.out.println("ArliAI Error: " + errorMsg);
 
-                    if (e.getMessage().contains("exceeded the maximum context length")) {
-                        String contextInfo = extractContextInfo(e.getMessage());
+                    boolean is403 = errorMsg.contains("Status: 403");
+                    boolean isContextExceeded = errorMsg.contains("exceeded the maximum context length");
+
+                    if (is403 && isContextExceeded) {
+                        String contextInfo = extractContextInfo(errorMsg);
                         matrixClient.updateTextMessage(responseRoomId, eventId,
                                 "Arli AI context exceeded" + contextInfo + ". Querying Cerebras with " + queryDescription + "...");
                         msgEdited = true;
                     } else {
-                        matrixClient.sendText(responseRoomId, "ArliAI failed: " + e.getMessage());
+                        matrixClient.sendText(responseRoomId, "ArliAI failed: " + errorMsg);
+                        if (is403) return; // Don't fallback on other 403 errors
                     }
 
                     if (preferredBackend == Backend.ARLIAI) return;
