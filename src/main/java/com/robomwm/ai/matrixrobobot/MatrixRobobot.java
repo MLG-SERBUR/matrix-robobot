@@ -76,8 +76,8 @@ public class MatrixRobobot {
                 aiService, semanticSearchService, timezoneService);
 
         // NEW: AutoLastService with explicit HttpClient passed
-        AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, client, mapper, url,
-                config.accessToken);
+        AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, aiService,
+                timezoneService, client, mapper, url, config.accessToken);
 
         String userId = matrixClient.getUserId();
 
@@ -190,6 +190,11 @@ public class MatrixRobobot {
                             else if ("!autolast".equals(trimmed)) {
                                 System.out.println("Received !autolast command from " + sender);
                                 autoLastService.toggleAutoLast(sender, responseRoomId);
+                            }
+                            // NEW: !autosummary command
+                            else if ("!autosummary".equals(trimmed)) {
+                                System.out.println("Received !autosummary command from " + sender);
+                                autoLastService.toggleAutoSummary(sender, responseRoomId);
                             }
                             // !ping for diagnostics
                             else if ("!ping".equals(trimmed)) {

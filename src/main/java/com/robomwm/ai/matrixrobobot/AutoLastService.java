@@ -17,26 +17,35 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AutoLastService {
 
     private final Set<String> enabledUsers = ConcurrentHashMap.newKeySet();
+    private final Set<String> enabledSummaryUsers = ConcurrentHashMap.newKeySet();
     private final Map<String, Long> lastTriggerTime = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastSummaryTriggerTime = new ConcurrentHashMap<>();
     private final Map<String, RoomHistoryManager.EventInfo> lastReadInfo = new ConcurrentHashMap<>();
 
     private final MatrixClient matrixClient;
     private final LastMessageService lastMessageService;
-    private final HttpClient httpClient; // Added HttpClient
+    private final AIService aiService;
+    private final TimezoneService timezoneService;
+    private final HttpClient httpClient;
     private final ObjectMapper mapper;
     private final String homeserver;
     private final String accessToken;
     private final Path persistenceFile;
+    private final Path summaryPersistenceFile;
 
     public AutoLastService(MatrixClient matrixClient, LastMessageService lastMessageService,
+            AIService aiService, TimezoneService timezoneService,
             HttpClient httpClient, ObjectMapper mapper, String homeserver, String accessToken) {
         this.matrixClient = matrixClient;
         this.lastMessageService = lastMessageService;
-        this.httpClient = httpClient; // Store HttpClient
+        this.aiService = aiService;
+        this.timezoneService = timezoneService;
+        this.httpClient = httpClient;
         this.mapper = mapper;
         this.homeserver = homeserver;
         this.accessToken = accessToken;
         this.persistenceFile = Paths.get("autolast_enabled_users.json");
+        this.summaryPersistenceFile = Paths.get("autosummary_enabled_users.json");
 
         // Load persisted enabled users
         loadEnabledUsers();
@@ -52,7 +61,22 @@ public class AutoLastService {
         } else {
             enabledUsers.add(userId);
             matrixClient.sendText(roomId,
-                    "Auto-!last enabled. I will DM you a summary when you read the export room after being away.");
+                    "Auto-!last enabled. I will DM you your last message when you read the export room after being away.");
+        }
+        saveEnabledUsers();
+    }
+
+    /**
+     * Toggles the summary feature for a user.
+     */
+    public void toggleAutoSummary(String userId, String roomId) {
+        if (enabledSummaryUsers.contains(userId)) {
+            enabledSummaryUsers.remove(userId);
+            matrixClient.sendText(roomId, "Auto-!summary disabled.");
+        } else {
+            enabledSummaryUsers.add(userId);
+            matrixClient.sendText(roomId,
+                    "Auto-!summary enabled. I will DM you an AI summary when you read the export room after being away for over an hour with over 100 unread messages.");
         }
         saveEnabledUsers();
     }
@@ -88,33 +112,45 @@ public class AutoLastService {
             while (userIds.hasNext()) {
                 String userId = userIds.next();
 
-                // 1. Check if user is enabled
-                if (!enabledUsers.contains(userId))
+                // 1. Check if user is enabled for at least one feature
+                boolean lastEnabled = enabledUsers.contains(userId);
+                boolean summaryEnabled = enabledSummaryUsers.contains(userId);
+                
+                if (!lastEnabled && !summaryEnabled)
                     continue;
 
                 long now = System.currentTimeMillis();
-                long lastTrigger = lastTriggerTime.getOrDefault(userId, 0L);
+                long ts = readNode.path(userId).path("ts").asLong(0);
+                RoomHistoryManager.EventInfo currentReadInfo = new RoomHistoryManager.EventInfo(eventId, ts);
+                RoomHistoryManager.EventInfo previousReadInfo = lastReadInfo.get(userId);
 
-                // 2. Check debounce (30 minutes) - "last read was more than half an hour ago"
-                // We use the trigger time to ensure we don't spam if they read messages in a
-                // row.
-                if (now - lastTrigger < 1800000) {
-                    // Update the last known read info, but don't trigger
-                    long ts = readNode.path(userId).path("ts").asLong(0);
-                    lastReadInfo.put(userId, new RoomHistoryManager.EventInfo(eventId, ts));
+                // Update state for next trigger check, but we need the previous info to check gaps
+                if (previousReadInfo == null || previousReadInfo.eventId.equals(eventId)) {
+                    lastReadInfo.put(userId, currentReadInfo);
                     continue;
                 }
 
-                // 3. Check for at least 30 unread messages
-                RoomHistoryManager.EventInfo previousReadInfo = lastReadInfo.get(userId);
-                long ts = readNode.path(userId).path("ts").asLong(0);
-                RoomHistoryManager.EventInfo currentReadInfo = new RoomHistoryManager.EventInfo(eventId, ts);
+                // 2. Handle Auto-Last
+                if (lastEnabled) {
+                    long lastTrigger = lastTriggerTime.getOrDefault(userId, 0L);
+                    // Debounce (30 minutes)
+                    if (now - lastTrigger >= 1800000) {
+                        if (hasAtLeastMessages(roomId, previousReadInfo.eventId, eventId, 30)) {
+                            triggerLastMessage(roomId, userId, previousReadInfo);
+                            lastTriggerTime.put(userId, now);
+                        }
+                    }
+                }
 
-                // If we have a previous read state, check the gap
-                if (previousReadInfo != null && !previousReadInfo.eventId.equals(eventId)) {
-                    if (hasAtLeast30Messages(roomId, previousReadInfo.eventId, eventId)) {
-                        triggerLastMessage(roomId, userId);
-                        lastTriggerTime.put(userId, now);
+                // 3. Handle Auto-Summary
+                if (summaryEnabled) {
+                    long lastSummaryTrigger = lastSummaryTriggerTime.getOrDefault(userId, 0L);
+                    // Threshold: > 1 hour gap
+                    if (now - lastSummaryTrigger >= 3600000) {
+                        if (hasAtLeastMessages(roomId, previousReadInfo.eventId, eventId, 100)) {
+                            triggerSummary(roomId, userId);
+                            lastSummaryTriggerTime.put(userId, now);
+                        }
                     }
                 }
 
@@ -124,17 +160,11 @@ public class AutoLastService {
         }
     }
 
-    private void triggerLastMessage(String exportRoomId, String userId) {
+    private void triggerLastMessage(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo) {
         // Find a DM room with the user
         String dmRoomId = findDirectMessageRoom(userId);
         if (dmRoomId != null) {
             System.out.println("Triggering Auto-Last for " + userId);
-            // Get the cached previous read info before updating it (wait, it was already
-            // updated above)
-            // Actually, we want the info from BEFORE they read the new messages to show
-            // what they MISSED.
-            // Wait, lastMessageService uses this to show where they WERE.
-            RoomHistoryManager.EventInfo previousReadInfo = lastReadInfo.get(userId);
             // We run this in a separate thread to not block the sync loop
             new Thread(() -> lastMessageService.sendLastMessageAndReadReceipt(exportRoomId, userId, dmRoomId,
                     previousReadInfo)).start();
@@ -143,11 +173,34 @@ public class AutoLastService {
         }
     }
 
+    private void triggerSummary(String exportRoomId, String userId) {
+        String dmRoomId = findDirectMessageRoom(userId);
+        if (dmRoomId != null) {
+            System.out.println("Triggering Auto-Summary for " + userId);
+            java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(userId);
+            if (zoneId == null) {
+                System.out.println("No timezone set for " + userId + ", skipping auto-summary trigger.");
+                return;
+            }
+
+            new Thread(() -> {
+                try {
+                    aiService.queryArliAIUnread(dmRoomId, exportRoomId, userId, zoneId, null,
+                            AIService.Prompts.OVERVIEW_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false));
+                } catch (Exception e) {
+                    System.err.println("Error running auto-summary: " + e.getMessage());
+                }
+            }).start();
+        } else {
+            System.out.println("Could not find DM room for auto-summary user: " + userId);
+        }
+    }
+
     /**
-     * Checks if there are >= 30 messages between fromEventId and toEventId
+     * Checks if there are >= threshold messages between fromEventId and toEventId
      * (exclusive of from, inclusive of to).
      */
-    private boolean hasAtLeast30Messages(String roomId, String previousReadId, String currentReadId) {
+    private boolean hasAtLeastMessages(String roomId, String previousReadId, String currentReadId, int threshold) {
         try {
             // Fetch recent messages
             String url = homeserver + "/_matrix/client/v3/rooms/" + roomId + "/messages?dir=b&limit=100";
@@ -188,7 +241,7 @@ public class AutoLastService {
                 }
             }
 
-            return messagesFound >= 30;
+            return messagesFound >= threshold;
 
         } catch (Exception e) {
             System.err.println("Error checking message gap: " + e.getMessage());
@@ -252,17 +305,26 @@ public class AutoLastService {
      * Load enabled users from persistence file.
      */
     private void loadEnabledUsers() {
-        if (!Files.exists(persistenceFile)) {
-            return;
+        if (Files.exists(persistenceFile)) {
+            try {
+                String content = Files.readString(persistenceFile);
+                String[] users = mapper.readValue(content, String[].class);
+                enabledUsers.addAll(Arrays.asList(users));
+                System.out.println("Loaded " + users.length + " autolast enabled users from persistence");
+            } catch (IOException e) {
+                System.err.println("Error loading autolast enabled users: " + e.getMessage());
+            }
         }
 
-        try {
-            String content = Files.readString(persistenceFile);
-            String[] users = mapper.readValue(content, String[].class);
-            enabledUsers.addAll(Arrays.asList(users));
-            System.out.println("Loaded " + users.length + " autolast enabled users from persistence");
-        } catch (IOException e) {
-            System.err.println("Error loading autolast enabled users: " + e.getMessage());
+        if (Files.exists(summaryPersistenceFile)) {
+            try {
+                String content = Files.readString(summaryPersistenceFile);
+                String[] users = mapper.readValue(content, String[].class);
+                enabledSummaryUsers.addAll(Arrays.asList(users));
+                System.out.println("Loaded " + users.length + " autosummary enabled users from persistence");
+            } catch (IOException e) {
+                System.err.println("Error loading autosummary enabled users: " + e.getMessage());
+            }
         }
     }
 
@@ -274,8 +336,12 @@ public class AutoLastService {
             String[] users = enabledUsers.toArray(new String[0]);
             String content = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(users);
             Files.writeString(persistenceFile, content);
+
+            String[] summaryUsers = enabledSummaryUsers.toArray(new String[0]);
+            String summaryContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(summaryUsers);
+            Files.writeString(summaryPersistenceFile, summaryContent);
         } catch (IOException e) {
-            System.err.println("Error saving autolast enabled users: " + e.getMessage());
+            System.err.println("Error saving enabled users: " + e.getMessage());
         }
     }
 }

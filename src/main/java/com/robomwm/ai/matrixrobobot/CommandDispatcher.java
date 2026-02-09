@@ -419,6 +419,8 @@ public class CommandDispatcher {
                 +
                 "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
+                "**!autolast** - Toggle automatic DM of last message when reading export room\n\n" +
+                "**!autosummary** - Toggle automatic AI summary when reading export room (>100 msgs, >1h gap)\n\n" +
                 "**!summary <link or count or duration> [question]** - Detailed summary with auto-fallback (ArliAI -> Cerebras)\n"
                 +
                 "**!arliai, !cerebras <link or count or duration> [question]** - Query specific AI backend (debug)\n"
