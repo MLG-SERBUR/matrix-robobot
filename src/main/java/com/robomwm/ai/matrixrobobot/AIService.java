@@ -42,7 +42,7 @@ public class AIService {
         public static final String QUESTION_PREFIX = "'";
         public static final String QUESTION_SUFFIX = "' Answer this prompt using these chat logs:\n\n";
         public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions, unanswered questions, or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end, including discovered solutions or interesting resources; no complete sentences required, this should be brief and avoid analysis. Your entire response should be faster to read than reading the chat log itself:\n\n";
-        public static final String SUMMARY_PREFIX = "Give a high level overview of the following chat logs, only including substantially-discussed topics; bias to include discovered solutions, unanswered questions, or suggested resources. Use only a title and timestamp for each topic; it shouldn't take more than 20 seconds to skim through the topics. Include one chat message verbatim (with username) for each topic. Don't use table format. Then collect a list of all chat messages verbatim (with username) that were not included in the overview that contain discovered solutions, unanswered questions, or suggested resources:\n\n";
+        public static final String SUMMARY_PREFIX = "Give a high level overview of the following chat logs, only including substantially-discussed topics; bias to include discovered solutions, unanswered questions, or suggested resources. Use only a title and timestamp for each topic; it shouldn't take more than 20 seconds to skim through the topics. Include one chat message verbatim (with username) for each topic. Don't use table format. Then collect a list of all chat messages verbatim (with username) that were not included in the overview that contain discovered solutions, unanswered questions, or suggested resources (ignore images not relevant to solutions/questions):\n\n";
         public static final String TLDR_PREFIX = "Provide a very concise summary of the following chat logs that can be read in 15 seconds or less. Make use of bullet points of key topics with timestamp; be extremely brief, no need for complete sentences. Always include topics that are informative towards a discovered solution or resources; if the other topics are significantly discussed, these topics can be added on to increase reading time to no more than 30 seconds. Then directly include the best chat message verbatim; have bias towards one that is informative towards a discovered solution or informative resource:\n\n";
     }
 
@@ -260,8 +260,32 @@ public class AIService {
         }
     }
 
+    private static final List<String> IGNORED_DOMAINS = List.of(
+            "pixiv.net",
+            "danbooru.donmai.us",
+            "safebooru.donmai.us");
+
     private String buildPrompt(String question, List<String> logs, String promptPrefix) {
-        String logsStr = String.join("\n", logs);
+        List<String> effectiveLogs = logs;
+
+        // If no question is provided, filter out lines containing ignored domains
+        if (question == null || question.isEmpty()) {
+            effectiveLogs = new ArrayList<>();
+            for (String log : logs) {
+                boolean ignore = false;
+                for (String domain : IGNORED_DOMAINS) {
+                    if (log.contains(domain)) {
+                        ignore = true;
+                        break;
+                    }
+                }
+                if (!ignore) {
+                    effectiveLogs.add(log);
+                }
+            }
+        }
+
+        String logsStr = String.join("\n", effectiveLogs);
         if (question != null && !question.isEmpty()) {
             return Prompts.QUESTION_PREFIX + question + Prompts.QUESTION_SUFFIX + logsStr;
         } else {
