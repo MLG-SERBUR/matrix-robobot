@@ -148,7 +148,7 @@ public class AutoLastService {
                     // Threshold: > 1 hour gap
                     if (now - lastSummaryTrigger >= 3600000) {
                         if (hasAtLeastMessages(roomId, previousReadInfo.eventId, eventId, 100)) {
-                            triggerSummary(roomId, userId);
+                            triggerSummary(roomId, userId, previousReadInfo);
                             lastSummaryTriggerTime.put(userId, now);
                         }
                     }
@@ -173,7 +173,7 @@ public class AutoLastService {
         }
     }
 
-    private void triggerSummary(String exportRoomId, String userId) {
+    private void triggerSummary(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo) {
         String dmRoomId = findDirectMessageRoom(userId);
         if (dmRoomId != null) {
             System.out.println("Triggering Auto-Summary for " + userId);
@@ -186,7 +186,8 @@ public class AutoLastService {
             new Thread(() -> {
                 try {
                     aiService.queryAIUnread(dmRoomId, exportRoomId, userId, zoneId, null,
-                            AIService.Prompts.OVERVIEW_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false));
+                            AIService.Prompts.OVERVIEW_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false),
+                            previousReadInfo != null ? previousReadInfo.eventId : null);
                 } catch (Exception e) {
                     System.err.println("Error running auto-summary: " + e.getMessage());
                 }

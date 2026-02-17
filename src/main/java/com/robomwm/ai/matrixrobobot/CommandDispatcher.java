@@ -150,7 +150,7 @@ public class CommandDispatcher {
             new Thread(() -> {
                 try {
                     aiService.queryAIUnread(responseRoomId, exportRoomId, sender, zoneId, question,
-                            AIService.Prompts.OVERVIEW_PREFIX, abortFlag);
+                            AIService.Prompts.OVERVIEW_PREFIX, abortFlag, null);
                 } finally {
                     runningOperations.remove(sender);
                 }

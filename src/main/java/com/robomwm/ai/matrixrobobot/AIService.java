@@ -190,18 +190,22 @@ public class AIService {
     }
 
     public void queryAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
-            String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
+            String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            String startEventId) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            RoomHistoryManager.EventInfo lastRead = historyManager.getReadReceipt(exportRoomId, sender);
-
-            if (lastRead == null) {
-                matrixClient.sendMarkdown(responseRoomId, "No read receipt found for you in " + exportRoomId + ".");
-                return;
+            String lastReadEventId = startEventId;
+            if (lastReadEventId == null) {
+                RoomHistoryManager.EventInfo lastRead = historyManager.getReadReceipt(exportRoomId, sender);
+                if (lastRead == null) {
+                    matrixClient.sendMarkdown(responseRoomId, "No read receipt found for you in " + exportRoomId + ".");
+                    return;
+                }
+                lastReadEventId = lastRead.eventId;
             }
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
-                    lastRead.eventId,
+                    lastReadEventId,
                     zoneId);
 
             if (result.logs.isEmpty()) {
