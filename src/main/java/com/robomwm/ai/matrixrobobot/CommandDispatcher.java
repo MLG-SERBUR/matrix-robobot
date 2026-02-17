@@ -64,9 +64,13 @@ public class CommandDispatcher {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!tldr",
                     AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
             return true;
+        } else if (trimmed.matches("!longsummary(?:\\s+.*)?")) {
+            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!longsummary",
+                    AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
+            return true;
         } else if (trimmed.matches("!summary(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summary",
-                    AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
+                    AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
         } else if (trimmed.matches("!cerebras(?:\\s+.*)?") || trimmed.matches("!cerebras-ts(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!cerebras",
@@ -421,7 +425,8 @@ public class CommandDispatcher {
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
                 "**!autolast** - Toggle automatic DM of last message when reading export room\n\n" +
                 "**!autosummary** - Toggle automatic AI summary when reading export room (>100 msgs, >1h gap)\n\n" +
-                "**!summary <link or count or duration> [question]** - Detailed summary with auto-fallback (ArliAI -> Cerebras)\n"
+                "**!summary <link or count or duration> [question]** - Condensed summary with auto-fallback (ArliAI -> Cerebras)\n" +
+                "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI -> Cerebras)\n"
                 +
                 "**!arliai, !cerebras <link or count or duration> [question]** - Query specific AI backend (debug)\n"
                 +

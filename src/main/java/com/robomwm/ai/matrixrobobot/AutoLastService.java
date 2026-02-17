@@ -135,7 +135,7 @@ public class AutoLastService {
                     long lastTrigger = lastTriggerTime.getOrDefault(userId, 0L);
                     // Debounce (30 minutes)
                     if (now - lastTrigger >= 1800000) {
-                        if (hasAtLeastMessages(roomId, previousReadInfo.eventId, eventId, 30)) {
+                        if (hasAtLeastMessages(roomId, previousReadInfo.eventId, eventId, 50)) {
                             triggerLastMessage(roomId, userId, previousReadInfo);
                             lastTriggerTime.put(userId, now);
                         }
