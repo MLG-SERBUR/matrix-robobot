@@ -250,6 +250,35 @@ public class AIService {
         }
     }
 
+    public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question,
+                         java.util.concurrent.atomic.AtomicBoolean abortFlag) {
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        try {
+            // ~16k tokens is roughly 60k characters
+            int charLimit = 60000;
+            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
+                    fromToken, charLimit, false, null);
+
+            if (history.logs.isEmpty()) {
+                matrixClient.sendMarkdown(responseRoomId, "No chat logs found in " + exportRoomId + ".");
+                return;
+            }
+
+            String arliModel = getRandomModel(ARLI_MODELS);
+            String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
+            String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
+            
+            String statusMsg = "Querying AI backend with " + history.logs.size() + " messages (no timestamps)" + questionPart + "...";
+            String queryDescription = "latest messages (no timestamps)" + questionPart;
+
+            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, Backend.AUTO, statusMsg, queryDescription, arliModel, cerebrasModel);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            matrixClient.sendMarkdown(responseRoomId, "Error querying AI: " + e.getMessage());
+        }
+    }
+
     private String callCerebras(String prompt, String model) throws Exception {
         String cerebrasApiUrl = "https://api.cerebras.ai";
         if (cerebrasApiKey == null || cerebrasApiKey.isEmpty()) {

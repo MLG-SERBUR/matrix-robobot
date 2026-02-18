@@ -603,6 +603,83 @@ public class RoomHistoryManager {
     }
 
     /**
+     * Fetch room history backwards until a character limit is reached.
+     */
+    public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int charLimit, boolean includeTimestamp, ZoneId zoneId) {
+        List<String> logs = new ArrayList<>();
+        String firstEventId = null;
+        int currentChars = 0;
+
+        String token = getPaginationToken(roomId, fromToken);
+
+        while (token != null && currentChars < charLimit) {
+            try {
+                String messagesUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
+                        + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
+                        + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=100";
+                HttpRequest msgReq = HttpRequest.newBuilder()
+                        .uri(URI.create(messagesUrl))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .timeout(Duration.ofSeconds(120))
+                        .GET()
+                        .build();
+                HttpResponse<String> msgResp = httpClient.send(msgReq, HttpResponse.BodyHandlers.ofString());
+                if (msgResp.statusCode() != 200) {
+                    System.out.println("Failed to fetch messages: " + msgResp.statusCode() + " - " + msgResp.body());
+                    break;
+                }
+                JsonNode root = mapper.readTree(msgResp.body());
+                JsonNode chunk = root.path("chunk");
+                if (!chunk.isArray() || chunk.size() == 0)
+                    break;
+
+                boolean reachedLimit = false;
+                for (JsonNode ev : chunk) {
+                    if (!"m.room.message".equals(ev.path("type").asText(null)))
+                        continue;
+
+                    String body = ev.path("content").path("body").asText(null);
+                    String sender = ev.path("sender").asText(null);
+                    String eventId = ev.path("event_id").asText(null);
+                    if (body != null && sender != null) {
+                        String line;
+                        if (includeTimestamp && zoneId != null) {
+                            long originServerTs = ev.path("origin_server_ts").asLong(0);
+                            String timestamp = Instant.ofEpochMilli(originServerTs)
+                                    .atZone(zoneId)
+                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                            line = "[" + timestamp + "] <" + sender + "> " + body;
+                        } else {
+                            line = "<" + sender + "> " + body;
+                        }
+
+                        if (currentChars + line.length() > charLimit) {
+                            reachedLimit = true;
+                            break;
+                        }
+
+                        logs.add(line);
+                        currentChars += line.length() + 1; // +1 for newline
+                        firstEventId = eventId;
+                    }
+                }
+
+                if (reachedLimit) {
+                    break;
+                }
+
+                token = root.path("end").asText(null);
+
+            } catch (Exception e) {
+                System.out.println("Error fetching room history until limit: " + e.getMessage());
+                break;
+            }
+        }
+        Collections.reverse(logs);
+        return new ChatLogsResult(logs, firstEventId);
+    }
+
+    /**
      * Get read receipt for a user in a room
      */
     public EventInfo getReadReceipt(String roomId, String userId) {

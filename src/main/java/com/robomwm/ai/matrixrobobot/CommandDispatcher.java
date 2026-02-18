@@ -72,6 +72,9 @@ public class CommandDispatcher {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summary",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
+        } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
+            handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+            return true;
         } else if (trimmed.matches("!cerebras(?:\\s+.*)?") || trimmed.matches("!cerebras-ts(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!cerebras",
                     AIService.Backend.CEREBRAS, AIService.Prompts.OVERVIEW_PREFIX);
@@ -271,6 +274,27 @@ public class CommandDispatcher {
         }).start();
     }
 
+    private void handleAsk(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
+                           String exportRoomId) {
+        String question = trimmed.replaceFirst("^!ask\\s*", "").trim();
+        if (question.isEmpty()) question = null;
+
+        System.out.println("Received !ask command in " + roomId + " from " + sender);
+
+        AtomicBoolean abortFlag = new AtomicBoolean(false);
+        runningOperations.put(sender, abortFlag);
+
+        final String fQuestion = question;
+
+        new Thread(() -> {
+            try {
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag);
+            } finally {
+                runningOperations.remove(sender);
+            }
+        }).start();
+    }
+
     private void handleSemanticSearch(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
         Matcher matcher = Pattern.compile("!semantic\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
@@ -431,6 +455,8 @@ public class CommandDispatcher {
                 "**!arliai, !cerebras <link or count or duration> [question]** - Query specific AI backend (debug)\n"
                 +
                 "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n"
+                +
+                "**!ask [question]** - Query AI backend with up to 16k tokens of history (no timestamps)\n"
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!grep, !grep-slow, !search <hours>h <pattern>** - Pattern and term-based searches\n\n" +
