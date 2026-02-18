@@ -21,6 +21,8 @@ public class AIService {
     private final String arliApiKey;
     private final String cerebrasApiKey;
     private final RoomHistoryManager historyManager;
+    public static final String ARLI_MODEL = "Gemma-3-27B-it";
+    public static final String CEREBRAS_MODEL = "gpt-oss-120b";
 
     public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
             String cerebrasApiKey) {
@@ -64,7 +66,7 @@ public class AIService {
             }
 
             String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
-            String backendName = preferredBackend == Backend.AUTO ? "Arli AI" : preferredBackend.toString();
+            String backendName = preferredBackend == Backend.CEREBRAS ? "Cerebras (" + CEREBRAS_MODEL + ")" : "Arli AI (" + ARLI_MODEL + ")";
             String statusMsg = "Querying " + backendName
                     + " with chat logs from " + exportRoomId + " ("
                     + timeInfo + questionPart + ")...";
@@ -124,10 +126,10 @@ public class AIService {
                     if (is403 && isContextExceeded) {
                         String contextInfo = extractContextInfo(errorMsg);
                         matrixClient.updateTextMessage(responseRoomId, eventId,
-                                "Arli AI context exceeded" + contextInfo + ". Querying Cerebras with " + queryDescription + "...");
+                                "Arli AI (" + ARLI_MODEL + ") context exceeded" + contextInfo + ". Querying Cerebras (" + CEREBRAS_MODEL + ") with " + queryDescription + "...");
                         msgEdited = true;
                     } else {
-                        matrixClient.sendText(responseRoomId, "ArliAI failed: " + errorMsg);
+                        matrixClient.sendText(responseRoomId, "ArliAI (" + ARLI_MODEL + ") failed: " + errorMsg);
                         if (is403) return; // Don't fallback on other 403 errors
                     }
 
@@ -139,7 +141,7 @@ public class AIService {
 
             if (tryCerebras) {
                 if (preferredBackend == Backend.AUTO && !eventId.isEmpty() && !msgEdited) {
-                    matrixClient.sendText(responseRoomId, "Querying Cerebras...");
+                    matrixClient.sendText(responseRoomId, "Querying Cerebras (" + CEREBRAS_MODEL + ")...");
                 }
 
                 try {
@@ -147,7 +149,7 @@ public class AIService {
                     answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
                     matrixClient.sendMarkdown(responseRoomId, answer);
                 } catch (Exception e) {
-                    matrixClient.sendMarkdown(responseRoomId, "Cerebras AI failed: " + e.getMessage());
+                    matrixClient.sendMarkdown(responseRoomId, "Cerebras AI (" + CEREBRAS_MODEL + ") failed: " + e.getMessage());
                 }
             }
         } catch (Exception e) {
@@ -165,7 +167,7 @@ public class AIService {
         List<Map<String, String>> messages = buildMessages(prompt);
 
         Map<String, Object> arliPayload = Map.of(
-                "model", "Gemma-3-27B-it",
+                "model", ARLI_MODEL,
                 "messages", messages,
                 "stream", false);
         String jsonPayload = mapper.writeValueAsString(arliPayload);
@@ -183,9 +185,9 @@ public class AIService {
         if (response.statusCode() == 200) {
             JsonNode arliResponse = mapper.readTree(response.body());
             return arliResponse.path("choices").get(0).path("message").path("content")
-                    .asText("No response from Arli AI.");
+                    .asText("No response from Arli AI (" + ARLI_MODEL + ").");
         } else {
-            throw new Exception("Failed to get response from Arli AI. Status: "
+            throw new Exception("Failed to get response from Arli AI (" + ARLI_MODEL + "). Status: "
                     + response.statusCode() + ", Body: " + response.body());
         }
     }
@@ -215,7 +217,7 @@ public class AIService {
             }
 
             String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
-            String statusMsg = "Summarizing " + result.logs.size() + " unread messages" + questionPart + "...";
+            String statusMsg = "Summarizing " + result.logs.size() + " unread messages with Arli AI (" + ARLI_MODEL + ")" + questionPart + "...";
             String queryDescription = result.logs.size() + " unread messages" + questionPart;
 
             performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, statusMsg, queryDescription);
@@ -235,7 +237,7 @@ public class AIService {
         List<Map<String, String>> messages = buildMessages(prompt);
 
         Map<String, Object> cerebrasPayload = Map.of(
-                "model", "gpt-oss-120b",
+                "model", CEREBRAS_MODEL,
                 "messages", messages,
                 "stream", false);
         String jsonPayload = mapper.writeValueAsString(cerebrasPayload);
@@ -253,9 +255,9 @@ public class AIService {
         if (response.statusCode() == 200) {
             JsonNode cerebrasResponse = mapper.readTree(response.body());
             return cerebrasResponse.path("choices").get(0).path("message").path("content")
-                    .asText("No response from Cerebras AI.");
+                    .asText("No response from Cerebras AI (" + CEREBRAS_MODEL + ").");
         } else {
-            throw new Exception("Failed to get response from Cerebras AI. Status: "
+            throw new Exception("Failed to get response from Cerebras AI (" + CEREBRAS_MODEL + "). Status: "
                     + response.statusCode() + ", Body: " + response.body());
         }
     }
