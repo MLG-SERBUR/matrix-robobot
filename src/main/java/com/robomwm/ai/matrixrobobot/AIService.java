@@ -95,8 +95,7 @@ public class AIService {
                 return;
             }
 
-            String queryDescription = "chat logs from " + exportRoomId + " (" + timeInfo + ")";
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, queryDescription);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -106,7 +105,7 @@ public class AIService {
 
     private void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-                                Backend preferredBackend, String queryDescription) {
+                                Backend preferredBackend) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             String arliModel = getRandomModel(ARLI_MODELS);
@@ -114,6 +113,7 @@ public class AIService {
 
             String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
             String backendName = preferredBackend == Backend.CEREBRAS ? "Cerebras (" + cerebrasModel + ")" : "Arli AI (" + arliModel + ")";
+            String queryDescription = history.logs.size() + " messages";
             String initialStatusMsg = "Querying " + backendName + " with " + queryDescription + questionPart + "...";
 
             String eventId = matrixClient.sendTextWithEventId(responseRoomId, initialStatusMsg);
@@ -235,8 +235,7 @@ public class AIService {
                 return;
             }
 
-            String queryDescription = result.logs.size() + " unread messages";
-            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, queryDescription);
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -259,8 +258,7 @@ public class AIService {
                 return;
             }
 
-            String queryDescription = history.logs.size() + " messages (no timestamps)";
-            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, Backend.AUTO, queryDescription);
+            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, Backend.AUTO);
 
         } catch (Exception e) {
             e.printStackTrace();
