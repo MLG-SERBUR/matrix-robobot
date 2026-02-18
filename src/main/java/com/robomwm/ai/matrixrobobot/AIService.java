@@ -82,14 +82,6 @@ public class AIService {
                 }
             }
 
-            String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
-            String arliModel = getRandomModel(ARLI_MODELS);
-            String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
-            String backendName = preferredBackend == Backend.CEREBRAS ? "Cerebras (" + cerebrasModel + ")" : "Arli AI (" + arliModel + ")";
-            String statusMsg = "Querying " + backendName
-                    + " with chat logs from " + exportRoomId + " ("
-                    + timeInfo + questionPart + ")...";
-
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryRelative(exportRoomId, hours,
                     fromToken, startEventId, forward, zoneId, maxMessages);
 
@@ -103,7 +95,8 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, statusMsg, timeInfo + questionPart, arliModel, cerebrasModel);
+            String queryDescription = "chat logs from " + exportRoomId + " (" + timeInfo + ")";
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, queryDescription);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -113,10 +106,16 @@ public class AIService {
 
     private void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-                                Backend preferredBackend, String initialStatusMsg, String queryDescription,
-                                String arliModel, String cerebrasModel) {
+                                Backend preferredBackend, String queryDescription) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
+            String arliModel = getRandomModel(ARLI_MODELS);
+            String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
+
+            String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
+            String backendName = preferredBackend == Backend.CEREBRAS ? "Cerebras (" + cerebrasModel + ")" : "Arli AI (" + arliModel + ")";
+            String initialStatusMsg = "Querying " + backendName + " with " + queryDescription + questionPart + "...";
+
             String eventId = matrixClient.sendTextWithEventId(responseRoomId, initialStatusMsg);
             if (eventId == null) return;
 
@@ -146,7 +145,7 @@ public class AIService {
                     if (is403 && isContextExceeded) {
                         String contextInfo = extractContextInfo(errorMsg);
                         matrixClient.updateTextMessage(responseRoomId, eventId,
-                                "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ". Querying Cerebras (" + cerebrasModel + ") with " + queryDescription + "...");
+                                "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ". Querying Cerebras (" + cerebrasModel + ") with " + queryDescription + questionPart + "...");
                         msgEdited = true;
                     } else {
                         matrixClient.sendText(responseRoomId, "ArliAI (" + arliModel + ") failed: " + errorMsg);
@@ -236,13 +235,8 @@ public class AIService {
                 return;
             }
 
-            String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
-            String arliModel = getRandomModel(ARLI_MODELS);
-            String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
-            String statusMsg = "Summarizing " + result.logs.size() + " unread messages with Arli AI (" + arliModel + ")" + questionPart + "...";
-            String queryDescription = result.logs.size() + " unread messages" + questionPart;
-
-            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, statusMsg, queryDescription, arliModel, cerebrasModel);
+            String queryDescription = result.logs.size() + " unread messages";
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, queryDescription);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -265,14 +259,8 @@ public class AIService {
                 return;
             }
 
-            String arliModel = getRandomModel(ARLI_MODELS);
-            String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
-            String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
-            
-            String statusMsg = "Querying Arli AI (" + arliModel + ") with " + history.logs.size() + " messages (no timestamps)" + questionPart + "...";
-            String queryDescription = "latest messages (no timestamps)" + questionPart;
-
-            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, Backend.AUTO, statusMsg, queryDescription, arliModel, cerebrasModel);
+            String queryDescription = history.logs.size() + " messages (no timestamps)";
+            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, Backend.AUTO, queryDescription);
 
         } catch (Exception e) {
             e.printStackTrace();
