@@ -254,8 +254,9 @@ public class AIService {
                          java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            // ~16k tokens is roughly 60k characters
-            int charLimit = 60000;
+            // ~16k tokens is roughly 40k-60k characters depending on content. 
+            // 60k characters resulted in ~23k tokens in practice, so we use 40k to be safe.
+            int charLimit = 40000;
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
                     fromToken, charLimit, false, null);
 
