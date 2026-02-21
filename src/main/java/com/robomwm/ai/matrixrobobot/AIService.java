@@ -312,6 +312,9 @@ public class AIService {
             "danbooru.donmai.us",
             "safebooru.donmai.us");
 
+    private static final List<String> IGNORED_USERS = List.of(
+            "@bot:kitty.haus");
+
     private String buildPrompt(String question, List<String> logs, String promptPrefix) {
         List<String> effectiveLogs = logs;
 
@@ -324,6 +327,14 @@ public class AIService {
                     if (log.contains(domain)) {
                         ignore = true;
                         break;
+                    }
+                }
+                if (!ignore) {
+                    for (String user : IGNORED_USERS) {
+                        if (log.contains("<" + user + ">")) {
+                            ignore = true;
+                            break;
+                        }
                     }
                 }
                 if (!ignore) {
