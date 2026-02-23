@@ -68,6 +68,10 @@ public class CommandDispatcher {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!longsummary",
                     AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
+        } else if (trimmed.matches("!summarylist(?:\\s+.*)?")) {
+            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summarylist",
+                    AIService.Backend.AUTO, AIService.Prompts.SUMMARYLIST_PREFIX);
+            return true;
         } else if (trimmed.matches("!summary(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summary",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
@@ -450,6 +454,7 @@ public class CommandDispatcher {
                 "**!autolast** - Toggle automatic DM of last message when reading export room\n\n" +
                 "**!autotldr** - Toggle automatic AI TLDR when reading export room (>100 msgs, >1h gap)\n\n" +
                 "**!summary <link or count or duration> [question]** - Condensed summary with auto-fallback (ArliAI -> Cerebras)\n" +
+                "**!summarylist <link or count or duration> [question]** - Bullet list of tech/VR/gaming/ethics/philosophy chats with auto-fallback\n" +
                 "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI -> Cerebras)\n"
                 +
                 "**!arliai, !cerebras <link or count or duration> [question]** - Query specific AI backend (debug)\n"
