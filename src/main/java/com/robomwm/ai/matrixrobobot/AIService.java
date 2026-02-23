@@ -309,8 +309,7 @@ public class AIService {
 
     private static final List<String> IGNORED_DOMAINS = List.of(
             "pixiv.net",
-            "danbooru.donmai.us",
-            "safebooru.donmai.us");
+            "donmai.us");
 
     private static final List<String> IGNORED_USERS = List.of(
             "@bot:kitty.haus");
@@ -324,7 +323,7 @@ public class AIService {
             for (String log : logs) {
                 boolean ignore = false;
                 for (String domain : IGNORED_DOMAINS) {
-                    if (log.contains(domain)) {
+                    if (log.toLowerCase().contains(domain.toLowerCase())) {
                         ignore = true;
                         break;
                     }

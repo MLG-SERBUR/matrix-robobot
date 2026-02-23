@@ -17,9 +17,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AutoLastService {
 
     private final Set<String> enabledUsers = ConcurrentHashMap.newKeySet();
-    private final Set<String> enabledSummaryUsers = ConcurrentHashMap.newKeySet();
+    private final Set<String> enabledTldrUsers = ConcurrentHashMap.newKeySet();
     private final Map<String, Long> lastTriggerTime = new ConcurrentHashMap<>();
-    private final Map<String, Long> lastSummaryTriggerTime = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastTldrTriggerTime = new ConcurrentHashMap<>();
     private final Map<String, RoomHistoryManager.EventInfo> lastReadInfo = new ConcurrentHashMap<>();
 
     private final MatrixClient matrixClient;
@@ -45,7 +45,7 @@ public class AutoLastService {
         this.homeserver = homeserver;
         this.accessToken = accessToken;
         this.persistenceFile = Paths.get("autolast_enabled_users.json");
-        this.summaryPersistenceFile = Paths.get("autosummary_enabled_users.json");
+        this.summaryPersistenceFile = Paths.get("autotldr_enabled_users.json");
 
         // Load persisted enabled users
         loadEnabledUsers();
@@ -67,16 +67,16 @@ public class AutoLastService {
     }
 
     /**
-     * Toggles the summary feature for a user.
+     * Toggles the tldr feature for a user.
      */
-    public void toggleAutoSummary(String userId, String roomId) {
-        if (enabledSummaryUsers.contains(userId)) {
-            enabledSummaryUsers.remove(userId);
-            matrixClient.sendText(roomId, "Auto-!summary disabled.");
+    public void toggleAutoTldr(String userId, String roomId) {
+        if (enabledTldrUsers.contains(userId)) {
+            enabledTldrUsers.remove(userId);
+            matrixClient.sendText(roomId, "Auto-!autotldr disabled.");
         } else {
-            enabledSummaryUsers.add(userId);
+            enabledTldrUsers.add(userId);
             matrixClient.sendText(roomId,
-                    "Auto-!summary enabled. I will DM you an AI summary when you read the export room after being away for over an hour with over 100 unread messages.");
+                    "Auto-!autotldr enabled. I will DM you an AI TLDR when you read the export room after being away for over an hour with over 100 unread messages.");
         }
         saveEnabledUsers();
     }
@@ -114,9 +114,9 @@ public class AutoLastService {
 
                 // 1. Check if user is enabled for at least one feature
                 boolean lastEnabled = enabledUsers.contains(userId);
-                boolean summaryEnabled = enabledSummaryUsers.contains(userId);
+                boolean tldrEnabled = enabledTldrUsers.contains(userId);
                 
-                if (!lastEnabled && !summaryEnabled)
+                if (!lastEnabled && !tldrEnabled)
                     continue;
 
                 long now = System.currentTimeMillis();
@@ -142,14 +142,14 @@ public class AutoLastService {
                     }
                 }
 
-                // 3. Handle Auto-Summary
-                if (summaryEnabled) {
-                    long lastSummaryTrigger = lastSummaryTriggerTime.getOrDefault(userId, 0L);
+                // 3. Handle Auto-TLDR
+                if (tldrEnabled) {
+                    long lastTldrTrigger = lastTldrTriggerTime.getOrDefault(userId, 0L);
                     // Threshold: > 1 hour gap
-                    if (now - lastSummaryTrigger >= 3600000) {
-                        if (hasAtLeastMessages(roomId, previousReadInfo.eventId, eventId, 100)) {
-                            triggerSummary(roomId, userId, previousReadInfo);
-                            lastSummaryTriggerTime.put(userId, now);
+                    if (now - lastTldrTrigger >= 3600000) {
+                        if (hasAtLeastMessages(roomId, previousReadInfo.eventId, eventId, 75)) {
+                            triggerTldr(roomId, userId, previousReadInfo);
+                            lastTldrTriggerTime.put(userId, now);
                         }
                     }
                 }
@@ -173,27 +173,27 @@ public class AutoLastService {
         }
     }
 
-    private void triggerSummary(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo) {
+    private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo) {
         String dmRoomId = findDirectMessageRoom(userId);
         if (dmRoomId != null) {
-            System.out.println("Triggering Auto-Summary for " + userId);
+            System.out.println("Triggering Auto-TLDR for " + userId);
             java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(userId);
             if (zoneId == null) {
-                System.out.println("No timezone set for " + userId + ", skipping auto-summary trigger.");
+                System.out.println("No timezone set for " + userId + ", skipping auto-tldr trigger.");
                 return;
             }
 
             new Thread(() -> {
                 try {
                     aiService.queryAIUnread(dmRoomId, exportRoomId, userId, zoneId, null,
-                            AIService.Prompts.OVERVIEW_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false),
+                            AIService.Prompts.TLDR_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false),
                             previousReadInfo != null ? previousReadInfo.eventId : null);
                 } catch (Exception e) {
-                    System.err.println("Error running auto-summary: " + e.getMessage());
+                    System.err.println("Error running auto-tldr: " + e.getMessage());
                 }
             }).start();
         } else {
-            System.out.println("Could not find DM room for auto-summary user: " + userId);
+            System.out.println("Could not find DM room for auto-tldr user: " + userId);
         }
     }
 
@@ -321,10 +321,10 @@ public class AutoLastService {
             try {
                 String content = Files.readString(summaryPersistenceFile);
                 String[] users = mapper.readValue(content, String[].class);
-                enabledSummaryUsers.addAll(Arrays.asList(users));
-                System.out.println("Loaded " + users.length + " autosummary enabled users from persistence");
+                enabledTldrUsers.addAll(Arrays.asList(users));
+                System.out.println("Loaded " + users.length + " autotldr enabled users from persistence");
             } catch (IOException e) {
-                System.err.println("Error loading autosummary enabled users: " + e.getMessage());
+                System.err.println("Error loading autotldr enabled users: " + e.getMessage());
             }
         }
     }
@@ -338,9 +338,9 @@ public class AutoLastService {
             String content = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(users);
             Files.writeString(persistenceFile, content);
 
-            String[] summaryUsers = enabledSummaryUsers.toArray(new String[0]);
-            String summaryContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(summaryUsers);
-            Files.writeString(summaryPersistenceFile, summaryContent);
+            String[] tldrUsers = enabledTldrUsers.toArray(new String[0]);
+            String tldrContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(tldrUsers);
+            Files.writeString(summaryPersistenceFile, tldrContent);
         } catch (IOException e) {
             System.err.println("Error saving enabled users: " + e.getMessage());
         }

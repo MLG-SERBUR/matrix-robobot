@@ -191,10 +191,10 @@ public class MatrixRobobot {
                                 System.out.println("Received !autolast command from " + sender);
                                 autoLastService.toggleAutoLast(sender, responseRoomId);
                             }
-                            // NEW: !autosummary command
-                            else if ("!autosummary".equals(trimmed)) {
-                                System.out.println("Received !autosummary command from " + sender);
-                                autoLastService.toggleAutoSummary(sender, responseRoomId);
+                            // NEW: !autotldr command
+                            else if ("!autotldr".equals(trimmed)) {
+                                System.out.println("Received !autotldr command from " + sender);
+                                autoLastService.toggleAutoTldr(sender, responseRoomId);
                             }
                             // !ping for diagnostics
                             else if ("!ping".equals(trimmed)) {
