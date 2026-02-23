@@ -78,6 +78,9 @@ public class MatrixRobobot {
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, aiService,
                 timezoneService, client, mapper, url, config.accessToken);
+        
+        // NEW: PleadService for 🥺 reactions
+        PleadService pleadService = new PleadService(matrixClient);
 
         String userId = matrixClient.getUserId();
 
@@ -173,11 +176,15 @@ public class MatrixRobobot {
                             if (body == null)
                                 continue;
 
+                            String eventId = ev.path("event_id").asText(null);
                             String trimmed = body.trim();
                             String responseRoomId = roomId;
 
                             if (userId != null && userId.equals(sender))
                                 continue;
+                            
+                            // Process emojis via PleadService
+                            pleadService.processMessage(roomId, eventId, body);
 
                             // PRIMARY: !last command
                             if ("!last".equals(trimmed)) {
@@ -195,6 +202,11 @@ public class MatrixRobobot {
                             else if ("!autotldr".equals(trimmed)) {
                                 System.out.println("Received !autotldr command from " + sender);
                                 autoLastService.toggleAutoTldr(sender, responseRoomId);
+                            }
+                            // NEW: !plead command
+                            else if ("!plead".equals(trimmed)) {
+                                System.out.println("Received !plead command from " + sender);
+                                pleadService.togglePlead(responseRoomId);
                             }
                             // !ping for diagnostics
                             else if ("!ping".equals(trimmed)) {

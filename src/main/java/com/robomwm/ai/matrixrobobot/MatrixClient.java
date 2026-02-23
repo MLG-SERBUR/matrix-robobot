@@ -223,6 +223,41 @@ public class MatrixClient {
     }
 
     /**
+     * Send a reaction to an event
+     */
+    public void sendReaction(String roomId, String eventId, String reaction) {
+        try {
+            String txnId = "m" + Instant.now().toEpochMilli();
+            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.reaction/"
+                    + txnId;
+
+            Map<String, Object> payload = new HashMap<>();
+
+            Map<String, Object> relatesTo = new HashMap<>();
+            relatesTo.put("event_id", eventId);
+            relatesTo.put("key", reaction);
+            relatesTo.put("rel_type", "m.annotation");
+            payload.put("m.relates_to", relatesTo);
+
+            String json = mapper.writeValueAsString(payload);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(endpoint))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(120))
+                    .PUT(HttpRequest.BodyPublishers.ofString(json))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            System.out.println("Sent reaction " + reaction + " to " + eventId + " -> " + response.statusCode());
+        } catch (Exception e) {
+            System.out.println("Failed to send reaction: " + e.getMessage());
+        }
+    }
+
+    /**
      * Join a room
      */
     public boolean joinRoom(String roomId) {
