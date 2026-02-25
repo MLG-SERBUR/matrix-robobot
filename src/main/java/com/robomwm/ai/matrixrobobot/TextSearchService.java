@@ -543,4 +543,265 @@ public class TextSearchService {
             runningOperations.remove(sender);
         }
     }
+
+    public void performMediaSearch(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
+            String fromToken, String query, ZoneId zoneId) {
+        try {
+            // Register this operation for abort capability
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+
+            String timeInfo = "last " + hours + "h";
+
+            // Send initial message and get event ID for updates
+            String initialMessage = "Performing media search in " + exportRoomId + " for: \"" + query + "\" (" + timeInfo
+                    + ")...";
+            String eventMessageId = matrixClient.sendTextWithEventId(responseRoomId, initialMessage);
+            String originalEventId = eventMessageId; // Track the original event ID for all updates
+
+            // Calculate the time range
+            long startTime = System.currentTimeMillis() - (long) hours * 3600L * 1000L;
+            long endTime = System.currentTimeMillis();
+
+            // If we don't have a pagination token, try to get one via a short sync
+            String token = fromToken;
+            if (token == null) {
+                try {
+                    HttpRequest syncReq = HttpRequest.newBuilder()
+                            .uri(URI.create(homeserverUrl + "/_matrix/client/v3/sync?timeout=0"))
+                            .header("Authorization", "Bearer " + config.accessToken)
+                            .GET()
+                            .build();
+                    HttpResponse<String> syncResp = httpClient.send(syncReq, HttpResponse.BodyHandlers.ofString());
+                    if (syncResp.statusCode() == 200) {
+                        JsonNode root = mapper.readTree(syncResp.body());
+                        JsonNode roomNode = root.path("rooms").path("join").path(exportRoomId);
+                        if (!roomNode.isMissingNode()) {
+                            token = roomNode.path("timeline").path("prev_batch").asText(null);
+                        }
+                    }
+                } catch (Exception ignore) {
+                    // ignore errors here, we'll just start fetching from the latest available if
+                    // sync fails
+                }
+            }
+
+            // Parse search terms (space-separated, case-insensitive)
+            String[] searchTerms = query.toLowerCase().split("\\s+");
+
+            java.util.List<String> results = new java.util.ArrayList<>();
+            java.util.List<String> eventIds = new java.util.ArrayList<>();
+            int maxResults = 50;
+            boolean truncated = false;
+            long lastUpdateTime = 0;
+            int lastResultCount = 0;
+
+            while (token != null && results.size() < maxResults) {
+                // Check for abort signal
+                if (abortFlag.get()) {
+                    System.out.println("Media search aborted by user: " + sender);
+                    runningOperations.remove(sender);
+                    return;
+                }
+
+                try {
+                    String messagesUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
+                            + URLEncoder.encode(exportRoomId, StandardCharsets.UTF_8)
+                            + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8)
+                            + "&dir=b&limit=1000";
+                    HttpRequest msgReq = HttpRequest.newBuilder()
+                            .uri(URI.create(messagesUrl))
+                            .header("Authorization", "Bearer " + config.accessToken)
+                            .GET()
+                            .build();
+                    HttpResponse<String> msgResp = httpClient.send(msgReq, HttpResponse.BodyHandlers.ofString());
+                    if (msgResp.statusCode() != 200) {
+                        System.out
+                                .println("Failed to fetch messages: " + msgResp.statusCode() + " - " + msgResp.body());
+                        break;
+                    }
+                    JsonNode root = mapper.readTree(msgResp.body());
+                    JsonNode chunk = root.path("chunk");
+                    if (!chunk.isArray() || chunk.size() == 0)
+                        break;
+
+                    boolean reachedStart = false;
+                    for (JsonNode ev : chunk) {
+                        // Check for abort signal inside the loop too
+                        if (abortFlag.get()) {
+                            System.out.println("Media search aborted by user: " + sender);
+                            runningOperations.remove(sender);
+                            return;
+                        }
+
+                        // Check for media message types
+                        String eventType = ev.path("type").asText(null);
+                        String msgtype = ev.path("content").path("msgtype").asText(null);
+                        
+                        boolean isMediaMessage = false;
+                        String mediaType = "";
+                        
+                        if ("m.room.message".equals(eventType)) {
+                            if ("m.file".equals(msgtype) || "m.image".equals(msgtype) || 
+                                "m.video".equals(msgtype) || "m.audio".equals(msgtype)) {
+                                isMediaMessage = true;
+                                mediaType = msgtype.substring(2).toUpperCase(); // Remove "m." prefix
+                            }
+                        } else if ("m.room.encrypted".equals(eventType)) {
+                            // Encrypted messages may contain media - we'll include them
+                            isMediaMessage = true;
+                            mediaType = "ENCRYPTED";
+                        }
+
+                        if (!isMediaMessage)
+                            continue;
+
+                        long originServerTs = ev.path("origin_server_ts").asLong(0);
+
+                        if (originServerTs > endTime) {
+                            continue; // Skip messages newer than our range
+                        }
+
+                        if (originServerTs < startTime) {
+                            reachedStart = true;
+                            break; // Stop when we reach messages older than start time
+                        }
+
+                        String body = ev.path("content").path("body").asText(null);
+                        String senderMsg = ev.path("sender").asText(null);
+                        String eventId = ev.path("event_id").asText(null);
+                        
+                        // Extract filename for media messages
+                        String filename = null;
+                        if ("m.room.message".equals(eventType)) {
+                            filename = ev.path("content").path("filename").asText(null); // For file messages, filename field contains actual filename
+                            if (filename == null) {
+                                // For some media types, filename might be in body, but we'll use body as caption
+                                filename = ev.path("content").path("body").asText(null);
+                            }
+                        } else if ("m.room.encrypted".equals(eventType)) {
+                            filename = ev.path("content").path("filename").asText(null); // For encrypted media
+                        }
+
+                        if (body != null && senderMsg != null && eventId != null) {
+                            // Format timestamp with timezone (convert UTC to user's timezone)
+                            String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
+                                    .atZone(zoneId)
+                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                            
+                            // Build the formatted log with media type and filename
+                            StringBuilder formattedLogBuilder = new StringBuilder();
+                            formattedLogBuilder.append("[").append(timestamp).append("] <").append(senderMsg).append("> ");
+                            
+                            if (filename != null && !filename.equals(body)) {
+                                formattedLogBuilder.append("[").append(mediaType).append(": ").append(filename).append("] ");
+                                // Include filename in the search by appending it to the body for search purposes
+                                body = body + " " + filename;
+                            } else {
+                                formattedLogBuilder.append("[").append(mediaType).append("] ");
+                            }
+                            formattedLogBuilder.append(body);
+                            
+                            String formattedLog = formattedLogBuilder.toString();
+
+                            // Check if formatted log contains ALL search terms (case-insensitive)
+                            String lowerLog = formattedLog.toLowerCase();
+                            boolean allTermsFound = true;
+                            for (String term : searchTerms) {
+                                if (!lowerLog.contains(term)) {
+                                    allTermsFound = false;
+                                    break;
+                                }
+                            }
+
+                            if (allTermsFound) {
+                                results.add(formattedLog);
+                                eventIds.add(eventId);
+
+                                // Update message every 5 results or every 2 seconds
+                                if (eventMessageId != null && (results.size() - lastResultCount >= 5
+                                        || System.currentTimeMillis() - lastUpdateTime > 2000)) {
+                                    StringBuilder updateMsg = new StringBuilder();
+                                    updateMsg.append("Media search results for \"").append(query).append("\" - ");
+                                    updateMsg.append("from last ").append(hours).append(" hours. ");
+                                    updateMsg.append(results.size()).append(" matches (searching...)\n");
+                                    for (int i = 0; i < results.size(); i++) {
+                                        updateMsg.append(results.get(i)).append(" ");
+                                        String messageLink = "https://matrix.to/#/" + exportRoomId + "/"
+                                                + eventIds.get(i);
+                                        updateMsg.append(messageLink).append("\n");
+                                    }
+                                    // Always use original event ID for updates
+                                    matrixClient.updateTextMessage(responseRoomId, originalEventId,
+                                            updateMsg.toString());
+                                    lastUpdateTime = System.currentTimeMillis();
+                                    lastResultCount = results.size();
+                                }
+
+                                if (results.size() >= maxResults) {
+                                    truncated = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (reachedStart) {
+                        break; // We've collected all messages in our time range
+                    }
+
+                    if (token != null) {
+                        token = root.path("end").asText(null);
+                    }
+
+                } catch (Exception e) {
+                    System.out.println("Error during media search: " + e.getMessage());
+                    break;
+                }
+            }
+
+            if (results.isEmpty()) {
+                if (originalEventId != null) {
+                    matrixClient.updateTextMessage(responseRoomId, originalEventId,
+                            "No media messages found containing all terms: \"" + query + "\" in " + timeInfo + " of "
+                                    + exportRoomId + ".");
+                } else {
+                    matrixClient.sendText(responseRoomId, "No media messages found containing all terms: \"" + query
+                            + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                }
+                runningOperations.remove(sender);
+                return;
+            }
+
+            // Final update with complete results
+            StringBuilder response = new StringBuilder();
+            response.append("Media search results for \"").append(query).append("\" - ");
+            response.append("from last ").append(hours).append(" hours. ");
+            response.append(results.size()).append(" matches.");
+            if (truncated) {
+                response.append(" (there may be more.)");
+            }
+            response.append("\n");
+
+            for (int i = 0; i < results.size(); i++) {
+                response.append(results.get(i)).append(" ");
+                // Add message link
+                String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + eventIds.get(i);
+                response.append(messageLink).append("\n");
+            }
+
+            if (originalEventId != null) {
+                matrixClient.updateTextMessage(responseRoomId, originalEventId, response.toString());
+            } else {
+                matrixClient.sendText(responseRoomId, response.toString());
+            }
+
+            runningOperations.remove(sender);
+
+        } catch (Exception e) {
+            System.out.println("Failed to perform media search: " + e.getMessage());
+            matrixClient.sendText(responseRoomId, "Error performing media search: " + e.getMessage());
+            runningOperations.remove(sender);
+        }
+    }
 }

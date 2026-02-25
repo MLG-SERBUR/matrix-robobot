@@ -95,6 +95,9 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!search\\s+(\\d+)([dh])\\s+(.+)")) {
             handleSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
+        } else if (trimmed.matches("!media\\s+(\\d+)([dh])\\s+(.+)")) {
+            handleMedia(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+            return true;
         } else if ("!abort".equals(trimmed)) {
             handleAbort(sender, responseRoomId);
             return true;
@@ -382,6 +385,28 @@ public class CommandDispatcher {
         }
     }
 
+    private void handleMedia(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
+            String exportRoomId) {
+        Matcher matcher = Pattern.compile("!media\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
+        if (matcher.matches()) {
+            int duration = Integer.parseInt(matcher.group(1));
+            String unit = matcher.group(2);
+            String query = matcher.group(3).trim();
+
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+            if (zoneId == null)
+                return;
+
+            // Convert to hours
+            int hours = unit.equals("d") ? duration * 24 : duration;
+
+            System.out.println("Received media search command in " + roomId + " from " + sender);
+            new Thread(() -> textSearchService.performMediaSearch(roomId, sender, responseRoomId, exportRoomId, hours,
+                    prevBatch, query,
+                    zoneId)).start();
+        }
+    }
+
     private void handleAbort(String sender, String responseRoomId) {
         System.out.println("Received abort command from " + sender);
         AtomicBoolean abortFlag = runningOperations.get(sender);
@@ -464,7 +489,7 @@ public class CommandDispatcher {
                 "**!ask [question]** - Query AI backend with up to 16k tokens of history (no timestamps)\n"
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
-                "**!grep, !grep-slow, !search <hours>h <pattern>** - Pattern and term-based searches\n\n" +
+                "**!grep, !grep-slow, !search, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
                 "**!abort** - Abort currently running operations";
         matrixClient.sendMarkdown(responseRoomId, helpText);
     }
