@@ -25,18 +25,7 @@ public class AIService {
     private final RoomHistoryManager historyManager;
     private final Random random;
     public static final List<String> ARLI_MODELS = Arrays.asList(
-            "Gemma-3-27B-ArliAI-RPMax-v3",
-            "Gemma-3-27B-ArliAI-RPMax-v3",
-            "Gemma-3-27B-Big-Tiger-v3",
-            "Gemma-3-27B-Big-Tiger-v3",
-            "Gemma-3-27B-CardProjector-v4",
-            "Gemma-3-27B-CardProjector-v4",
-            "Gemma-3-27B-Glitter",
-            "Gemma-3-27B-Glitter",
-            "Gemma-3-27B-it",
-            "Gemma-3-27B-it",
-            "Gemma-3-27B-it-Abliterated",
-            "Gemma-3-27B-it-Abliterated"
+            "Gemma-3-27B-it"
     );
     public static final List<String> CEREBRAS_MODELS = Arrays.asList("gpt-oss-120b");
 
