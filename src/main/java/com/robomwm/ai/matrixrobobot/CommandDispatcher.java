@@ -3,6 +3,8 @@ package com.robomwm.ai.matrixrobobot;
 import java.time.ZoneId;
 import java.net.http.HttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
@@ -100,6 +102,9 @@ public class CommandDispatcher {
             return true;
         } else if ("!abort".equals(trimmed)) {
             handleAbort(sender, responseRoomId);
+            return true;
+        } else if (trimmed.matches("!ttsexport\\s+(\\d+)")) {
+            handleTTSExport(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if ("!help".equals(trimmed)) {
             handleHelp(responseRoomId);
@@ -465,6 +470,104 @@ public class CommandDispatcher {
         return null;
     }
 
+    private void handleTTSExport(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
+            String exportRoomId) {
+        Matcher matcher = Pattern.compile("!ttsexport\\s+(\\d+)").matcher(trimmed);
+        if (matcher.matches()) {
+            int messageCount = Integer.parseInt(matcher.group(1));
+            
+            System.out.println("Received TTS export command in " + roomId + " from " + sender + " (" + messageCount + " messages)");
+            
+            new Thread(() -> {
+                try {
+                    // Fetch messages with TTS-friendly formatting
+                    // Use default timezone (UTC) when no timezone is specified for TTS export
+                    ZoneId defaultZoneId = ZoneId.of("UTC");
+                    RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(
+                        exportRoomId, -1, prevBatch, -1, -1, defaultZoneId, messageCount);
+                    
+                    if (result.logs.isEmpty()) {
+                        matrixClient.sendMarkdown(responseRoomId,
+                                "No chat logs found for the last " + messageCount + " messages to export from " + exportRoomId + ".");
+                        return;
+                    }
+
+                    // Apply TTS-friendly formatting
+                    List<String> ttsLines = formatForTTS(result.logs);
+                    
+                    // Create filename with tts prefix
+                    long now = System.currentTimeMillis();
+                    String safeRoom = exportRoomId.replaceAll("[^A-Za-z0-9._-]", "_");
+                    String filename = safeRoom + "-tts-" + messageCount + "msgs-" + now + ".txt";
+
+                    matrixClient.sendMarkdown(responseRoomId,
+                            "Starting TTS-friendly export of last " + messageCount + " messages from " + exportRoomId + " to " + filename);
+
+                    // Write formatted content
+                    try (java.io.BufferedWriter w = new java.io.BufferedWriter(new java.io.FileWriter(filename))) {
+                        for (String line : ttsLines)
+                            w.write(line + "\n");
+                    }
+
+                    matrixClient.sendMarkdown(responseRoomId,
+                            "TTS export complete: " + filename + " (" + ttsLines.size() + " formatted messages)");
+                    System.out.println("TTS exported " + ttsLines.size() + " messages to " + filename);
+                } catch (Exception e) {
+                    System.out.println("TTS export failed: " + e.getMessage());
+                    try {
+                        matrixClient.sendMarkdown(responseRoomId, "TTS export failed: " + e.getMessage());
+                    } catch (Exception ignore) {
+                    }
+                }
+            }).start();
+        }
+    }
+
+    /**
+     * Format chat logs for TTS consumption by removing timestamps, user homeserver,
+     * angle brackets, and handling consecutive messages from same user.
+     * First message from a user: "username: message"
+     * Consecutive messages from same user: "message" (no username)
+     */
+    private List<String> formatForTTS(List<String> logs) {
+        List<String> formatted = new ArrayList<>();
+        String lastUser = null;
+
+        for (String line : logs) {
+            // Remove timestamp [yyyy-MM-dd HH:mm z]
+            String noTimestamp = line.replaceAll("\\[\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} [A-Z]+\\]", "").trim();
+            
+            // Remove angle brackets and extract username and message
+            // Format: <@username:server> message
+            if (noTimestamp.matches("<[^>]+>.*")) {
+                int firstSpace = noTimestamp.indexOf('>');
+                if (firstSpace > 0) {
+                    String userPart = noTimestamp.substring(1, firstSpace);
+                    String message = noTimestamp.substring(firstSpace + 1).trim();
+                    
+                    // Extract username (remove @ symbol and homeserver part)
+                    String username = userPart.split(":")[0];
+                    // Remove the @ symbol if present
+                    if (username.startsWith("@")) {
+                        username = username.substring(1);
+                    }
+                    
+                    // Handle consecutive messages from same user
+                    if (lastUser == null || !lastUser.equals(username)) {
+                        // First message from this user - include username
+                        formatted.add(username + ": " + message);
+                        lastUser = username;
+                    } else {
+                        // Consecutive message from same user - no username
+                        formatted.add(message);
+                    }
+                }
+            }
+        }
+        
+        return formatted;
+    }
+
     private void handleHelp(String responseRoomId) {
         System.out.println("Received help command");
         String helpText = "**Matrix Bot Commands (Primary Use Case: !last)**\n\n" +
@@ -475,6 +578,7 @@ public class CommandDispatcher {
                 "**!timezone <TZ or Time>** - Set your preferred timezone (e.g. `!timezone PST`, `!timezone 1:14am` or `!timezone 14:30`)\n\n"
                 +
                 "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
+                "**!ttsexport <count>** - Export specified number of messages with TTS-friendly formatting (removes timestamps, homeserver, angle brackets, consolidates consecutive messages)\n\n" +
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
                 "**!autolast** - Toggle automatic DM of last message when reading export room\n\n" +
                 "**!autotldr** - Toggle automatic AI TLDR when reading export room (>100 msgs, >1h gap)\n\n" +

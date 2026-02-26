@@ -377,6 +377,7 @@ public class RoomHistoryManager {
 
                         firstEventId = eventId;
 
+                        // Check if we've reached the requested message count
                         if (maxMessages > 0 && lines.size() >= maxMessages) {
                             reachedStart = true;
                             break;
