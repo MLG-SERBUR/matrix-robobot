@@ -603,17 +603,46 @@ public class RoomHistoryManager {
         }
     }
 
-    /**
-     * Fetch room history backwards until a character limit is reached.
+/**
+     * Estimates the number of LLM tokens a string will use.
+     * A highly accurate heuristic that counts word chunks and punctuation marks separately,
+     * adding a 10% safety margin.
      */
-    public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int charLimit, boolean includeTimestamp, ZoneId zoneId) {
+    public static int estimateTokens(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        int count = 0;
+        boolean inWord = false;
+        
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c)) {
+                inWord = false;
+            } else if (Character.isLetterOrDigit(c)) {
+                if (!inWord) {
+                    count++;
+                    inWord = true;
+                }
+            } else {
+                // Punctuation, symbols, and special characters usually count as 1 token each
+                count++;
+                inWord = false;
+            }
+        }
+        // Add 10% safety margin and 1 for line breaks
+        return (int) Math.ceil(count * 1.1) + 1; 
+    }
+
+    /**
+     * Fetch room history backwards until a token limit is reached.
+     */
+    public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId) {
         List<String> logs = new ArrayList<>();
         String firstEventId = null;
-        int currentChars = 0;
+        int currentTokens = 0;
 
         String token = getPaginationToken(roomId, fromToken);
 
-        while (token != null && currentChars < charLimit) {
+        while (token != null && currentTokens < tokenLimit) {
             try {
                 String messagesUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
                         + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
@@ -654,13 +683,15 @@ public class RoomHistoryManager {
                             line = "<" + sender + "> " + body;
                         }
 
-                        if (currentChars + line.length() > charLimit) {
+                        int lineTokens = estimateTokens(line);
+
+                        if (currentTokens + lineTokens > tokenLimit) {
                             reachedLimit = true;
                             break;
                         }
 
                         logs.add(line);
-                        currentChars += line.length() + 1; // +1 for newline
+                        currentTokens += lineTokens;
                         firstEventId = eventId;
                     }
                 }

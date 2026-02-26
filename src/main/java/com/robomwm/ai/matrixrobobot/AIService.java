@@ -237,11 +237,19 @@ public class AIService {
                          java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            // ~16k tokens is roughly 40k-60k characters depending on content. 
-            // 60k characters resulted in ~23k tokens in practice, so we use 40k to be safe.
-            int charLimit = 40000;
+            // Target context window for Arli AI is 16k tokens.
+            // We reserve ~4000 tokens for the generated response to be safe.
+            int targetPromptTokens = 12000;
+            
+            // Calculate base tokens consumed by prompts and the user's question
+            String emptyPrompt = buildPrompt(question, new ArrayList<>(), "");
+            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) + 
+                             RoomHistoryManager.estimateTokens(emptyPrompt);
+            
+            int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
+
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, charLimit, false, null);
+                    fromToken, tokenLimit, false, null);
 
             if (history.logs.isEmpty()) {
                 matrixClient.sendMarkdown(responseRoomId, "No chat logs found in " + exportRoomId + ".");
