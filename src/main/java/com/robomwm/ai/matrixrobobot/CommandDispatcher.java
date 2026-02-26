@@ -103,7 +103,7 @@ public class CommandDispatcher {
         } else if ("!abort".equals(trimmed)) {
             handleAbort(sender, responseRoomId);
             return true;
-        } else if (trimmed.matches("!ttsexport\\s+(\\d+)")) {
+        } else if (trimmed.matches("!ttsexport\\s+(\\d+)(h)?")) {
             handleTTSExport(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if ("!help".equals(trimmed)) {
@@ -472,54 +472,108 @@ public class CommandDispatcher {
 
     private void handleTTSExport(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
-        Matcher matcher = Pattern.compile("!ttsexport\\s+(\\d+)").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!ttsexport\\s+(\\d+)(h)?").matcher(trimmed);
         if (matcher.matches()) {
-            int messageCount = Integer.parseInt(matcher.group(1));
+            String value = matcher.group(1);
+            boolean isDuration = matcher.group(2) != null;
             
-            System.out.println("Received TTS export command in " + roomId + " from " + sender + " (" + messageCount + " messages)");
-            
-            new Thread(() -> {
-                try {
-                    // Fetch messages with TTS-friendly formatting
-                    // Use default timezone (UTC) when no timezone is specified for TTS export
-                    ZoneId defaultZoneId = ZoneId.of("UTC");
-                    RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(
-                        exportRoomId, -1, prevBatch, -1, -1, defaultZoneId, messageCount);
-                    
-                    if (result.logs.isEmpty()) {
-                        matrixClient.sendMarkdown(responseRoomId,
-                                "No chat logs found for the last " + messageCount + " messages to export from " + exportRoomId + ".");
-                        return;
-                    }
-
-                    // Apply TTS-friendly formatting
-                    List<String> ttsLines = formatForTTS(result.logs);
-                    
-                    // Create filename with tts prefix
-                    long now = System.currentTimeMillis();
-                    String safeRoom = exportRoomId.replaceAll("[^A-Za-z0-9._-]", "_");
-                    String filename = safeRoom + "-tts-" + messageCount + "msgs-" + now + ".txt";
-
-                    matrixClient.sendMarkdown(responseRoomId,
-                            "Starting TTS-friendly export of last " + messageCount + " messages from " + exportRoomId + " to " + filename);
-
-                    // Write formatted content
-                    try (java.io.BufferedWriter w = new java.io.BufferedWriter(new java.io.FileWriter(filename))) {
-                        for (String line : ttsLines)
-                            w.write(line + "\n");
-                    }
-
-                    matrixClient.sendMarkdown(responseRoomId,
-                            "TTS export complete: " + filename + " (" + ttsLines.size() + " formatted messages)");
-                    System.out.println("TTS exported " + ttsLines.size() + " messages to " + filename);
-                } catch (Exception e) {
-                    System.out.println("TTS export failed: " + e.getMessage());
+            if (isDuration) {
+                // Handle duration (hours)
+                int hours = Integer.parseInt(value);
+                
+                System.out.println("Received TTS export command in " + roomId + " from " + sender + " (" + hours + "h)");
+                
+                new Thread(() -> {
                     try {
-                        matrixClient.sendMarkdown(responseRoomId, "TTS export failed: " + e.getMessage());
-                    } catch (Exception ignore) {
+                        // Fetch messages with TTS-friendly formatting
+                        // Use default timezone (UTC) when no timezone is specified for TTS export
+                        ZoneId defaultZoneId = ZoneId.of("UTC");
+                        RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(
+                            exportRoomId, hours, prevBatch, -1, -1, defaultZoneId, -1);
+                        
+                        if (result.logs.isEmpty()) {
+                            matrixClient.sendMarkdown(responseRoomId,
+                                    "No chat logs found for the last " + hours + "h to export from " + exportRoomId + ".");
+                            return;
+                        }
+
+                        // Apply TTS-friendly formatting
+                        List<String> ttsLines = formatForTTS(result.logs);
+                        
+                        // Create filename with tts prefix and hours
+                        long now = System.currentTimeMillis();
+                        String safeRoom = exportRoomId.replaceAll("[^A-Za-z0-9._-]", "_");
+                        String filename = safeRoom + "-tts-" + hours + "h-" + now + ".txt";
+
+                        matrixClient.sendMarkdown(responseRoomId,
+                                "Starting TTS-friendly export of last " + hours + "h from " + exportRoomId + " to " + filename);
+
+                        // Write formatted content
+                        try (java.io.BufferedWriter w = new java.io.BufferedWriter(new java.io.FileWriter(filename))) {
+                            for (String line : ttsLines)
+                                w.write(line + "\n");
+                        }
+
+                        matrixClient.sendMarkdown(responseRoomId,
+                                "TTS export complete: " + filename + " (" + ttsLines.size() + " formatted messages)");
+                        System.out.println("TTS exported " + ttsLines.size() + " messages to " + filename);
+                    } catch (Exception e) {
+                        System.out.println("TTS export failed: " + e.getMessage());
+                        try {
+                            matrixClient.sendMarkdown(responseRoomId, "TTS export failed: " + e.getMessage());
+                        } catch (Exception ignore) {
+                        }
                     }
-                }
-            }).start();
+                }).start();
+            } else {
+                // Handle count (existing functionality)
+                int messageCount = Integer.parseInt(value);
+                
+                System.out.println("Received TTS export command in " + roomId + " from " + sender + " (" + messageCount + " messages)");
+                
+                new Thread(() -> {
+                    try {
+                        // Fetch messages with TTS-friendly formatting
+                        // Use default timezone (UTC) when no timezone is specified for TTS export
+                        ZoneId defaultZoneId = ZoneId.of("UTC");
+                        RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(
+                            exportRoomId, -1, prevBatch, -1, -1, defaultZoneId, messageCount);
+                        
+                        if (result.logs.isEmpty()) {
+                            matrixClient.sendMarkdown(responseRoomId,
+                                    "No chat logs found for the last " + messageCount + " messages to export from " + exportRoomId + ".");
+                            return;
+                        }
+
+                        // Apply TTS-friendly formatting
+                        List<String> ttsLines = formatForTTS(result.logs);
+                        
+                        // Create filename with tts prefix
+                        long now = System.currentTimeMillis();
+                        String safeRoom = exportRoomId.replaceAll("[^A-Za-z0-9._-]", "_");
+                        String filename = safeRoom + "-tts-" + messageCount + "msgs-" + now + ".txt";
+
+                        matrixClient.sendMarkdown(responseRoomId,
+                                "Starting TTS-friendly export of last " + messageCount + " messages from " + exportRoomId + " to " + filename);
+
+                        // Write formatted content
+                        try (java.io.BufferedWriter w = new java.io.BufferedWriter(new java.io.FileWriter(filename))) {
+                            for (String line : ttsLines)
+                                w.write(line + "\n");
+                        }
+
+                        matrixClient.sendMarkdown(responseRoomId,
+                                "TTS export complete: " + filename + " (" + ttsLines.size() + " formatted messages)");
+                        System.out.println("TTS exported " + ttsLines.size() + " messages to " + filename);
+                    } catch (Exception e) {
+                        System.out.println("TTS export failed: " + e.getMessage());
+                        try {
+                            matrixClient.sendMarkdown(responseRoomId, "TTS export failed: " + e.getMessage());
+                        } catch (Exception ignore) {
+                        }
+                    }
+                }).start();
+            }
         }
     }
 
@@ -578,7 +632,8 @@ public class CommandDispatcher {
                 "**!timezone <TZ or Time>** - Set your preferred timezone (e.g. `!timezone PST`, `!timezone 1:14am` or `!timezone 14:30`)\n\n"
                 +
                 "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
-                "**!ttsexport <count>** - Export specified number of messages with TTS-friendly formatting (removes timestamps, homeserver, angle brackets, consolidates consecutive messages)\n\n" +
+                "**!ttsexport <count>** - Export specified number of messages with TTS-friendly formatting (removes timestamps, homeserver, angle brackets, consolidates consecutive messages)\n" +
+                "**!ttsexport <duration>h** - Export messages from the last specified hours with TTS-friendly formatting\n\n" +
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
                 "**!autolast** - Toggle automatic DM of last message when reading export room\n\n" +
                 "**!autotldr** - Toggle automatic AI TLDR when reading export room (>100 msgs, >1h gap)\n\n" +
