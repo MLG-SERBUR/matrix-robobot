@@ -82,7 +82,7 @@ public class TextSearchService {
 
             java.util.List<String> results = new java.util.ArrayList<>();
             java.util.List<String> eventIds = new java.util.ArrayList<>();
-            int maxResults = 5000;
+            int maxResults = 100;
             boolean truncated = false;
 
             // Case-insensitive literal pattern matching
@@ -376,7 +376,7 @@ public class TextSearchService {
 
             java.util.List<String> results = new java.util.ArrayList<>();
             java.util.List<String> eventIds = new java.util.ArrayList<>();
-            int maxResults = 5000;
+            int maxResults = 100;
             boolean truncated = false;
             long lastUpdateTime = 0;
             int lastResultCount = 0;
@@ -589,7 +589,7 @@ public class TextSearchService {
 
             java.util.List<String> results = new java.util.ArrayList<>();
             java.util.List<String> eventIds = new java.util.ArrayList<>();
-            int maxResults = 5000;
+            int maxResults = 100;
             boolean truncated = false;
             long lastUpdateTime = 0;
             int lastResultCount = 0;
