@@ -82,7 +82,7 @@ public class TextSearchService {
 
             java.util.List<String> results = new java.util.ArrayList<>();
             java.util.List<String> eventIds = new java.util.ArrayList<>();
-            int maxResults = 50;
+            int maxResults = 5000;
             boolean truncated = false;
 
             // Case-insensitive literal pattern matching
@@ -156,9 +156,8 @@ public class TextSearchService {
                                 results.add(formattedLog);
                                 eventIds.add(eventId);
 
-                                // Update message every 5 results or every 2 seconds
-                                if (eventMessageId != null && (results.size() - lastResultCount >= 5
-                                        || System.currentTimeMillis() - lastUpdateTime > 2000)) {
+                                // Update message every every 3 seconds
+                                if (eventMessageId != null && (System.currentTimeMillis() - lastUpdateTime > 3000)) {
                                     StringBuilder updateMsg = new StringBuilder();
                                     updateMsg.append("Grep results for \"").append(pattern).append("\" - ");
                                     updateMsg.append("from last ").append(hours).append(" hours. ");
@@ -377,7 +376,7 @@ public class TextSearchService {
 
             java.util.List<String> results = new java.util.ArrayList<>();
             java.util.List<String> eventIds = new java.util.ArrayList<>();
-            int maxResults = 50;
+            int maxResults = 5000;
             boolean truncated = false;
             long lastUpdateTime = 0;
             int lastResultCount = 0;
@@ -457,9 +456,8 @@ public class TextSearchService {
                                 results.add(formattedLog);
                                 eventIds.add(eventId);
 
-                                // Update message every 5 results or every 2 seconds
-                                if (eventMessageId != null && (results.size() - lastResultCount >= 5
-                                        || System.currentTimeMillis() - lastUpdateTime > 2000)) {
+                                // Update message every 3 seconds
+                                if (eventMessageId != null && (System.currentTimeMillis() - lastUpdateTime > 3000)) {
                                     StringBuilder updateMsg = new StringBuilder();
                                     updateMsg.append("Search results for \"").append(query).append("\" - ");
                                     updateMsg.append("from last ").append(hours).append(" hours. ");
@@ -591,7 +589,7 @@ public class TextSearchService {
 
             java.util.List<String> results = new java.util.ArrayList<>();
             java.util.List<String> eventIds = new java.util.ArrayList<>();
-            int maxResults = 50;
+            int maxResults = 5000;
             boolean truncated = false;
             long lastUpdateTime = 0;
             int lastResultCount = 0;
@@ -718,9 +716,8 @@ public class TextSearchService {
                                 results.add(formattedLog);
                                 eventIds.add(eventId);
 
-                                // Update message every 5 results or every 2 seconds
-                                if (eventMessageId != null && (results.size() - lastResultCount >= 5
-                                        || System.currentTimeMillis() - lastUpdateTime > 2000)) {
+                                // Update message every 3 seconds
+                                    if (eventMessageId != null && (System.currentTimeMillis() - lastUpdateTime > 3000)) {
                                     StringBuilder updateMsg = new StringBuilder();
                                     updateMsg.append("Media search results for \"").append(query).append("\" - ");
                                     updateMsg.append("from last ").append(hours).append(" hours. ");
