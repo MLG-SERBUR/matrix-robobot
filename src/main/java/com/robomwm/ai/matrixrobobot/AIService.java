@@ -53,6 +53,7 @@ public class AIService {
         public static final String SUMMARY_PREFIX = "Give a concise, high level overview of the following chat logs. No need for complete sentences. Use only a title and timestamp for each topic; include one chat message verbatim (with username) for each topic. Should take no more than a minute to read, ideally target less than 30 seconds. No table format:\n\n";
         public static final String SUMMARYLIST_PREFIX = "Create a bullet list of chat messages that contain resources or discovered solutions for tech, automation/scripts, VR/gaming, ethics/philosophy:\n\n";
         public static final String TLDR_PREFIX = "Provide a very concise summary of the following chat logs that can be read in 15 seconds or less. Make use of bullet points of key topics with timestamp; be extremely brief, no need for complete sentences. Always include topics that are informative towards a discovered solution or resources; if the other topics are significantly discussed, these topics can be added on to increase reading time to no more than 30 seconds. Then directly include the best chat message verbatim; have bias towards one that is informative towards a discovered solution or informative resource:\n\n";
+        public static final String DEBUGAI_PREFIX = "\n\n";
     }
 
     public void queryAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
@@ -342,6 +343,9 @@ public class AIService {
 
         String logsStr = String.join("\n", effectiveLogs);
         if (question != null && !question.isEmpty()) {
+            if (Prompts.DEBUGAI_PREFIX.equals(promptPrefix)) {
+                return question + "\n\n" + logsStr;
+            }
             return Prompts.QUESTION_PREFIX + question + Prompts.QUESTION_SUFFIX + logsStr;
         } else {
             return promptPrefix + logsStr;

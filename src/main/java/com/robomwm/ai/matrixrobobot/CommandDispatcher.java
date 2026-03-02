@@ -58,6 +58,10 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!lastsummary(?:\\s+(.*))?")) {
             handleLastSummary(trimmed, roomId, sender, responseRoomId, exportRoomId);
             return true;
+        } else if (trimmed.matches("!debugai(?:\\s+.*)?") || trimmed.matches("!debugai-ts(?:\\s+.*)?")) {
+            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!debugai",
+                    AIService.Backend.AUTO, AIService.Prompts.DEBUGAI_PREFIX);
+            return true;
         } else if (trimmed.matches("!arliai(?:\\s+.*)?") || trimmed.matches("!arliai-ts(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!arliai",
                     AIService.Backend.ARLIAI, AIService.Prompts.OVERVIEW_PREFIX);
@@ -640,6 +644,8 @@ public class CommandDispatcher {
                 "**!summary <link or count or duration> [question]** - Condensed summary with auto-fallback (ArliAI -> Cerebras)\n" +
                 "**!summarylist <link or count or duration> [question]** - Bullet list of tech/VR/gaming/ethics/philosophy chats with auto-fallback\n" +
                 "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI -> Cerebras)\n"
+                +
+                "**!debugai <link or count or duration> [question]** - Query AI backend with a custom prompt via question or chat logs\n"
                 +
                 "**!arliai, !cerebras <link or count or duration> [question]** - Query specific AI backend (debug)\n"
                 +
