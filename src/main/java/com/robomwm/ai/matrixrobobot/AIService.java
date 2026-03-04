@@ -112,6 +112,7 @@ public class AIService {
 
             if (abortFlag != null && abortFlag.get()) return;
 
+            boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
             String prompt = buildPrompt(question, history.logs, promptPrefix);
 
             // Fallback Logic
@@ -122,7 +123,7 @@ public class AIService {
 
             if (tryArli) {
                 try {
-                    String answer = callArliAI(prompt, arliModel);
+                    String answer = callArliAI(prompt, arliModel, skipSystem);
                     answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
                     matrixClient.sendMarkdown(responseRoomId, answer);
                     return; // Success
@@ -155,7 +156,7 @@ public class AIService {
                 }
 
                 try {
-                    String answer = callCerebras(prompt, cerebrasModel);
+                    String answer = callCerebras(prompt, cerebrasModel, skipSystem);
                     answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
                     matrixClient.sendMarkdown(responseRoomId, answer);
                 } catch (Exception e) {
@@ -168,13 +169,13 @@ public class AIService {
         }
     }
 
-    private String callArliAI(String prompt, String model) throws Exception {
+    private String callArliAI(String prompt, String model, boolean skipSystem) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");
         }
 
-        List<Map<String, String>> messages = buildMessages(prompt);
+        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
 
         Map<String, Object> arliPayload = Map.of(
                 "model", model,
@@ -265,13 +266,13 @@ public class AIService {
         }
     }
 
-    private String callCerebras(String prompt, String model) throws Exception {
+    private String callCerebras(String prompt, String model, boolean skipSystem) throws Exception {
         String cerebrasApiUrl = "https://api.cerebras.ai";
         if (cerebrasApiKey == null || cerebrasApiKey.isEmpty()) {
             throw new Exception("CEREBRAS_API_KEY is not configured.");
         }
 
-        List<Map<String, String>> messages = buildMessages(prompt);
+        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
 
         Map<String, Object> cerebrasPayload = Map.of(
                 "model", model,
@@ -352,9 +353,11 @@ public class AIService {
         }
     }
 
-    private List<Map<String, String>> buildMessages(String prompt) {
+    private List<Map<String, String>> buildMessages(String prompt, boolean skipSystem) {
         List<Map<String, String>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content", Prompts.SYSTEM_OVERVIEW));
+        if (!skipSystem) {
+            messages.add(Map.of("role", "system", "content", Prompts.SYSTEM_OVERVIEW));
+        }
         messages.add(Map.of("role", "user", "content", prompt));
         return messages;
     }
