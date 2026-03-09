@@ -128,7 +128,7 @@ public class AIService {
                     matrixClient.sendMarkdown(responseRoomId, answer);
                     return; // Success
                 } catch (Exception e) {
-                    String errorMsg = e.getMessage();
+                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                     System.out.println("ArliAI Error: " + errorMsg);
 
                     boolean is403 = errorMsg.contains("Status: 403");
@@ -194,9 +194,17 @@ public class AIService {
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() == 200) {
-            JsonNode arliResponse = mapper.readTree(response.body());
-            return arliResponse.path("choices").get(0).path("message").path("content")
-                    .asText("No response from Arli AI (" + model + ").");
+            try {
+                JsonNode arliResponse = mapper.readTree(response.body());
+                JsonNode choice = arliResponse.path("choices").get(0);
+                if (choice == null) {
+                    throw new Exception("Missing 'choices' array");
+                }
+                return choice.path("message").path("content")
+                        .asText("No response from Arli AI (" + model + ").");
+            } catch (Exception e) {
+                throw new Exception("Unexpected 200 response from Arli AI (" + model + "). Body: " + response.body(), e);
+            }
         } else {
             throw new Exception("Failed to get response from Arli AI (" + model + "). Status: "
                     + response.statusCode() + ", Body: " + response.body());
@@ -291,9 +299,17 @@ public class AIService {
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() == 200) {
-            JsonNode cerebrasResponse = mapper.readTree(response.body());
-            return cerebrasResponse.path("choices").get(0).path("message").path("content")
-                    .asText("No response from Cerebras AI (" + model + ").");
+            try {
+                JsonNode cerebrasResponse = mapper.readTree(response.body());
+                JsonNode choice = cerebrasResponse.path("choices").get(0);
+                if (choice == null) {
+                    throw new Exception("Missing 'choices' array");
+                }
+                return choice.path("message").path("content")
+                        .asText("No response from Cerebras AI (" + model + ").");
+            } catch (Exception e) {
+                throw new Exception("Unexpected 200 response from Cerebras AI (" + model + "). Body: " + response.body(), e);
+            }
         } else {
             throw new Exception("Failed to get response from Cerebras AI (" + model + "). Status: "
                     + response.statusCode() + ", Body: " + response.body());
