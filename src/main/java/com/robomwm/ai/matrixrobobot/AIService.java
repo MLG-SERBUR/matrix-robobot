@@ -25,9 +25,9 @@ public class AIService {
     private final RoomHistoryManager historyManager;
     private final Random random;
     public static final List<String> ARLI_MODELS = Arrays.asList(
-            "Gemma-3-27B-it"
+            "Qwen3.5-27B"
     );
-    public static final List<String> CEREBRAS_MODELS = Arrays.asList("gpt-oss-120b");
+    public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
 
     public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
             String cerebrasApiKey) {
