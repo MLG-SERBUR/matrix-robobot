@@ -52,6 +52,13 @@ public class RoomManagementService {
             return;
         }
 
+        // Check if bot is actually in the room before trying to leave
+        java.util.List<String> joinedRooms = matrixClient.getJoinedRooms();
+        if (!joinedRooms.contains(roomId)) {
+            System.out.println("Bot is not in room " + roomId + ", skipping leave");
+            return;
+        }
+
         System.out.println("User left room " + roomId + ", bot is leaving...");
         matrixClient.leaveRoom(roomId);
     }
