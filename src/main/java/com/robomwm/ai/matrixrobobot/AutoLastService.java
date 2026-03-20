@@ -21,6 +21,9 @@ public class AutoLastService {
     private final Map<String, Long> lastTriggerTime = new ConcurrentHashMap<>();
     private final Map<String, Long> lastTldrTriggerTime = new ConcurrentHashMap<>();
     private final Map<String, RoomHistoryManager.EventInfo> lastReadInfo = new ConcurrentHashMap<>();
+    
+    // Track if we've processed the first sync to avoid triggering on old receipts
+    private volatile boolean firstSyncProcessed = false;
 
     private final MatrixClient matrixClient;
     private final LastMessageService lastMessageService;
@@ -91,6 +94,13 @@ public class AutoLastService {
 
         if (ephemeralEvents == null || !ephemeralEvents.isArray())
             return;
+
+        // Skip processing on first sync to avoid triggering on old receipts from before bot started
+        if (!firstSyncProcessed) {
+            firstSyncProcessed = true;
+            System.out.println("First sync processed - will start tracking read receipts from now");
+            return;
+        }
 
         for (JsonNode event : ephemeralEvents) {
             if ("m.receipt".equals(event.path("type").asText())) {
