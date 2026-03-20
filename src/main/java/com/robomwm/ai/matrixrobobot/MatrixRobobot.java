@@ -104,6 +104,34 @@ public class MatrixRobobot {
         System.out.println("Starting /sync loop");
         System.out.println("Command room: " + config.commandRoomId);
         System.out.println("Export room: " + config.exportRoomId);
+        
+        // Check bot account encryption status
+        try {
+            System.out.println("Checking bot account encryption status...");
+            String devicesUrl = url + "/_matrix/client/v3/devices";
+            HttpRequest devicesReq = HttpRequest.newBuilder()
+                    .uri(URI.create(devicesUrl))
+                    .header("Authorization", "Bearer " + config.accessToken)
+                    .timeout(Duration.ofSeconds(30))
+                    .GET()
+                    .build();
+            HttpResponse<String> devicesResp = client.send(devicesReq, HttpResponse.BodyHandlers.ofString());
+            if (devicesResp.statusCode() == 200) {
+                JsonNode devices = mapper.readTree(devicesResp.body()).path("devices");
+                System.out.println("Bot has " + (devices.isArray() ? devices.size() : 0) + " device(s)");
+                if (devices.isArray()) {
+                    for (JsonNode device : devices) {
+                        String deviceId = device.path("device_id").asText("unknown");
+                        String displayName = device.path("display_name").asText("unknown");
+                        System.out.println("  Device: " + deviceId + " (" + displayName + ")");
+                    }
+                }
+            } else {
+                System.out.println("Failed to get devices: " + devicesResp.statusCode());
+            }
+        } catch (Exception e) {
+            System.out.println("Error checking devices: " + e.getMessage());
+        }
 
         roomMgmt.cleanupAbandonedDMs(config.commandRoomId, config.exportRoomId);
 
@@ -113,7 +141,7 @@ public class MatrixRobobot {
 
         while (true) {
             try {
-                String syncUrl = url + "/_matrix/client/v3/sync?timeout=30000"
+                String syncUrl = url + "/_matrix/client/v3/sync?timeout=5000"
                         + (since != null ? "&since=" + URLEncoder.encode(since, StandardCharsets.UTF_8) : "");
 
                 HttpRequest syncReq = HttpRequest.newBuilder()
@@ -123,15 +151,48 @@ public class MatrixRobobot {
                         .GET()
                         .build();
 
+                long syncStartTime = System.currentTimeMillis();
                 HttpResponse<String> syncResp = client.send(syncReq, HttpResponse.BodyHandlers.ofString());
+                long syncDuration = System.currentTimeMillis() - syncStartTime;
+                
                 if (syncResp.statusCode() != 200) {
-                    System.out.println("/sync returned: " + syncResp.statusCode());
-                    Thread.sleep(2000);
+                    System.out.println("/sync returned: " + syncResp.statusCode() + " (took " + syncDuration + "ms)");
+                    
+                    // Special handling for 504 Gateway Timeout - use exponential backoff
+                    if (syncResp.statusCode() == 504) {
+                        System.out.println("Gateway timeout - using exponential backoff");
+                        System.out.println("  Sync URL: " + syncUrl);
+                        System.out.println("  Request duration: " + syncDuration + "ms");
+                        System.out.println("  Response headers: " + syncResp.headers().map());
+                        System.out.println("  Response body (first 500 chars): " + 
+                            (syncResp.body() != null && syncResp.body().length() > 0 ? 
+                                syncResp.body().substring(0, Math.min(500, syncResp.body().length())) : "empty"));
+                        
+                        // Check if this might be encryption-related
+                        if (syncResp.body() != null && syncResp.body().contains(" encryption")) {
+                            System.out.println("  WARNING: Response contains 'encryption' - may be related to encryption key requirement");
+                        }
+                        
+                        Thread.sleep(currentSleepMs);
+                        if (currentSleepMs < initialBackoffMs) {
+                            currentSleepMs = initialBackoffMs;
+                        } else {
+                            currentSleepMs = Math.min(maxBackoffMs, currentSleepMs * 2);
+                        }
+                    } else {
+                        // For other errors, use shorter delay
+                        Thread.sleep(2000);
+                    }
                     continue;
                 }
 
                 JsonNode root = mapper.readTree(syncResp.body());
                 since = root.path("next_batch").asText(since);
+                
+                // Log successful sync with timing info (only occasionally to avoid spam)
+                if (syncDuration > 5000 || System.currentTimeMillis() % 60000 < 1000) {
+                    System.out.println("/sync completed successfully (took " + syncDuration + "ms)");
+                }
 
                 // Handle invites
                 JsonNode inviteRooms = root.path("rooms").path("invite");
