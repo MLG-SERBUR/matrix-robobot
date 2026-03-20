@@ -719,7 +719,9 @@ public class RoomHistoryManager {
             Map<Long, List<String>> receiptsWithTimestamps = new TreeMap<>(Collections.reverseOrder());
 
             // Try to get the read receipt from the sync response first
-            String syncUrl = homeserverUrl + "/_matrix/client/v3/sync?timeout=0";
+            // Use lightweight filter to avoid 504 timeouts
+            String filter = "{\"room\":{\"rooms\":[\"" + roomId + "\"],\"timeline\":{\"limit\":1},\"state\":{\"lazy_load_members\":true},\"ephemeral\":{\"limit\":1}},\"presence\":{\"not_types\":[\"m.presence\"]}}";
+            String syncUrl = homeserverUrl + "/_matrix/client/v3/sync?timeout=0&filter=" + URLEncoder.encode(filter, StandardCharsets.UTF_8);
             HttpRequest syncReq = HttpRequest.newBuilder()
                     .uri(URI.create(syncUrl))
                     .header("Authorization", "Bearer " + accessToken)
@@ -810,7 +812,9 @@ public class RoomHistoryManager {
      */
     public boolean isLatestMessage(String roomId, String eventId) {
         try {
-            String syncUrl = homeserverUrl + "/_matrix/client/v3/sync?timeout=0";
+            // Use lightweight filter to avoid 504 timeouts
+            String filter = "{\"room\":{\"rooms\":[\"" + roomId + "\"],\"timeline\":{\"limit\":1},\"state\":{\"lazy_load_members\":true}},\"presence\":{\"not_types\":[\"m.presence\"]}}";
+            String syncUrl = homeserverUrl + "/_matrix/client/v3/sync?timeout=0&filter=" + URLEncoder.encode(filter, StandardCharsets.UTF_8);
             HttpRequest syncReq = HttpRequest.newBuilder()
                     .uri(URI.create(syncUrl))
                     .header("Authorization", "Bearer " + accessToken)
@@ -856,8 +860,11 @@ public class RoomHistoryManager {
         }
 
         try {
+            // Use lightweight filter to avoid 504 timeouts
+            String filter = "{\"room\":{\"rooms\":[\"" + roomId + "\"],\"timeline\":{\"limit\":1},\"state\":{\"lazy_load_members\":true}},\"presence\":{\"not_types\":[\"m.presence\"]}}";
+            String syncUrl = homeserverUrl + "/_matrix/client/v3/sync?timeout=0&filter=" + URLEncoder.encode(filter, StandardCharsets.UTF_8);
             HttpRequest syncReq = HttpRequest.newBuilder()
-                    .uri(URI.create(homeserverUrl + "/_matrix/client/v3/sync?timeout=0"))
+                    .uri(URI.create(syncUrl))
                     .header("Authorization", "Bearer " + accessToken)
                     .GET()
                     .build();
