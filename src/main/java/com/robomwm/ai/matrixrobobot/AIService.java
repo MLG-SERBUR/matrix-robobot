@@ -25,7 +25,7 @@ public class AIService {
     private final RoomHistoryManager historyManager;
     private final Random random;
     public static final List<String> ARLI_MODELS = Arrays.asList(
-            "Qwen3.5-27B"
+            "Qwen3.5-27B-Derestricted"
     );
     public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
 
