@@ -84,24 +84,9 @@ public class MatrixRobobot {
 
         String userId = matrixClient.getUserId();
 
+        // Skip initial sync - we only care about messages after bot starts
         String since = null;
-        try {
-            HttpRequest initSync = HttpRequest.newBuilder()
-                    .uri(URI.create(url + "/_matrix/client/v3/sync?timeout=0"))
-                    .header("Authorization", "Bearer " + config.accessToken)
-                    .GET()
-                    .build();
-            HttpResponse<String> initResp = client.send(initSync, HttpResponse.BodyHandlers.ofString());
-            if (initResp.statusCode() == 200) {
-                JsonNode initRoot = mapper.readTree(initResp.body());
-                since = initRoot.path("next_batch").asText(null);
-                System.out.println("Primed since token: " + since);
-            }
-        } catch (Exception e) {
-            System.out.println("Initial sync failed: " + e.getMessage());
-        }
-
-        System.out.println("Starting /sync loop");
+        System.out.println("Starting /sync loop (skipping initial sync - only processing new messages)");
         System.out.println("Command room: " + config.commandRoomId);
         System.out.println("Export room: " + config.exportRoomId);
 
@@ -113,8 +98,13 @@ public class MatrixRobobot {
 
         while (true) {
             try {
+                // Use a lightweight filter to minimize sync payload and avoid 504 timeouts
+                String filter = since == null 
+                    ? "{\"room\":{\"timeline\":{\"limit\":1},\"state\":{\"lazy_load_members\":true}},\"presence\":{\"not_types\":[\"m.presence\"]}}"
+                    : "";
                 String syncUrl = url + "/_matrix/client/v3/sync?timeout=30000"
-                        + (since != null ? "&since=" + URLEncoder.encode(since, StandardCharsets.UTF_8) : "");
+                        + (since != null ? "&since=" + URLEncoder.encode(since, StandardCharsets.UTF_8) : "")
+                        + (!filter.isEmpty() ? "&filter=" + URLEncoder.encode(filter, StandardCharsets.UTF_8) : "");
 
                 HttpRequest syncReq = HttpRequest.newBuilder()
                         .uri(URI.create(syncUrl))
