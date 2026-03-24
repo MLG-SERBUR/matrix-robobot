@@ -182,7 +182,8 @@ public class AIService {
                 "model", model,
                 "messages", messages,
                 "stream", true,
-                "output_kind", "delta");
+                "output_kind", "delta",
+                "dry_multiplier", 0.4);
         String jsonPayload = mapper.writeValueAsString(arliPayload);
 
         HttpRequest request = HttpRequest.newBuilder()
