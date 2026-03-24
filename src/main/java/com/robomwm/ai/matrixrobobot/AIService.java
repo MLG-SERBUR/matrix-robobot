@@ -124,9 +124,7 @@ public class AIService {
 
             if (tryArli) {
                 try {
-                    String answer = callArliAI(prompt, arliModel, skipSystem, responseRoomId, eventId);
-                    answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
-                    matrixClient.updateMarkdownMessage(responseRoomId, eventId, answer);
+                    callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId);
                     return; // Success
                 } catch (Exception e) {
                     String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -170,7 +168,7 @@ public class AIService {
         }
     }
 
-    private String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String eventId) throws Exception {
+    private String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");
@@ -181,24 +179,30 @@ public class AIService {
         Map<String, Object> arliPayload = Map.of(
                 "model", model,
                 "messages", messages,
-                "stream", true);
+                "stream", true,
+                "output_kind", "delta");
         String jsonPayload = mapper.writeValueAsString(arliPayload);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(arliApiUrl + "/v1/chat/completions"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + arliApiKey)
+                .header("Accept", "text/event-stream")
                 .timeout(Duration.ofSeconds(300))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        String eventId = matrixClient.sendTextWithEventId(responseRoomId, "...");
+        if (eventId == null) throw new Exception("Failed to send initial placeholder message for ArliAI.");
+
         StringBuilder fullResponse = new StringBuilder();
         AtomicLong lastUpdate = new AtomicLong(System.currentTimeMillis());
 
         try {
             System.out.println("Starting ArliAI streaming request...");
             client.send(request, HttpResponse.BodyHandlers.ofLines()).body().forEach(line -> {
+                System.out.println("ArliAI Raw Line: " + line);
                 String data = line.trim();
                 if (data.isEmpty()) return;
                 
@@ -211,8 +215,16 @@ public class AIService {
                         JsonNode choices = node.path("choices");
                         if (choices.isArray() && choices.size() > 0) {
                             JsonNode delta = choices.get(0).path("delta");
+                            String content = null;
                             if (delta.has("content")) {
-                                String content = delta.get("content").asText();
+                                content = delta.get("content").asText();
+                            } else if (delta.has("reasoning")) {
+                                content = delta.get("reasoning").asText();
+                            } else if (delta.has("reasoning_content")) {
+                                content = delta.get("reasoning_content").asText();
+                            }
+                            
+                            if (content != null && !content.isEmpty()) {
                                 fullResponse.append(content);
                                 
                                 long now = System.currentTimeMillis();
@@ -239,6 +251,8 @@ public class AIService {
             throw new Exception("No response received from ArliAI streaming.");
         }
 
+        String answer = appendMessageLink(fullResponse.toString(), exportRoomId, firstEventId);
+        matrixClient.updateMarkdownMessage(responseRoomId, eventId, answer);
         return fullResponse.toString();
     }
 
