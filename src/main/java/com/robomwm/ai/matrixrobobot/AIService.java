@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class AIService {
     private final HttpClient client;
@@ -123,9 +124,9 @@ public class AIService {
 
             if (tryArli) {
                 try {
-                    String answer = callArliAI(prompt, arliModel, skipSystem);
+                    String answer = callArliAI(prompt, arliModel, skipSystem, responseRoomId, eventId);
                     answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
-                    matrixClient.sendMarkdown(responseRoomId, answer);
+                    matrixClient.updateMarkdownMessage(responseRoomId, eventId, answer);
                     return; // Success
                 } catch (Exception e) {
                     String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -169,7 +170,7 @@ public class AIService {
         }
     }
 
-    private String callArliAI(String prompt, String model, boolean skipSystem) throws Exception {
+    private String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String eventId) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");
@@ -180,7 +181,7 @@ public class AIService {
         Map<String, Object> arliPayload = Map.of(
                 "model", model,
                 "messages", messages,
-                "stream", false);
+                "stream", true);
         String jsonPayload = mapper.writeValueAsString(arliPayload);
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -191,24 +192,39 @@ public class AIService {
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        StringBuilder fullResponse = new StringBuilder();
+        AtomicLong lastUpdate = new AtomicLong(System.currentTimeMillis());
 
-        if (response.statusCode() == 200) {
-            try {
-                JsonNode arliResponse = mapper.readTree(response.body());
-                JsonNode choice = arliResponse.path("choices").get(0);
-                if (choice == null) {
-                    throw new Exception("Missing 'choices' array");
+        try {
+            client.send(request, HttpResponse.BodyHandlers.ofLines()).body().forEach(line -> {
+                if (line.startsWith("data: ") && !line.contains("[DONE]")) {
+                    try {
+                        JsonNode node = mapper.readTree(line.substring(6));
+                        JsonNode delta = node.path("choices").get(0).path("delta");
+                        if (delta.has("content")) {
+                            fullResponse.append(delta.get("content").asText());
+                            
+                            long now = System.currentTimeMillis();
+                            if (now - lastUpdate.get() > 3000) {
+                                lastUpdate.set(now);
+                                matrixClient.updateMarkdownMessage(responseRoomId, eventId, fullResponse.toString() + "...");
+                            }
+                        }
+                    } catch (Exception e) {
+                        // ignore malformed chunks
+                    }
                 }
-                return choice.path("message").path("content")
-                        .asText("No response from Arli AI (" + model + ").");
-            } catch (Exception e) {
-                throw new Exception("Unexpected 200 response from Arli AI (" + model + "). Body: " + response.body(), e);
-            }
-        } else {
-            throw new Exception("Failed to get response from Arli AI (" + model + "). Status: "
-                    + response.statusCode() + ", Body: " + response.body());
+            });
+        } catch (Exception e) {
+            throw new Exception("Error during ArliAI streaming: " + e.getMessage(), e);
         }
+
+        if (fullResponse.length() == 0) {
+            throw new Exception("No response received from ArliAI streaming.");
+        }
+
+        return fullResponse.toString();
     }
 
     public void queryAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,

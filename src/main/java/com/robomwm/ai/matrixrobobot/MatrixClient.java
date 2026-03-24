@@ -139,6 +139,14 @@ public class MatrixClient {
      * Update a previously sent text message
      */
     public String updateTextMessage(String roomId, String originalEventId, String message) {
+        return updateMarkdownMessage(roomId, originalEventId, message, false);
+    }
+
+    public String updateMarkdownMessage(String roomId, String originalEventId, String message) {
+        return updateMarkdownMessage(roomId, originalEventId, message, true);
+    }
+
+    private String updateMarkdownMessage(String roomId, String originalEventId, String message, boolean useMarkdown) {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
@@ -156,6 +164,13 @@ public class MatrixClient {
             newContent.put("msgtype", "m.text");
             newContent.put("body", sanitizedMessage);
             newContent.put("m.mentions", Map.of());
+            
+            if (useMarkdown) {
+                String htmlBody = convertMarkdownToHtml(sanitizedMessage);
+                newContent.put("format", "org.matrix.custom.html");
+                newContent.put("formatted_body", htmlBody);
+            }
+            
             payload.put("m.new_content", newContent);
 
             Map<String, Object> relatesTo = new HashMap<>();
