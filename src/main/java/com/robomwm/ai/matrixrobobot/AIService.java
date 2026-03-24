@@ -454,25 +454,29 @@ public class AIService {
             }
         }
         
-        if (stepIndices.size() >= 1) {
-            int startIndex = stepIndices.get(stepIndices.size() - 1);
-            StringBuilder sb = new StringBuilder();
-            for (int i = startIndex; i < lines.length; i++) {
-                sb.append(lines[i]).append("\n");
-            }
-            return sb.toString().trim();
+        int lastStepIdx = -1;
+        if (!stepIndices.isEmpty()) {
+            lastStepIdx = stepIndices.get(stepIndices.size() - 1);
         }
         
-        // Fallback truncation: keep last 20 lines or last 3000 characters
-        int maxLines = 20;
-        int maxChars = 3000;
+        // Strict limits: 15 lines, 2500 characters
+        int maxLines = 15;
+        int maxChars = 2500;
         
         StringBuilder sb = new StringBuilder();
         int lineCount = 0;
+        // Build from the end (tail) upwards
         for (int i = lines.length - 1; i >= 0 && lineCount < maxLines; i--) {
+            // Check character limit before appending
             if (sb.length() + lines[i].length() + 1 > maxChars) break;
+            
             sb.insert(0, lines[i] + "\n");
             lineCount++;
+            
+            // If we've reached the start of the last identified step, stop here to avoid
+            // including content from previous steps, UNLESS we must keep going to fill limits
+            // (but user said "only the last line item", so stopping at lastStepIdx is correct).
+            if (i == lastStepIdx) break;
         }
         
         return sb.toString().trim();
