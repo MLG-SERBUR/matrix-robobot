@@ -270,9 +270,13 @@ public class AIService {
         
         String finalOutput;
         if (content.toString().trim().isEmpty()) {
-            System.out.println("ArliAI: Content is empty, falling back to trimmed reasoning.");
-            String trimmed = trimReasoning(reasoning.toString());
-            finalOutput = "> " + trimmed.replace("\n", "\n> ") + "\n\n**ArliAI: No final response was generated.**";
+            if (reasoning.length() > 0) {
+                System.out.println("ArliAI: Content is empty, falling back to trimmed reasoning.");
+                String trimmed = trimReasoning(reasoning.toString());
+                finalOutput = "> " + trimmed.replace("\n", "\n> ") + "\n\n**ArliAI: No final response was generated.**";
+            } else {
+                finalOutput = "**ArliAI Error: No final response was generated.**";
+            }
         } else {
             finalOutput = content.toString();
         }
