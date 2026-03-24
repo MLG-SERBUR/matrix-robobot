@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class AIService {
@@ -26,7 +27,8 @@ public class AIService {
     private final RoomHistoryManager historyManager;
     private final Random random;
     public static final List<String> ARLI_MODELS = Arrays.asList(
-            "Qwen3.5-27B-Derestricted"
+            "Qwen3.5-27B-Derestricted",
+            "Qwen3.5-27B-Vivid-Durian"
     );
     public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
 
@@ -106,7 +108,7 @@ public class AIService {
             String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
             String backendName = preferredBackend == Backend.CEREBRAS ? "Cerebras (" + cerebrasModel + ")" : "Arli AI (" + arliModel + ")";
             String queryDescription = history.logs.size() + " messages";
-            String initialStatusMsg = "Querying " + backendName + " with " + queryDescription + questionPart + "...";
+            String initialStatusMsg = "Querying " + backendName + " with " + queryDescription + questionPart;
 
             String eventId = matrixClient.sendTextWithEventId(responseRoomId, initialStatusMsg);
             if (eventId == null) return;
@@ -136,7 +138,7 @@ public class AIService {
                     if (is403 && isContextExceeded) {
                         String contextInfo = extractContextInfo(errorMsg);
                         matrixClient.updateTextMessage(responseRoomId, eventId,
-                                "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ". Querying Cerebras (" + cerebrasModel + ") with " + queryDescription + questionPart + "...");
+                                "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ". Querying Cerebras (" + cerebrasModel + ") with " + queryDescription + questionPart);
                         msgEdited = true;
                     } else {
                         matrixClient.sendText(responseRoomId, "ArliAI (" + arliModel + ") failed: " + errorMsg);
@@ -200,6 +202,8 @@ public class AIService {
         StringBuilder content = new StringBuilder();
         AtomicLong lastUpdate = new AtomicLong(System.currentTimeMillis());
 
+        AtomicInteger updateCount = new AtomicInteger(0);
+
         try {
             System.out.println("Starting ArliAI streaming request...");
             client.send(request, HttpResponse.BodyHandlers.ofLines()).body().forEach(line -> {
@@ -240,7 +244,8 @@ public class AIService {
                                     output = output.substring(0, 15900) + "... [TRUNCATED]";
                                 }
                                 
-                                matrixClient.updateMarkdownMessage(responseRoomId, eventId, output + "...");
+                                String indicator = (updateCount.getAndIncrement() % 2 == 0) ? "⌛" : "⏳";
+                                matrixClient.updateMarkdownMessage(responseRoomId, eventId, output + indicator);
                             }
                         }
                     } catch (Exception e) {
@@ -441,17 +446,16 @@ public class AIService {
         if (r == null || r.isEmpty()) return "";
         String[] lines = r.split("\n");
         List<Integer> stepIndices = new ArrayList<>();
-        // Look for lines starting with "1. ", "2. ", etc. or "* "
+        // Look for main list items starting at the beginning of the line
         for (int i = 0; i < lines.length; i++) {
-            String trimmed = lines[i].trim();
-            if (trimmed.matches("^\\d+\\..*") || trimmed.startsWith("* ")) {
+            if (lines[i].matches("^(\\d+\\.|\\*).*")) {
                 stepIndices.add(i);
             }
         }
         
         if (stepIndices.size() >= 2) {
             int startIndex = stepIndices.get(stepIndices.size() - 2);
-            StringBuilder sb = new StringBuilder("...\n");
+            StringBuilder sb = new StringBuilder();
             for (int i = startIndex; i < lines.length; i++) {
                 sb.append(lines[i]).append("\n");
             }
@@ -459,7 +463,7 @@ public class AIService {
         }
         
         if (r.length() > 10000) {
-            return "... " + r.substring(r.length() - 10000);
+            return r.substring(r.length() - 10000);
         }
         return r;
     }
