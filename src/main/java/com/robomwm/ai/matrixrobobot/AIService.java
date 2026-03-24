@@ -196,13 +196,13 @@ public class AIService {
         String eventId = matrixClient.sendTextWithEventId(responseRoomId, "...");
         if (eventId == null) throw new Exception("Failed to send initial placeholder message for ArliAI.");
 
-        StringBuilder fullResponse = new StringBuilder();
+        StringBuilder reasoning = new StringBuilder();
+        StringBuilder content = new StringBuilder();
         AtomicLong lastUpdate = new AtomicLong(System.currentTimeMillis());
 
         try {
             System.out.println("Starting ArliAI streaming request...");
             client.send(request, HttpResponse.BodyHandlers.ofLines()).body().forEach(line -> {
-                System.out.println("ArliAI Raw Line: " + line);
                 String data = line.trim();
                 if (data.isEmpty()) return;
                 
@@ -215,23 +215,35 @@ public class AIService {
                         JsonNode choices = node.path("choices");
                         if (choices.isArray() && choices.size() > 0) {
                             JsonNode delta = choices.get(0).path("delta");
-                            String content = null;
                             if (delta.has("content")) {
-                                content = delta.get("content").asText();
+                                content.append(delta.get("content").asText());
                             } else if (delta.has("reasoning")) {
-                                content = delta.get("reasoning").asText();
+                                reasoning.append(delta.get("reasoning").asText());
                             } else if (delta.has("reasoning_content")) {
-                                content = delta.get("reasoning_content").asText();
+                                reasoning.append(delta.get("reasoning_content").asText());
                             }
                             
-                            if (content != null && !content.isEmpty()) {
-                                fullResponse.append(content);
-                                
-                                long now = System.currentTimeMillis();
-                                if (fullResponse.length() > 0 && now - lastUpdate.get() > 3000) {
-                                    lastUpdate.set(now);
-                                    matrixClient.updateMarkdownMessage(responseRoomId, eventId, fullResponse.toString() + "...");
+                            long now = System.currentTimeMillis();
+                            if ((content.length() > 0 || reasoning.length() > 0) && now - lastUpdate.get() > 7000) {
+                                lastUpdate.set(now);
+                                StringBuilder streamingOutput = new StringBuilder();
+                                if (reasoning.length() > 0) {
+                                    String r = reasoning.toString();
+                                    if (r.length() > 1000) {
+                                        r = "... " + r.substring(r.length() - 1000);
+                                    }
+                                    streamingOutput.append("> ").append(r.replace("\n", "\n> ")).append("\n\n");
                                 }
+                                if (content.length() > 0) {
+                                    streamingOutput.append(content.toString());
+                                }
+                                
+                                String output = streamingOutput.toString();
+                                if (output.length() > 16000) {
+                                    output = output.substring(0, 15900) + "... [TRUNCATED]";
+                                }
+                                
+                                matrixClient.updateMarkdownMessage(responseRoomId, eventId, output + "...");
                             }
                         }
                     } catch (Exception e) {
@@ -247,13 +259,18 @@ public class AIService {
             throw new Exception("Error during ArliAI streaming: " + e.getMessage(), e);
         }
 
-        if (fullResponse.length() == 0) {
+        if (content.length() == 0 && reasoning.length() == 0) {
             throw new Exception("No response received from ArliAI streaming.");
         }
 
-        String answer = appendMessageLink(fullResponse.toString(), exportRoomId, firstEventId);
+        String finalContent = content.length() > 0 ? content.toString() : reasoning.toString();
+        if (finalContent.length() > 30000) {
+            finalContent = finalContent.substring(0, 29900) + "... [TRUNCATED]";
+        }
+
+        String answer = appendMessageLink(finalContent, exportRoomId, firstEventId);
         matrixClient.updateMarkdownMessage(responseRoomId, eventId, answer);
-        return fullResponse.toString();
+        return finalContent;
     }
 
     public void queryAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
