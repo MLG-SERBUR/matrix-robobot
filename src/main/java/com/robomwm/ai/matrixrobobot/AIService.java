@@ -197,26 +197,41 @@ public class AIService {
         AtomicLong lastUpdate = new AtomicLong(System.currentTimeMillis());
 
         try {
+            System.out.println("Starting ArliAI streaming request...");
             client.send(request, HttpResponse.BodyHandlers.ofLines()).body().forEach(line -> {
-                if (line.startsWith("data: ") && !line.contains("[DONE]")) {
+                String data = line.trim();
+                if (data.isEmpty()) return;
+                
+                if (data.startsWith("data:") && !data.contains("[DONE]")) {
                     try {
-                        JsonNode node = mapper.readTree(line.substring(6));
-                        JsonNode delta = node.path("choices").get(0).path("delta");
-                        if (delta.has("content")) {
-                            fullResponse.append(delta.get("content").asText());
-                            
-                            long now = System.currentTimeMillis();
-                            if (now - lastUpdate.get() > 3000) {
-                                lastUpdate.set(now);
-                                matrixClient.updateMarkdownMessage(responseRoomId, eventId, fullResponse.toString() + "...");
+                        String json = data.substring(5).trim();
+                        if (json.isEmpty()) return;
+                        
+                        JsonNode node = mapper.readTree(json);
+                        JsonNode choices = node.path("choices");
+                        if (choices.isArray() && choices.size() > 0) {
+                            JsonNode delta = choices.get(0).path("delta");
+                            if (delta.has("content")) {
+                                String content = delta.get("content").asText();
+                                fullResponse.append(content);
+                                
+                                long now = System.currentTimeMillis();
+                                if (fullResponse.length() > 0 && now - lastUpdate.get() > 3000) {
+                                    lastUpdate.set(now);
+                                    matrixClient.updateMarkdownMessage(responseRoomId, eventId, fullResponse.toString() + "...");
+                                }
                             }
                         }
                     } catch (Exception e) {
-                        // ignore malformed chunks
+                        System.err.println("ArliAI Stream Parse Error: " + e.getMessage() + " | Line: " + line);
                     }
+                } else if (data.contains("[DONE]")) {
+                    System.out.println("ArliAI streaming finished normally ([DONE] received).");
                 }
             });
         } catch (Exception e) {
+            System.err.println("Error during ArliAI streaming call: " + e.getMessage());
+            e.printStackTrace();
             throw new Exception("Error during ArliAI streaming: " + e.getMessage(), e);
         }
 
