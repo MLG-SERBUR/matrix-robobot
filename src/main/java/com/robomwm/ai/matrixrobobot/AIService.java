@@ -266,14 +266,24 @@ public class AIService {
             throw new Exception("No response received from ArliAI streaming.");
         }
 
-        String finalContent = content.length() > 0 ? content.toString() : reasoning.toString();
-        if (finalContent.length() > 16000) {
-            finalContent = finalContent.substring(0, 15900) + "... [TRUNCATED]";
+        System.out.println("ArliAI Final State - Content size: " + content.length() + ", Reasoning size: " + reasoning.length());
+        
+        String finalOutput;
+        if (content.toString().trim().isEmpty()) {
+            System.out.println("ArliAI: Content is empty, falling back to trimmed reasoning.");
+            String trimmed = trimReasoning(reasoning.toString());
+            finalOutput = "> " + trimmed.replace("\n", "\n> ") + "\n\n**ArliAI: No final response was generated.**";
+        } else {
+            finalOutput = content.toString();
         }
 
-        String answer = appendMessageLink(finalContent, exportRoomId, firstEventId);
+        if (finalOutput.length() > 16000) {
+            finalOutput = finalOutput.substring(0, 15900) + "... [TRUNCATED]";
+        }
+
+        String answer = appendMessageLink(finalOutput, exportRoomId, firstEventId);
         matrixClient.updateMarkdownMessage(responseRoomId, eventId, answer);
-        return finalContent;
+        return finalOutput;
     }
 
     public void queryAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
