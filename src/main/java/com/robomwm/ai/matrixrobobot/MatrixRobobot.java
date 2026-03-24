@@ -54,7 +54,7 @@ public class MatrixRobobot {
                 : config.homeserver;
 
         HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(120))
+                .connectTimeout(Duration.ofSeconds(300))
                 .build();
         ObjectMapper mapper = new ObjectMapper();
 
@@ -109,7 +109,7 @@ public class MatrixRobobot {
                 HttpRequest syncReq = HttpRequest.newBuilder()
                         .uri(URI.create(syncUrl))
                         .header("Authorization", "Bearer " + config.accessToken)
-                        .timeout(Duration.ofSeconds(120))
+                        .timeout(Duration.ofSeconds(300))
                         .GET()
                         .build();
 

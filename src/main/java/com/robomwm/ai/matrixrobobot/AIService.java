@@ -187,7 +187,7 @@ public class AIService {
                 .uri(URI.create(arliApiUrl + "/v1/chat/completions"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + arliApiKey)
-                .timeout(Duration.ofSeconds(120))
+                .timeout(Duration.ofSeconds(300))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
@@ -292,7 +292,7 @@ public class AIService {
                 .uri(URI.create(cerebrasApiUrl + "/v1/chat/completions"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + cerebrasApiKey)
-                .timeout(Duration.ofSeconds(120))
+                .timeout(Duration.ofSeconds(300))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
