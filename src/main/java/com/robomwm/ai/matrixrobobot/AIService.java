@@ -195,7 +195,7 @@ public class AIService {
                 .build();
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-        String eventId = matrixClient.sendTextWithEventId(responseRoomId, "...");
+        String eventId = matrixClient.sendTextWithEventId(responseRoomId, "⏳");
         if (eventId == null) throw new Exception("Failed to send initial placeholder message for ArliAI.");
 
         StringBuilder reasoning = new StringBuilder();
@@ -203,6 +203,7 @@ public class AIService {
         AtomicLong lastUpdate = new AtomicLong(System.currentTimeMillis());
 
         AtomicInteger updateCount = new AtomicInteger(0);
+        String[] clockFaces = {"🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦"};
 
         try {
             System.out.println("Starting ArliAI streaming request...");
@@ -244,7 +245,7 @@ public class AIService {
                                     output = output.substring(0, 15900) + "... [TRUNCATED]";
                                 }
                                 
-                                String indicator = (updateCount.getAndIncrement() % 2 == 0) ? "⌛" : "⏳";
+                                String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length];
                                 matrixClient.updateMarkdownMessage(responseRoomId, eventId, output + indicator);
                             }
                         }
@@ -266,8 +267,8 @@ public class AIService {
         }
 
         String finalContent = content.length() > 0 ? content.toString() : reasoning.toString();
-        if (finalContent.length() > 30000) {
-            finalContent = finalContent.substring(0, 29900) + "... [TRUNCATED]";
+        if (finalContent.length() > 16000) {
+            finalContent = finalContent.substring(0, 15900) + "... [TRUNCATED]";
         }
 
         String answer = appendMessageLink(finalContent, exportRoomId, firstEventId);
@@ -462,9 +463,9 @@ public class AIService {
             return sb.toString().trim();
         }
         
-        // Fallback truncation: keep last 30 lines or last 5000 characters
-        int maxLines = 30;
-        int maxChars = 5000;
+        // Fallback truncation: keep last 20 lines or last 3000 characters
+        int maxLines = 20;
+        int maxChars = 3000;
         
         StringBuilder sb = new StringBuilder();
         int lineCount = 0;
