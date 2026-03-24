@@ -453,8 +453,8 @@ public class AIService {
             }
         }
         
-        if (stepIndices.size() >= 2) {
-            int startIndex = stepIndices.get(stepIndices.size() - 2);
+        if (stepIndices.size() >= 1) {
+            int startIndex = stepIndices.get(stepIndices.size() - 1);
             StringBuilder sb = new StringBuilder();
             for (int i = startIndex; i < lines.length; i++) {
                 sb.append(lines[i]).append("\n");
@@ -462,10 +462,19 @@ public class AIService {
             return sb.toString().trim();
         }
         
-        if (r.length() > 10000) {
-            return r.substring(r.length() - 10000);
+        // Fallback truncation: keep last 30 lines or last 5000 characters
+        int maxLines = 30;
+        int maxChars = 5000;
+        
+        StringBuilder sb = new StringBuilder();
+        int lineCount = 0;
+        for (int i = lines.length - 1; i >= 0 && lineCount < maxLines; i--) {
+            if (sb.length() + lines[i].length() + 1 > maxChars) break;
+            sb.insert(0, lines[i] + "\n");
+            lineCount++;
         }
-        return r;
+        
+        return sb.toString().trim();
     }
 
     private String appendMessageLink(String aiAnswer, String exportRoomId, String firstEventId) {
