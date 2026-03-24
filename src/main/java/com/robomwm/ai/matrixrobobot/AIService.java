@@ -224,14 +224,11 @@ public class AIService {
                             }
                             
                             long now = System.currentTimeMillis();
-                            if ((content.length() > 0 || reasoning.length() > 0) && now - lastUpdate.get() > 7000) {
+                            if ((content.length() > 0 || reasoning.length() > 0) && now - lastUpdate.get() > 5000) {
                                 lastUpdate.set(now);
                                 StringBuilder streamingOutput = new StringBuilder();
                                 if (reasoning.length() > 0) {
-                                    String r = reasoning.toString();
-                                    if (r.length() > 1000) {
-                                        r = "... " + r.substring(r.length() - 1000);
-                                    }
+                                    String r = trimReasoning(reasoning.toString());
                                     streamingOutput.append("> ").append(r.replace("\n", "\n> ")).append("\n\n");
                                 }
                                 if (content.length() > 0) {
@@ -438,6 +435,33 @@ public class AIService {
         }
         messages.add(Map.of("role", "user", "content", prompt));
         return messages;
+    }
+
+    private String trimReasoning(String r) {
+        if (r == null || r.isEmpty()) return "";
+        String[] lines = r.split("\n");
+        List<Integer> stepIndices = new ArrayList<>();
+        // Look for lines starting with "1. ", "2. ", etc. or "* "
+        for (int i = 0; i < lines.length; i++) {
+            String trimmed = lines[i].trim();
+            if (trimmed.matches("^\\d+\\..*") || trimmed.startsWith("* ")) {
+                stepIndices.add(i);
+            }
+        }
+        
+        if (stepIndices.size() >= 2) {
+            int startIndex = stepIndices.get(stepIndices.size() - 2);
+            StringBuilder sb = new StringBuilder("...\n");
+            for (int i = startIndex; i < lines.length; i++) {
+                sb.append(lines[i]).append("\n");
+            }
+            return sb.toString().trim();
+        }
+        
+        if (r.length() > 10000) {
+            return "... " + r.substring(r.length() - 10000);
+        }
+        return r;
     }
 
     private String appendMessageLink(String aiAnswer, String exportRoomId, String firstEventId) {
