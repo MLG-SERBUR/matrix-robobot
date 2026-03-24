@@ -434,7 +434,11 @@ public class MatrixClient {
      * Sanitize user IDs to prevent pinging
      */
     private String sanitizeUserIds(String message) {
-        return message.replaceAll("(?<!`)(?<!`<)(@[a-zA-Z0-9._=-]+:[a-zA-Z0-9.-]+)(?!`)", "`$1`");
+        if (message == null) return null;
+        // Wrap @room, @everyone, @channel mentions to prevent pings
+        String sanitized = message.replaceAll("(?<!`)(?<!`<)(@(room|everyone|channel))(?!`)", "`$1`");
+        // Wrap @user:domain mentions to prevent pings
+        return sanitized.replaceAll("(?<!`)(?<!`<)(@[a-zA-Z0-9._=-]+:[a-zA-Z0-9.-]+)(?!`)", "`$1`");
     }
 
     public String getHomeserverUrl() {
