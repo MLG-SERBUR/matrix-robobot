@@ -174,7 +174,7 @@ public class MatrixRobobot {
                                 continue;
                             
                             // Process emojis via PleadService
-                            pleadService.processMessage(roomId, eventId, body);
+                            pleadService.processMessage(roomId, eventId, body, sender);
 
                             // PRIMARY: !last command
                             if ("!last".equals(trimmed)) {

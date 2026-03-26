@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Handles all Matrix protocol interactions including sending messages,
@@ -25,6 +26,7 @@ public class MatrixClient {
     private final ObjectMapper mapper;
     private final String homeserverUrl;
     private final String accessToken;
+    private final Map<String, String> displayNameCache = new ConcurrentHashMap<>();
 
     public MatrixClient(HttpClient httpClient, ObjectMapper mapper, String homeserverUrl, String accessToken) {
         this.httpClient = httpClient;
@@ -428,6 +430,38 @@ public class MatrixClient {
         HtmlRenderer renderer = HtmlRenderer.builder().build();
         org.commonmark.node.Node document = parser.parse(markdown);
         return renderer.render(document);
+    }
+
+    public String getDisplayName(String userId) {
+        if (userId == null) return null;
+        if (displayNameCache.containsKey(userId)) {
+            return displayNameCache.get(userId);
+        }
+
+        try {
+            String encodedId = URLEncoder.encode(userId, StandardCharsets.UTF_8);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(homeserverUrl + "/_matrix/client/v3/profile/" + encodedId + "/displayname"))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .timeout(Duration.ofSeconds(30))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                JsonNode root = mapper.readTree(response.body());
+                String displayName = root.path("displayname").asText(null);
+                if (displayName != null) {
+                    displayNameCache.put(userId, displayName);
+                    return displayName;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to fetch display name for " + userId + ": " + e.getMessage());
+        }
+
+        // Return userID as fallback if no display name found or error occurred
+        return userId;
     }
 
     /**

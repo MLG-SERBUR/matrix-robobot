@@ -137,12 +137,17 @@ public class PleadService {
         }
     }
 
-    public void processMessage(String roomId, String eventId, String body) {
+    public void processMessage(String roomId, String eventId, String body, String senderId) {
         if (!isEnabled || body == null) {
             return;
         }
 
         if (body.contains("🥺")) {
+            String displayName = matrixClient.getDisplayName(senderId);
+            if (displayName != null && displayName.contains("🥺")) {
+                return;
+            }
+
             String reaction;
             int chance = random.nextInt(4);
             if (chance == 0) {
