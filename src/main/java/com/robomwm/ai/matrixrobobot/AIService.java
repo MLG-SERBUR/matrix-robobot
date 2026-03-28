@@ -195,8 +195,7 @@ public class AIService {
                 .build();
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-        String eventId = matrixClient.sendTextWithEventId(responseRoomId, "⏳");
-        if (eventId == null) throw new Exception("Failed to send initial placeholder message for ArliAI.");
+        java.util.concurrent.atomic.AtomicReference<String> eventIdObj = new java.util.concurrent.atomic.AtomicReference<>(null);
 
         StringBuilder reasoning = new StringBuilder();
         StringBuilder content = new StringBuilder();
@@ -207,7 +206,14 @@ public class AIService {
 
         try {
             System.out.println("Starting ArliAI streaming request...");
-            client.send(request, HttpResponse.BodyHandlers.ofLines()).body().forEach(line -> {
+            HttpResponse<java.util.stream.Stream<String>> response = client.send(request, HttpResponse.BodyHandlers.ofLines());
+            
+            if (response.statusCode() != 200) {
+                String errorBody = response.body().collect(java.util.stream.Collectors.joining("\n"));
+                throw new Exception("Status: " + response.statusCode() + " Body: " + errorBody);
+            }
+            
+            response.body().forEach(line -> {
                 String data = line.trim();
                 if (data.isEmpty()) return;
                 
@@ -229,7 +235,8 @@ public class AIService {
                             }
                             
                             long now = System.currentTimeMillis();
-                            if ((content.length() > 0 || reasoning.length() > 0) && now - lastUpdate.get() > 5000) {
+                            int updateInterval = "Qwen3.5-27B-Vivid-Durian".equals(model) ? 10000 : 5000;
+                            if ((content.length() > 0 || reasoning.length() > 0) && now - lastUpdate.get() > updateInterval) {
                                 lastUpdate.set(now);
                                 StringBuilder streamingOutput = new StringBuilder();
                                 if (reasoning.length() > 0) {
@@ -246,7 +253,11 @@ public class AIService {
                                 }
                                 
                                 String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length];
-                                matrixClient.updateMarkdownMessage(responseRoomId, eventId, output + indicator);
+                                if (eventIdObj.get() == null) {
+                                    eventIdObj.set(matrixClient.sendMarkdownWithEventId(responseRoomId, output + indicator));
+                                } else {
+                                    matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), output + indicator);
+                                }
                             }
                         }
                     } catch (Exception e) {
@@ -286,7 +297,11 @@ public class AIService {
         }
 
         String answer = appendMessageLink(finalOutput, exportRoomId, firstEventId);
-        matrixClient.updateMarkdownMessage(responseRoomId, eventId, answer);
+        if (eventIdObj.get() == null) {
+            matrixClient.sendMarkdownWithEventId(responseRoomId, answer);
+        } else {
+            matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), answer);
+        }
         return finalOutput;
     }
 

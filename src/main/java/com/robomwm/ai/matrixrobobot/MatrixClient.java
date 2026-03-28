@@ -204,6 +204,48 @@ public class MatrixClient {
     }
 
     /**
+     * Send a markdown formatted message and return the event ID
+     */
+    public String sendMarkdownWithEventId(String roomId, String message) {
+        try {
+            String txnId = "m" + Instant.now().toEpochMilli();
+            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
+                    + txnId;
+
+            String sanitizedMessage = sanitizeUserIds(message);
+            String htmlBody = convertMarkdownToHtml(sanitizedMessage);
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("msgtype", "m.text");
+            payload.put("body", sanitizedMessage);
+            payload.put("format", "org.matrix.custom.html");
+            payload.put("formatted_body", htmlBody);
+            payload.put("m.mentions", Map.of());
+            String json = mapper.writeValueAsString(payload);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(endpoint))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(120))
+                    .PUT(HttpRequest.BodyPublishers.ofString(json))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                JsonNode root = mapper.readTree(response.body());
+                return root.path("event_id").asText(null);
+            }
+            System.out.println("Sent markdown reply to " + roomId + " -> " + response.statusCode());
+            return null;
+        } catch (Exception e) {
+            System.out.println("Failed to send markdown message: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Send a markdown formatted message
      */
     public void sendMarkdown(String roomId, String message) {
