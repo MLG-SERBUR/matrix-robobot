@@ -25,6 +25,11 @@ import java.util.Iterator;
  */
 public class RoomHistoryManager {
 
+    @FunctionalInterface
+    public interface ProgressCallback {
+        void onProgress(int messageCount, int estimatedTokens);
+    }
+
     private final HttpClient httpClient;
     private final ObjectMapper mapper;
     private final String homeserverUrl;
@@ -198,13 +203,19 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages) {
-        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, null);
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, null, null);
     }
 
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, abortFlag, null);
+    }
+
+    public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
+            boolean forward, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            ProgressCallback progressCallback) {
         if (startEventId == null) {
-            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages, abortFlag);
+            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages, abortFlag, progressCallback);
         }
 
         List<String> lines = new ArrayList<>();
@@ -293,6 +304,13 @@ public class RoomHistoryManager {
                     }
                 }
 
+                // Report progress after each batch
+                if (progressCallback != null && !lines.isEmpty()) {
+                    int tokens = 0;
+                    for (String l : lines) tokens += estimateTokens(l);
+                    progressCallback.onProgress(lines.size(), tokens);
+                }
+
                 if (stop) {
                     break;
                 }
@@ -344,11 +362,17 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, int maxMessages) {
-        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, null);
+        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, null, null);
     }
 
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
+        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, abortFlag, null);
+    }
+
+    public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
+            long endTime, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            ProgressCallback progressCallback) {
         List<String> lines = new ArrayList<>();
         String firstEventId = null;
 
@@ -414,6 +438,13 @@ public class RoomHistoryManager {
                             break;
                         }
                     }
+                }
+
+                // Report progress after each batch
+                if (progressCallback != null && !lines.isEmpty()) {
+                    int tokens = 0;
+                    for (String l : lines) tokens += estimateTokens(l);
+                    progressCallback.onProgress(lines.size(), tokens);
                 }
 
                 if (reachedStart) {
@@ -569,10 +600,15 @@ public class RoomHistoryManager {
      * Fetch all messages in a room from lastReadEventId to the latest message.
      */
     public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId) {
-        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, null);
+        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, null, null);
     }
 
     public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
+        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, abortFlag, null);
+    }
+
+    public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
         if (lastReadEventId == null)
             return new ChatLogsResult(new ArrayList<>(), null);
 
@@ -629,6 +665,13 @@ public class RoomHistoryManager {
                     }
                 }
 
+                // Report progress after each batch
+                if (progressCallback != null && !logs.isEmpty()) {
+                    int tokens = 0;
+                    for (String l : logs) tokens += estimateTokens(l);
+                    progressCallback.onProgress(logs.size(), tokens);
+                }
+
                 if (foundLastRead || logs.size() > 500)
                     break; // Safety limit
                 token = root.path("end").asText(null);
@@ -675,10 +718,15 @@ public class RoomHistoryManager {
      * Fetch room history backwards until a token limit is reached.
      */
     public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId) {
-        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, null);
+        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, null, null);
     }
 
     public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
+        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, abortFlag, null);
+    }
+
+    public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
         List<String> logs = new ArrayList<>();
         String firstEventId = null;
         int currentTokens = 0;
@@ -741,6 +789,11 @@ public class RoomHistoryManager {
                         currentTokens += lineTokens;
                         firstEventId = eventId;
                     }
+                }
+
+                // Report progress after each batch
+                if (progressCallback != null && !logs.isEmpty()) {
+                    progressCallback.onProgress(logs.size(), currentTokens);
                 }
 
                 if (reachedLimit) {

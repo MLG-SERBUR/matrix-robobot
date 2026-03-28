@@ -63,32 +63,47 @@ public class AIService {
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            String timeInfo = "";
+            final String timeInfo;
             if (startEventId != null) {
                 timeInfo = (forward ? "after " : "before ") + "message " + startEventId + " (limit "
                         + (maxMessages > 0 ? maxMessages + " messages" : hours + "h") + ")";
+            } else if (maxMessages > 0) {
+                timeInfo = "last " + maxMessages + " messages";
             } else {
-                if (maxMessages > 0) {
-                    timeInfo = "last " + maxMessages + " messages";
-                } else {
-                    timeInfo = "last " + (hours > 0 ? hours + "h" : "all history");
-                }
+                timeInfo = "last " + (hours > 0 ? hours + "h" : "all history");
             }
 
+            // Send immediate status message
+            String gatherMsg = "\uD83D\uDCE8 Gathering " + timeInfo + "...";
+            String statusEventId = matrixClient.sendTextWithEventId(responseRoomId, gatherMsg);
+
+            // Create progress callback that updates every 5 seconds
+            final String fStatusEventId = statusEventId;
+            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
+                long now = System.currentTimeMillis();
+                if (now - lastProgressUpdate.get() >= 5000) {
+                    lastProgressUpdate.set(now);
+                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                    matrixClient.updateTextMessage(responseRoomId, fStatusEventId,
+                            "\uD83D\uDCE8 Gathering " + timeInfo + "... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                }
+            };
+
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryRelative(exportRoomId, hours,
-                    fromToken, startEventId, forward, zoneId, maxMessages, abortFlag);
+                    fromToken, startEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
 
             if (history.errorMessage != null) {
-                matrixClient.sendMarkdown(responseRoomId, history.errorMessage);
+                matrixClient.updateTextMessage(responseRoomId, statusEventId, history.errorMessage);
                 return;
             }
             if (history.logs.isEmpty()) {
-                matrixClient.sendMarkdown(responseRoomId,
+                matrixClient.updateTextMessage(responseRoomId, statusEventId,
                         "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, 300);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, 300, statusEventId);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -98,7 +113,7 @@ public class AIService {
 
     private void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-                                Backend preferredBackend, String forcedModel, int timeoutSeconds) {
+                                Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId) {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
@@ -108,14 +123,20 @@ public class AIService {
             String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
             String backendName = preferredBackend == Backend.CEREBRAS ? "Cerebras (" + cerebrasModel + ")" : "Arli AI (" + arliModel + ")";
             String queryDescription = history.logs.size() + " messages";
-            String initialStatusMsg = "Querying " + backendName + " with " + queryDescription + questionPart;
+            String queryStatusMsg = "\u23F3 Querying " + backendName + " with " + queryDescription + questionPart;
 
-            String eventId = matrixClient.sendTextWithEventId(responseRoomId, initialStatusMsg);
+            // Reuse existing status message if available, otherwise send a new one
+            String eventId;
+            if (statusEventId != null) {
+                matrixClient.updateTextMessage(responseRoomId, statusEventId, queryStatusMsg);
+                eventId = statusEventId;
+            } else {
+                eventId = matrixClient.sendTextWithEventId(responseRoomId, queryStatusMsg);
+            }
             if (eventId == null) return;
 
             if (abortFlag != null && abortFlag.get()) {
-                // Should we delete or update the message? For now let's just update it to be clean.
-                matrixClient.updateTextMessage(responseRoomId, eventId, initialStatusMsg + " [ABORTED]");
+                matrixClient.updateTextMessage(responseRoomId, eventId, queryStatusMsg + " [ABORTED]");
                 return;
             }
 
@@ -337,16 +358,34 @@ public class AIService {
                 lastReadEventId = lastRead.eventId;
             }
 
+            // Send immediate status message
+            String gatherMsg = "\uD83D\uDCE8 Gathering unread messages...";
+            String statusEventId = matrixClient.sendTextWithEventId(responseRoomId, gatherMsg);
+
+            // Create progress callback that updates every 5 seconds
+            final String fStatusEventId = statusEventId;
+            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
+                long now = System.currentTimeMillis();
+                if (now - lastProgressUpdate.get() >= 5000) {
+                    lastProgressUpdate.set(now);
+                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                    matrixClient.updateTextMessage(responseRoomId, fStatusEventId,
+                            "\uD83D\uDCE8 Gathering unread messages... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                }
+            };
+
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
                     lastReadEventId,
-                    zoneId, abortFlag);
+                    zoneId, abortFlag, progressCallback);
 
             if (result.logs.isEmpty()) {
-                matrixClient.sendMarkdown(responseRoomId, "No unread messages found for you in " + exportRoomId + ".");
+                matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                        "No unread messages found for you in " + exportRoomId + ".");
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, 300);
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, 300, statusEventId);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -369,15 +408,33 @@ public class AIService {
             
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
 
+            // Send immediate status message
+            String gatherMsg = "\uD83D\uDCE8 Gathering messages (up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
+            String statusEventId = matrixClient.sendTextWithEventId(responseRoomId, gatherMsg);
+
+            // Create progress callback that updates every 5 seconds
+            final String fStatusEventId = statusEventId;
+            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
+                long now = System.currentTimeMillis();
+                if (now - lastProgressUpdate.get() >= 5000) {
+                    lastProgressUpdate.set(now);
+                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                    matrixClient.updateTextMessage(responseRoomId, fStatusEventId,
+                            "\uD83D\uDCE8 Gathering messages... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                }
+            };
+
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, tokenLimit, false, null, abortFlag);
+                    fromToken, tokenLimit, false, null, abortFlag, progressCallback);
 
             if (history.logs.isEmpty()) {
-                matrixClient.sendMarkdown(responseRoomId, "No chat logs found in " + exportRoomId + ".");
+                matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                        "No chat logs found in " + exportRoomId + ".");
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, preferredBackend, forcedModel, timeoutSeconds);
+            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId);
 
         } catch (Exception e) {
             e.printStackTrace();
