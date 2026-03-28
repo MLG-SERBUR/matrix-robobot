@@ -130,7 +130,7 @@ public class AIService {
 
             if (tryArli) {
                 try {
-                    callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds);
+                    callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag);
                     return; // Success
                 } catch (Exception e) {
                     String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -140,11 +140,13 @@ public class AIService {
                     boolean isContextExceeded = errorMsg.contains("exceeded the maximum context length");
 
                     if (is403 && isContextExceeded) {
+                        if (abortFlag != null && abortFlag.get()) return;
                         String contextInfo = extractContextInfo(errorMsg);
                         matrixClient.updateTextMessage(responseRoomId, eventId,
                                 "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ". Querying Cerebras (" + cerebrasModel + ") with " + queryDescription + questionPart);
                         msgEdited = true;
                     } else {
+                        if (abortFlag != null && abortFlag.get()) return;
                         matrixClient.sendText(responseRoomId, "ArliAI (" + arliModel + ") failed: " + errorMsg);
                         if (is403) return; // Don't fallback on other 403 errors
                     }
@@ -157,6 +159,7 @@ public class AIService {
 
             if (tryCerebras) {
                 if (preferredBackend == Backend.AUTO && !eventId.isEmpty() && !msgEdited) {
+                    if (abortFlag != null && abortFlag.get()) return;
                     matrixClient.sendText(responseRoomId, "Querying Cerebras (" + cerebrasModel + ")...");
                 }
 
@@ -174,7 +177,7 @@ public class AIService {
         }
     }
 
-    private String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds) throws Exception {
+    private String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");
@@ -218,60 +221,69 @@ public class AIService {
                 throw new Exception("Status: " + response.statusCode() + " Body: " + errorBody);
             }
             
-            response.body().forEach(line -> {
-                String data = line.trim();
-                if (data.isEmpty()) return;
-                
-                if (data.startsWith("data:") && !data.contains("[DONE]")) {
-                    try {
-                        String json = data.substring(5).trim();
-                        if (json.isEmpty()) return;
-                        
-                        JsonNode node = mapper.readTree(json);
-                        JsonNode choices = node.path("choices");
-                        if (choices.isArray() && choices.size() > 0) {
-                            JsonNode delta = choices.get(0).path("delta");
-                            if (delta.has("content")) {
-                                content.append(delta.get("content").asText());
-                            } else if (delta.has("reasoning")) {
-                                reasoning.append(delta.get("reasoning").asText());
-                            } else if (delta.has("reasoning_content")) {
-                                reasoning.append(delta.get("reasoning_content").asText());
-                            }
-                            
-                            long now = System.currentTimeMillis();
-                            int updateInterval = "Qwen3.5-27B-Vivid-Durian".equals(model) ? 10000 : 5000;
-                            if ((content.length() > 0 || reasoning.length() > 0) && now - lastUpdate.get() > updateInterval) {
-                                lastUpdate.set(now);
-                                StringBuilder streamingOutput = new StringBuilder();
-                                if (reasoning.length() > 0) {
-                                    String r = trimReasoning(reasoning.toString());
-                                    streamingOutput.append("> ").append(r.replace("\n", "\n> ")).append("\n\n");
-                                }
-                                if (content.length() > 0) {
-                                    streamingOutput.append(content.toString());
-                                }
-                                
-                                String output = streamingOutput.toString();
-                                if (output.length() > 16000) {
-                                    output = output.substring(0, 15900) + "... [TRUNCATED]";
-                                }
-                                
-                                String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length];
-                                if (eventIdObj.get() == null) {
-                                    eventIdObj.set(matrixClient.sendMarkdownWithEventId(responseRoomId, output + indicator));
-                                } else {
-                                    matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), output + indicator);
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        System.err.println("ArliAI Stream Parse Error: " + e.getMessage() + " | Line: " + line);
+            try (java.util.stream.Stream<String> lines = response.body()) {
+                java.util.Iterator<String> it = lines.iterator();
+                while (it.hasNext()) {
+                    if (abortFlag != null && abortFlag.get()) {
+                        System.out.println("ArliAI streaming aborted by flag.");
+                        break;
                     }
-                } else if (data.contains("[DONE]")) {
-                    System.out.println("ArliAI streaming finished normally ([DONE] received).");
+                    String line = it.next();
+                    String data = line.trim();
+                    if (data.isEmpty()) continue;
+                    
+                    if (data.startsWith("data:") && !data.contains("[DONE]")) {
+                        try {
+                            String json = data.substring(5).trim();
+                            if (json.isEmpty()) continue;
+                            
+                            JsonNode node = mapper.readTree(json);
+                            JsonNode choices = node.path("choices");
+                            if (choices.isArray() && choices.size() > 0) {
+                                JsonNode delta = choices.get(0).path("delta");
+                                if (delta.has("content")) {
+                                    content.append(delta.get("content").asText());
+                                } else if (delta.has("reasoning")) {
+                                    reasoning.append(delta.get("reasoning").asText());
+                                } else if (delta.has("reasoning_content")) {
+                                    reasoning.append(delta.get("reasoning_content").asText());
+                                }
+                                
+                                long now = System.currentTimeMillis();
+                                int updateInterval = "Qwen3.5-27B-Vivid-Durian".equals(model) ? 10000 : 5000;
+                                if ((content.length() > 0 || reasoning.length() > 0) && now - lastUpdate.get() > updateInterval) {
+                                    lastUpdate.set(now);
+                                    StringBuilder streamingOutput = new StringBuilder();
+                                    if (reasoning.length() > 0) {
+                                        String r = trimReasoning(reasoning.toString());
+                                        streamingOutput.append("> ").append(r.replace("\n", "\n> ")).append("\n\n");
+                                    }
+                                    if (content.length() > 0) {
+                                        streamingOutput.append(content.toString());
+                                    }
+                                    
+                                    String output = streamingOutput.toString();
+                                    if (output.length() > 16000) {
+                                        output = output.substring(0, 15900) + "... [TRUNCATED]";
+                                    }
+                                    
+                                    String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length];
+                                    if (eventIdObj.get() == null) {
+                                        eventIdObj.set(matrixClient.sendMarkdownWithEventId(responseRoomId, output + indicator));
+                                    } else {
+                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), output + indicator);
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            System.err.println("ArliAI Stream Parse Error: " + e.getMessage() + " | Line: " + line);
+                        }
+                    } else if (data.contains("[DONE]")) {
+                        System.out.println("ArliAI streaming finished normally ([DONE] received).");
+                        break;
+                    }
                 }
-            });
+            }
         } catch (Exception e) {
             System.err.println("Error during ArliAI streaming call: " + e.getMessage());
             e.printStackTrace();

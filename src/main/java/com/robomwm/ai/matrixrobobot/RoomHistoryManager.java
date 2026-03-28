@@ -97,8 +97,12 @@ public class RoomHistoryManager {
      * Fetch room history as simple log strings
      */
     public List<String> fetchRoomHistory(String roomId, int hours, String fromToken) {
+        return fetchRoomHistory(roomId, hours, fromToken, null);
+    }
+
+    public List<String> fetchRoomHistory(String roomId, int hours, String fromToken, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         ChatLogsResult result = fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1,
-                ZoneId.of("America/Los_Angeles"), -1);
+                ZoneId.of("America/Los_Angeles"), -1, abortFlag);
         return result.logs;
     }
 

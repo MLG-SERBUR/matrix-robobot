@@ -120,6 +120,10 @@ public class CommandDispatcher {
             String exportRoomId) {
         int hours = Integer.parseInt(trimmed.replaceAll("\\D+", ""));
         System.out.println("Received export command in " + roomId + " from " + sender + " (" + hours + "h)");
+        
+        AtomicBoolean abortFlag = new AtomicBoolean(false);
+        runningOperations.put(sender, abortFlag);
+
         new Thread(() -> {
             try {
                 long now = System.currentTimeMillis();
@@ -129,17 +133,28 @@ public class CommandDispatcher {
                 matrixClient.sendMarkdown(responseRoomId,
                         "Starting export of last " + hours + "h from " + exportRoomId + " to " + filename);
 
-                java.util.List<String> lines = historyManager.fetchRoomHistory(exportRoomId, hours, prevBatch);
+                java.util.List<String> lines = historyManager.fetchRoomHistory(exportRoomId, hours, prevBatch, abortFlag);
 
                 if (lines.isEmpty()) {
+                    if (abortFlag.get()) {
+                        System.out.println("Export aborted by user.");
+                        return;
+                    }
                     matrixClient.sendMarkdown(responseRoomId,
                             "No chat logs found for the last " + hours + "h to export from " + exportRoomId + ".");
                     return;
                 }
 
+                if (abortFlag.get()) return;
+
                 try (java.io.BufferedWriter w = new java.io.BufferedWriter(new java.io.FileWriter(filename))) {
-                    for (String l : lines)
+                    for (String l : lines) {
+                        if (abortFlag.get()) {
+                            System.out.println("Export aborted during file write.");
+                            return;
+                        }
                         w.write(l + "\n");
+                    }
                 }
 
                 matrixClient.sendMarkdown(responseRoomId,
@@ -151,6 +166,8 @@ public class CommandDispatcher {
                     matrixClient.sendMarkdown(responseRoomId, "Export failed: " + e.getMessage());
                 } catch (Exception ignore) {
                 }
+            } finally {
+                runningOperations.remove(sender);
             }
         }).start();
     }
@@ -322,9 +339,18 @@ public class CommandDispatcher {
             if (zoneId == null)
                 return;
 
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+
             System.out.println("Received semantic search command in " + roomId + " from " + sender);
-            new Thread(() -> semanticSearchService.performSemanticSearch(responseRoomId, exportRoomId, hours, prevBatch,
-                    query, zoneId)).start();
+            new Thread(() -> {
+                try {
+                    semanticSearchService.performSemanticSearch(responseRoomId, exportRoomId, hours, prevBatch,
+                        query, zoneId, abortFlag);
+                } finally {
+                    runningOperations.remove(sender);
+                }
+            }).start();
         }
     }
 
@@ -358,7 +384,7 @@ public class CommandDispatcher {
         AtomicBoolean abortFlag = runningOperations.get(sender);
         if (abortFlag != null) {
             abortFlag.set(true);
-            matrixClient.sendText(responseRoomId, "Aborting your running search/grep operations...");
+            matrixClient.sendText(responseRoomId, "Aborting your running operations (summaries, searches, etc.)...");
         } else {
             matrixClient.sendText(responseRoomId, "No running operations found to abort.");
         }
@@ -424,19 +450,28 @@ public class CommandDispatcher {
                 
                 System.out.println("Received TTS export command in " + roomId + " from " + sender + " (" + hours + "h)");
                 
+                AtomicBoolean abortFlag = new AtomicBoolean(false);
+                runningOperations.put(sender, abortFlag);
+
                 new Thread(() -> {
                     try {
                         // Fetch messages with TTS-friendly formatting
                         // Use default timezone (UTC) when no timezone is specified for TTS export
                         ZoneId defaultZoneId = ZoneId.of("UTC");
                         RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(
-                            exportRoomId, hours, prevBatch, -1, -1, defaultZoneId, -1);
+                            exportRoomId, hours, prevBatch, -1, -1, defaultZoneId, -1, abortFlag);
                         
                         if (result.logs.isEmpty()) {
+                            if (abortFlag.get()) {
+                                System.out.println("TTS export aborted by user.");
+                                return;
+                            }
                             matrixClient.sendMarkdown(responseRoomId,
                                     "No chat logs found for the last " + hours + "h to export from " + exportRoomId + ".");
                             return;
                         }
+
+                        if (abortFlag.get()) return;
 
                         // Apply TTS-friendly formatting
                         List<String> ttsLines = formatForTTS(result.logs);
@@ -451,8 +486,13 @@ public class CommandDispatcher {
 
                         // Write formatted content
                         try (java.io.BufferedWriter w = new java.io.BufferedWriter(new java.io.FileWriter(filename))) {
-                            for (String line : ttsLines)
+                            for (String line : ttsLines) {
+                                if (abortFlag.get()) {
+                                    System.out.println("TTS export aborted during file write.");
+                                    return;
+                                }
                                 w.write(line + "\n");
+                            }
                         }
 
                         matrixClient.sendMarkdown(responseRoomId,
@@ -464,6 +504,8 @@ public class CommandDispatcher {
                             matrixClient.sendMarkdown(responseRoomId, "TTS export failed: " + e.getMessage());
                         } catch (Exception ignore) {
                         }
+                    } finally {
+                        runningOperations.remove(sender);
                     }
                 }).start();
             } else {
@@ -472,19 +514,28 @@ public class CommandDispatcher {
                 
                 System.out.println("Received TTS export command in " + roomId + " from " + sender + " (" + messageCount + " messages)");
                 
+                AtomicBoolean abortFlag = new AtomicBoolean(false);
+                runningOperations.put(sender, abortFlag);
+
                 new Thread(() -> {
                     try {
                         // Fetch messages with TTS-friendly formatting
                         // Use default timezone (UTC) when no timezone is specified for TTS export
                         ZoneId defaultZoneId = ZoneId.of("UTC");
                         RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(
-                            exportRoomId, -1, prevBatch, -1, -1, defaultZoneId, messageCount);
+                            exportRoomId, -1, prevBatch, -1, -1, defaultZoneId, messageCount, abortFlag);
                         
                         if (result.logs.isEmpty()) {
+                            if (abortFlag.get()) {
+                                System.out.println("TTS export aborted by user.");
+                                return;
+                            }
                             matrixClient.sendMarkdown(responseRoomId,
                                     "No chat logs found for the last " + messageCount + " messages to export from " + exportRoomId + ".");
                             return;
                         }
+
+                        if (abortFlag.get()) return;
 
                         // Apply TTS-friendly formatting
                         List<String> ttsLines = formatForTTS(result.logs);
@@ -499,8 +550,13 @@ public class CommandDispatcher {
 
                         // Write formatted content
                         try (java.io.BufferedWriter w = new java.io.BufferedWriter(new java.io.FileWriter(filename))) {
-                            for (String line : ttsLines)
+                            for (String line : ttsLines) {
+                                if (abortFlag.get()) {
+                                    System.out.println("TTS export aborted during file write.");
+                                    return;
+                                }
                                 w.write(line + "\n");
+                            }
                         }
 
                         matrixClient.sendMarkdown(responseRoomId,
@@ -512,6 +568,8 @@ public class CommandDispatcher {
                             matrixClient.sendMarkdown(responseRoomId, "TTS export failed: " + e.getMessage());
                         } catch (Exception ignore) {
                         }
+                    } finally {
+                        runningOperations.remove(sender);
                     }
                 }).start();
             }

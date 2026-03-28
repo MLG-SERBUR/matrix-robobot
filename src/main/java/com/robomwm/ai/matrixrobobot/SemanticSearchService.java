@@ -48,7 +48,7 @@ public class SemanticSearchService {
     }
 
     public void performSemanticSearch(String responseRoomId, String exportRoomId, int hours, String fromToken,
-            String query, ZoneId zoneId) {
+            String query, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             String timeInfo = "last " + hours + "h";
@@ -60,9 +60,10 @@ public class SemanticSearchService {
             long endTime = System.currentTimeMillis();
 
             RoomHistoryManager.ChatLogsWithIds result = historyManager.fetchRoomHistoryWithIds(exportRoomId, hours,
-                    fromToken, startTime, endTime, zoneId);
+                    fromToken, startTime, endTime, zoneId, abortFlag);
 
             if (result.logs.isEmpty()) {
+                if (abortFlag != null && abortFlag.get()) return;
                 matrixClient.sendText(responseRoomId,
                         "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
                 return;
@@ -72,6 +73,10 @@ public class SemanticSearchService {
             Pattern pattern = Pattern.compile("\\[(.*?)\\] <(.*?)> (.*)");
 
             for (int i = 0; i < result.logs.size(); i++) {
+                if (abortFlag != null && abortFlag.get()) {
+                    System.out.println("Semantic search aborted during candidate building.");
+                    return;
+                }
                 String log = result.logs.get(i);
                 String eventId = result.eventIds.get(i);
                 Matcher matcher = pattern.matcher(log);
