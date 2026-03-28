@@ -107,6 +107,11 @@ public class RoomHistoryManager {
      */
     public ChatLogsWithIds fetchRoomHistoryWithIds(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId) {
+        return fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId, null);
+    }
+
+    public ChatLogsWithIds fetchRoomHistoryWithIds(String roomId, int hours, String fromToken, long startTimestamp,
+            long endTime, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         List<String> logs = new ArrayList<>();
         List<String> eventIds = new ArrayList<>();
 
@@ -117,6 +122,10 @@ public class RoomHistoryManager {
         String token = getPaginationToken(roomId, fromToken);
 
         while (token != null) {
+            if (abortFlag != null && abortFlag.get()) {
+                System.out.println("fetchRoomHistoryWithIds aborted.");
+                break;
+            }
             try {
                 String messagesUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
                         + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
@@ -185,8 +194,13 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages) {
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, null);
+    }
+
+    public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
+            boolean forward, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         if (startEventId == null) {
-            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages);
+            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages, abortFlag);
         }
 
         List<String> lines = new ArrayList<>();
@@ -216,6 +230,10 @@ public class RoomHistoryManager {
         String dir = forward ? "f" : "b";
 
         while (token != null) {
+            if (abortFlag != null && abortFlag.get()) {
+                System.out.println("fetchRoomHistoryRelative aborted.");
+                break;
+            }
             try {
                 String messagesUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
                         + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
@@ -322,6 +340,11 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, int maxMessages) {
+        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, null);
+    }
+
+    public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
+            long endTime, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         List<String> lines = new ArrayList<>();
         String firstEventId = null;
 
@@ -332,6 +355,10 @@ public class RoomHistoryManager {
         String token = getPaginationToken(roomId, fromToken);
 
         while (token != null) {
+            if (abortFlag != null && abortFlag.get()) {
+                System.out.println("fetchRoomHistoryDetailed aborted.");
+                break;
+            }
             try {
                 String messagesUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
                         + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
@@ -538,6 +565,10 @@ public class RoomHistoryManager {
      * Fetch all messages in a room from lastReadEventId to the latest message.
      */
     public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId) {
+        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, null);
+    }
+
+    public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         if (lastReadEventId == null)
             return new ChatLogsResult(new ArrayList<>(), null);
 
@@ -552,6 +583,10 @@ public class RoomHistoryManager {
             boolean foundLastRead = false;
 
             while (token != null && !foundLastRead) {
+                if (abortFlag != null && abortFlag.get()) {
+                    System.out.println("fetchUnreadMessages aborted.");
+                    break;
+                }
                 String url = homeserverUrl + "/_matrix/client/v3/rooms/"
                         + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
                         + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=100";
@@ -636,6 +671,10 @@ public class RoomHistoryManager {
      * Fetch room history backwards until a token limit is reached.
      */
     public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId) {
+        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, null);
+    }
+
+    public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         List<String> logs = new ArrayList<>();
         String firstEventId = null;
         int currentTokens = 0;
@@ -643,6 +682,10 @@ public class RoomHistoryManager {
         String token = getPaginationToken(roomId, fromToken);
 
         while (token != null && currentTokens < tokenLimit) {
+            if (abortFlag != null && abortFlag.get()) {
+                System.out.println("fetchRoomHistoryUntilLimit aborted.");
+                break;
+            }
             try {
                 String messagesUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
                         + URLEncoder.encode(roomId, StandardCharsets.UTF_8)

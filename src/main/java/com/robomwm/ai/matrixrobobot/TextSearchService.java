@@ -258,9 +258,8 @@ public class TextSearchService {
             long endTime = System.currentTimeMillis();
 
             // Use existing fetchRoomHistoryWithIds to get all messages first
-            // Note: This method doesn't support abort during fetch, but we can check after
             RoomHistoryManager.ChatLogsWithIds result = historyManager.fetchRoomHistoryWithIds(exportRoomId, hours,
-                    fromToken, startTime, endTime, zoneId);
+                    fromToken, startTime, endTime, zoneId, abortFlag);
 
             // Check for abort after fetch
             if (abortFlag.get()) {

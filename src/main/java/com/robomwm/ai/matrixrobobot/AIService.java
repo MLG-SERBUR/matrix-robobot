@@ -76,7 +76,7 @@ public class AIService {
             }
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryRelative(exportRoomId, hours,
-                    fromToken, startEventId, forward, zoneId, maxMessages);
+                    fromToken, startEventId, forward, zoneId, maxMessages, abortFlag);
 
             if (history.errorMessage != null) {
                 matrixClient.sendMarkdown(responseRoomId, history.errorMessage);
@@ -99,6 +99,7 @@ public class AIService {
     private void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds) {
+        if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             String arliModel = (preferredBackend == Backend.ARLIAI && forcedModel != null) ? forcedModel : getRandomModel(ARLI_MODELS);
@@ -112,7 +113,11 @@ public class AIService {
             String eventId = matrixClient.sendTextWithEventId(responseRoomId, initialStatusMsg);
             if (eventId == null) return;
 
-            if (abortFlag != null && abortFlag.get()) return;
+            if (abortFlag != null && abortFlag.get()) {
+                // Should we delete or update the message? For now let's just update it to be clean.
+                matrixClient.updateTextMessage(responseRoomId, eventId, initialStatusMsg + " [ABORTED]");
+                return;
+            }
 
             boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
             String prompt = buildPrompt(question, history.logs, promptPrefix);
@@ -322,7 +327,7 @@ public class AIService {
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
                     lastReadEventId,
-                    zoneId);
+                    zoneId, abortFlag);
 
             if (result.logs.isEmpty()) {
                 matrixClient.sendMarkdown(responseRoomId, "No unread messages found for you in " + exportRoomId + ".");
@@ -353,7 +358,7 @@ public class AIService {
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, tokenLimit, false, null);
+                    fromToken, tokenLimit, false, null, abortFlag);
 
             if (history.logs.isEmpty()) {
                 matrixClient.sendMarkdown(responseRoomId, "No chat logs found in " + exportRoomId + ".");
