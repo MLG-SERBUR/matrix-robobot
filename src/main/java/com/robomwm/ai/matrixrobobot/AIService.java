@@ -27,8 +27,7 @@ public class AIService {
     private final RoomHistoryManager historyManager;
     private final Random random;
     public static final List<String> ARLI_MODELS = Arrays.asList(
-            "Qwen3.5-27B-Derestricted",
-            "Qwen3.5-27B-Vivid-Durian"
+            "Qwen3.5-27B-Derestricted"
     );
     public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
 
@@ -89,7 +88,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, 300);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -99,10 +98,10 @@ public class AIService {
 
     private void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-                                Backend preferredBackend) {
+                                Backend preferredBackend, String forcedModel, int timeoutSeconds) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            String arliModel = getRandomModel(ARLI_MODELS);
+            String arliModel = (preferredBackend == Backend.ARLIAI && forcedModel != null) ? forcedModel : getRandomModel(ARLI_MODELS);
             String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
 
             String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
@@ -126,7 +125,7 @@ public class AIService {
 
             if (tryArli) {
                 try {
-                    callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId);
+                    callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds);
                     return; // Success
                 } catch (Exception e) {
                     String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -170,7 +169,7 @@ public class AIService {
         }
     }
 
-    private String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId) throws Exception {
+    private String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");
@@ -191,7 +190,7 @@ public class AIService {
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + arliApiKey)
                 .header("Accept", "text/event-stream")
-                .timeout(Duration.ofSeconds(300))
+                .timeout(Duration.ofSeconds(timeoutSeconds))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
@@ -315,7 +314,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO);
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, 300);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -324,7 +323,7 @@ public class AIService {
     }
 
     public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question,
-                         java.util.concurrent.atomic.AtomicBoolean abortFlag) {
+                         java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, Backend preferredBackend) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             // Target context window for Arli AI is 16k tokens.
@@ -346,7 +345,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, Backend.AUTO);
+            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, preferredBackend, forcedModel, timeoutSeconds);
 
         } catch (Exception e) {
             e.printStackTrace();

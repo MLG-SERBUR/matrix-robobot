@@ -83,7 +83,10 @@ public class CommandDispatcher {
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
         } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
-            handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+            handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, 300, AIService.Backend.AUTO);
+            return true;
+        } else if (trimmed.matches("!longask(?:\\s+.*)?")) {
+            handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "Qwen3.5-27B-Vivid-Durian", 900, AIService.Backend.ARLIAI);
             return true;
         } else if (trimmed.matches("!cerebras(?:\\s+.*)?") || trimmed.matches("!cerebras-ts(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!cerebras",
@@ -93,17 +96,13 @@ public class CommandDispatcher {
             handleSemanticSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!grep\\s+(\\d+)([dh])\\s+(.+)")) {
-            handleGrep(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
-            return true;
+            return handleTextSearchCommand(trimmed, "!grep\\s+(\\d+)([dh])\\s+(.+)", "grep", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrep);
         } else if (trimmed.matches("!grep-slow\\s+(\\d+)([dh])\\s+(.+)")) {
-            handleGrepSlow(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
-            return true;
+            return handleTextSearchCommand(trimmed, "!grep-slow\\s+(\\d+)([dh])\\s+(.+)", "grep-slow", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrepSlow);
         } else if (trimmed.matches("!search\\s+(\\d+)([dh])\\s+(.+)")) {
-            handleSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
-            return true;
+            return handleTextSearchCommand(trimmed, "!search\\s+(\\d+)([dh])\\s+(.+)", "search", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performSearch);
         } else if (trimmed.matches("!media\\s+(\\d+)([dh])\\s+(.+)")) {
-            handleMedia(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
-            return true;
+            return handleTextSearchCommand(trimmed, "!media\\s+(\\d+)([dh])\\s+(.+)", "media search", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performMediaSearch);
         } else if ("!abort".equals(trimmed)) {
             handleAbort(sender, responseRoomId);
             return true;
@@ -291,11 +290,12 @@ public class CommandDispatcher {
     }
 
     private void handleAsk(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-                           String exportRoomId) {
-        String question = trimmed.replaceFirst("^!ask\\s*", "").trim();
+                           String exportRoomId, String forcedModel, int timeoutSeconds, AIService.Backend preferredBackend) {
+        String command = trimmed.startsWith("!longask") ? "!longask" : "!ask";
+        String question = trimmed.replaceFirst("^" + command + "\\s*", "").trim();
         if (question.isEmpty()) question = null;
 
-        System.out.println("Received !ask command in " + roomId + " from " + sender);
+        System.out.println("Received " + command + " command in " + roomId + " from " + sender);
 
         AtomicBoolean abortFlag = new AtomicBoolean(false);
         runningOperations.put(sender, abortFlag);
@@ -304,7 +304,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, forcedModel, timeoutSeconds, preferredBackend);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -328,92 +328,29 @@ public class CommandDispatcher {
         }
     }
 
-    private void handleGrep(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-            String exportRoomId) {
-        Matcher matcher = Pattern.compile("!grep\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
-        if (matcher.matches()) {
-            int duration = Integer.parseInt(matcher.group(1));
-            String unit = matcher.group(2);
-            String pattern = matcher.group(3).trim();
-
-            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return;
-
-            // Convert to hours
-            int hours = unit.equals("d") ? duration * 24 : duration;
-
-            System.out.println("Received grep command in " + roomId + " from " + sender);
-            new Thread(() -> textSearchService.performGrep(roomId, sender, responseRoomId, exportRoomId, hours,
-                    prevBatch, pattern,
-                    zoneId)).start();
-        }
+    @FunctionalInterface
+    public interface TextSearchAction {
+        void execute(String roomId, String sender, String responseRoomId, String exportRoomId, int hours, String prevBatch, String pattern, ZoneId zoneId);
     }
 
-    private void handleGrepSlow(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-            String exportRoomId) {
-        Matcher matcher = Pattern.compile("!grep-slow\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
+    private boolean handleTextSearchCommand(String trimmed, String regex, String commandName, String roomId, String sender, String prevBatch, String responseRoomId, String exportRoomId, TextSearchAction action) {
+        Matcher matcher = Pattern.compile(regex).matcher(trimmed);
         if (matcher.matches()) {
             int duration = Integer.parseInt(matcher.group(1));
             String unit = matcher.group(2);
-            String pattern = matcher.group(3).trim();
+            String input = matcher.group(3).trim();
 
             ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
-                return;
+                return true;
 
-            // Convert to hours
             int hours = unit.equals("d") ? duration * 24 : duration;
 
-            System.out.println("Received grep-slow command in " + roomId + " from " + sender);
-            new Thread(() -> textSearchService.performGrepSlow(roomId, sender, responseRoomId, exportRoomId, hours,
-                    prevBatch, pattern,
-                    zoneId)).start();
+            System.out.println("Received " + commandName + " command in " + roomId + " from " + sender);
+            new Thread(() -> action.execute(roomId, sender, responseRoomId, exportRoomId, hours, prevBatch, input, zoneId)).start();
+            return true;
         }
-    }
-
-    private void handleSearch(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-            String exportRoomId) {
-        Matcher matcher = Pattern.compile("!search\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
-        if (matcher.matches()) {
-            int duration = Integer.parseInt(matcher.group(1));
-            String unit = matcher.group(2);
-            String query = matcher.group(3).trim();
-
-            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return;
-
-            // Convert to hours
-            int hours = unit.equals("d") ? duration * 24 : duration;
-
-            System.out.println("Received search command in " + roomId + " from " + sender);
-            new Thread(() -> textSearchService.performSearch(roomId, sender, responseRoomId, exportRoomId, hours,
-                    prevBatch, query,
-                    zoneId)).start();
-        }
-    }
-
-    private void handleMedia(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-            String exportRoomId) {
-        Matcher matcher = Pattern.compile("!media\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
-        if (matcher.matches()) {
-            int duration = Integer.parseInt(matcher.group(1));
-            String unit = matcher.group(2);
-            String query = matcher.group(3).trim();
-
-            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return;
-
-            // Convert to hours
-            int hours = unit.equals("d") ? duration * 24 : duration;
-
-            System.out.println("Received media search command in " + roomId + " from " + sender);
-            new Thread(() -> textSearchService.performMediaSearch(roomId, sender, responseRoomId, exportRoomId, hours,
-                    prevBatch, query,
-                    zoneId)).start();
-        }
+        return false;
     }
 
     private void handleAbort(String sender, String responseRoomId) {
@@ -652,6 +589,8 @@ public class CommandDispatcher {
                 "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n"
                 +
                 "**!ask [question]** - Query AI backend with up to 16k tokens of history (no timestamps)\n"
+                +
+                "**!longask [question]** - Like !ask, but uses a strict reasoning model, ArliAI, and has a longer timeout (15 mins)\n"
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!grep, !grep-slow, !search, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
