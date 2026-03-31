@@ -689,7 +689,7 @@ public class RoomHistoryManager {
      * Estimates the number of LLM tokens a string will use.
      * Counts punctuation as 1 token each, and accounts for BPE subword tokenization
      * by estimating longer words (>4 chars) as multiple tokens.
-     * Adds a 15% safety margin.
+     * Adds a 5% safety margin.
      */
     public static int estimateTokens(String text) {
         if (text == null || text.isEmpty()) return 0;
@@ -719,8 +719,8 @@ public class RoomHistoryManager {
         if (wordLen > 0) {
             count += 1 + Math.max(0, (wordLen - 4) / 4);
         }
-        // 15% safety margin + 1 for line structure tokens
-        return (int) Math.ceil(count * 1.15) + 1; 
+        // 5% safety margin + 1 for line structure tokens
+        return (int) Math.ceil(count * 1.05) + 1; 
     }
 
     /**
