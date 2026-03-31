@@ -687,31 +687,40 @@ public class RoomHistoryManager {
 
 /**
      * Estimates the number of LLM tokens a string will use.
-     * A highly accurate heuristic that counts word chunks and punctuation marks separately,
-     * adding a 10% safety margin.
+     * Counts punctuation as 1 token each, and accounts for BPE subword tokenization
+     * by estimating longer words (>4 chars) as multiple tokens.
+     * Adds a 15% safety margin.
      */
     public static int estimateTokens(String text) {
         if (text == null || text.isEmpty()) return 0;
         int count = 0;
-        boolean inWord = false;
+        int wordLen = 0;
         
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (Character.isWhitespace(c)) {
-                inWord = false;
-            } else if (Character.isLetterOrDigit(c)) {
-                if (!inWord) {
-                    count++;
-                    inWord = true;
+                if (wordLen > 0) {
+                    // Short words (1-4 chars) = 1 token; longer words get extra subword tokens
+                    count += 1 + Math.max(0, (wordLen - 4) / 4);
+                    wordLen = 0;
                 }
+            } else if (Character.isLetterOrDigit(c)) {
+                wordLen++;
             } else {
-                // Punctuation, symbols, and special characters usually count as 1 token each
+                if (wordLen > 0) {
+                    count += 1 + Math.max(0, (wordLen - 4) / 4);
+                    wordLen = 0;
+                }
+                // Punctuation, symbols, and special characters = 1 token each
                 count++;
-                inWord = false;
             }
         }
-        // Add 10% safety margin and 1 for line breaks
-        return (int) Math.ceil(count * 1.1) + 1; 
+        // Handle trailing word
+        if (wordLen > 0) {
+            count += 1 + Math.max(0, (wordLen - 4) / 4);
+        }
+        // 15% safety margin + 1 for line structure tokens
+        return (int) Math.ceil(count * 1.15) + 1; 
     }
 
     /**

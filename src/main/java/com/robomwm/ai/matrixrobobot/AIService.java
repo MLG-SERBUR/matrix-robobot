@@ -403,8 +403,10 @@ public class AIService {
             
             // Calculate base tokens consumed by prompts and the user's question
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), "");
+            int chatFormatOverhead = 20; // Special tokens: BOS/EOS, role markers (im_start/im_end), separators
             int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) + 
-                             RoomHistoryManager.estimateTokens(emptyPrompt);
+                             RoomHistoryManager.estimateTokens(emptyPrompt) +
+                             chatFormatOverhead;
             
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
 
