@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Routes and executes commands (export, arliai, cerebras, semantic, grep,
+ * Routes and executes commands (export, arliai, semantic, grep,
  * search, etc.)
  * Keeps only non-!last commands here. !last is handled in the main bot.
  */
@@ -25,6 +25,12 @@ public class CommandDispatcher {
     private final AIService aiService;
     private final SemanticSearchService semanticSearchService;
     private final TimezoneService timezoneService;
+
+    private static final List<String> ARLIAI_MODELS = List.of(
+            "Qwen3.5-27B-Musica-v1",
+            "Qwen3.5-27B-Vivid-Durian",
+            "Qwen3.5-27B-Derestricted"
+    );
 
     public CommandDispatcher(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
             String commandRoomId, String exportRoomId, RoomHistoryManager historyManager,
@@ -62,10 +68,6 @@ public class CommandDispatcher {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!debugai",
                     AIService.Backend.AUTO, AIService.Prompts.DEBUGAI_PREFIX);
             return true;
-        } else if (trimmed.matches("!arliai(?:\\s+.*)?") || trimmed.matches("!arliai-ts(?:\\s+.*)?")) {
-            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!arliai",
-                    AIService.Backend.ARLIAI, AIService.Prompts.OVERVIEW_PREFIX);
-            return true;
         } else if (trimmed.matches("!tldr(?:\\s+.*)?") || trimmed.matches("!tldr-ts(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!tldr",
                     AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
@@ -85,12 +87,8 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
             handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, 300, AIService.Backend.AUTO);
             return true;
-        } else if (trimmed.matches("!longask(?:\\s+.*)?")) {
-            handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "Qwen3.5-27B-Vivid-Durian", 900, AIService.Backend.ARLIAI);
-            return true;
-        } else if (trimmed.matches("!cerebras(?:\\s+.*)?") || trimmed.matches("!cerebras-ts(?:\\s+.*)?")) {
-            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!cerebras",
-                    AIService.Backend.CEREBRAS, AIService.Prompts.OVERVIEW_PREFIX);
+        } else if (trimmed.matches("!arliai(?:\\s+.*)?")) {
+            handleArliai(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!semantic\\s+(\\d+)h\\s+(.+)")) {
             handleSemanticSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
@@ -308,11 +306,10 @@ public class CommandDispatcher {
 
     private void handleAsk(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
                            String exportRoomId, String forcedModel, int timeoutSeconds, AIService.Backend preferredBackend) {
-        String command = trimmed.startsWith("!longask") ? "!longask" : "!ask";
-        String question = trimmed.replaceFirst("^" + command + "\\s*", "").trim();
+        String question = trimmed.replaceFirst("^!ask\\s*", "").trim();
         if (question.isEmpty()) question = null;
 
-        System.out.println("Received " + command + " command in " + roomId + " from " + sender);
+        System.out.println("Received !ask command in " + roomId + " from " + sender);
 
         AtomicBoolean abortFlag = new AtomicBoolean(false);
         runningOperations.put(sender, abortFlag);
@@ -322,6 +319,90 @@ public class CommandDispatcher {
         new Thread(() -> {
             try {
                 aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, forcedModel, timeoutSeconds, preferredBackend);
+            } finally {
+                runningOperations.remove(sender);
+            }
+        }).start();
+    }
+
+    /**
+     * Fuzzy match a model name input to the list of available models.
+     * Uses case-insensitive contains matching.
+     */
+    private String fuzzyMatchModel(String input) {
+        if (input == null || input.isEmpty()) {
+            return null;
+        }
+        
+        String lowerInput = input.toLowerCase();
+        
+        // First, try exact match (case-insensitive)
+        for (String model : ARLIAI_MODELS) {
+            if (model.equalsIgnoreCase(input)) {
+                return model;
+            }
+        }
+        
+        // Then try contains match
+        for (String model : ARLIAI_MODELS) {
+            if (model.toLowerCase().contains(lowerInput)) {
+                return model;
+            }
+        }
+        
+        // Try matching with underscores replaced by hyphens
+        String normalizedInput = lowerInput.replace("_", "-");
+        for (String model : ARLIAI_MODELS) {
+            if (model.toLowerCase().replace("_", "-").contains(normalizedInput)) {
+                return model;
+            }
+        }
+        
+        return null;
+    }
+
+    private void handleArliai(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
+                              String exportRoomId) {
+        // Format: !arliai <model> <prompt>
+        String args = trimmed.replaceFirst("^!arliai\\s*", "").trim();
+        
+        if (args.isEmpty()) {
+            matrixClient.sendText(responseRoomId, "Usage: !arliai <model> <prompt>\n" +
+                    "Available models: Qwen3.5-27B-Musica-v1, Qwen3.5-27B-Vivid-Durian, Qwen3.5-27B-Derestricted\n" +
+                    "Model names are fuzzy matched (e.g., 'musica', 'vivid', 'derestricted')");
+            return;
+        }
+        
+        String[] parts = args.split("\\s+", 2);
+        String modelInput = parts[0];
+        String question = parts.length > 1 ? parts[1].trim() : null;
+        
+        String matchedModel = fuzzyMatchModel(modelInput);
+        
+        if (matchedModel == null) {
+            matrixClient.sendText(responseRoomId, "Unknown model: " + modelInput + "\n" +
+                    "Available models: Qwen3.5-27B-Musica-v1, Qwen3.5-27B-Vivid-Durian, Qwen3.5-27B-Derestricted\n" +
+                    "Model names are fuzzy matched (e.g., 'musica', 'vivid', 'derestricted')");
+            return;
+        }
+        
+        if (question == null || question.isEmpty()) {
+            matrixClient.sendText(responseRoomId, "Please provide a prompt after the model name.\n" +
+                    "Usage: !arliai " + modelInput + " <your prompt here>");
+            return;
+        }
+
+        System.out.println("Received !arliai command in " + roomId + " from " + sender + " (model: " + matchedModel + ")");
+
+        AtomicBoolean abortFlag = new AtomicBoolean(false);
+        runningOperations.put(sender, abortFlag);
+
+        final String fQuestion = question;
+        final String fModel = matchedModel;
+
+        new Thread(() -> {
+            try {
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, fModel, 900, AIService.Backend.ARLIAI);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -636,19 +717,17 @@ public class CommandDispatcher {
                 "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
                 "**!autolast** - Toggle automatic DM of last message when reading export room\n\n" +
                 "**!autotldr** - Toggle automatic AI TLDR when reading export room (>100 msgs, >1h gap)\n\n" +
-                "**!summary <link or count or duration> [question]** - Condensed summary with auto-fallback (ArliAI -> Cerebras)\n" +
+                "**!summary <link or count or duration> [question]** - Condensed summary with auto-fallback (ArliAI)\n" +
                 "**!summarylist <link or count or duration> [question]** - Bullet list of tech/VR/gaming/ethics/philosophy chats with auto-fallback\n" +
-                "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI -> Cerebras)\n"
+                "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI)\n"
                 +
                 "**!debugai <link or count or duration> [question]** - Query AI backend with a custom prompt via question or chat logs\n"
                 +
-                "**!arliai, !cerebras <link or count or duration> [question]** - Query specific AI backend (debug)\n"
+                "**!arliai <model> <prompt>** - Query ArliAI with specific model (models: Qwen3.5-27B-Musica-v1, Qwen3.5-27B-Vivid-Durian, Qwen3.5-27B-Derestricted; fuzzy matched)\n"
                 +
                 "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n"
                 +
                 "**!ask [question]** - Query AI backend with up to 16k tokens of history (no timestamps)\n"
-                +
-                "**!longask [question]** - Like !ask, but uses a strict reasoning model, ArliAI, and has a longer timeout (15 mins)\n"
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!grep, !grep-slow, !search, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
