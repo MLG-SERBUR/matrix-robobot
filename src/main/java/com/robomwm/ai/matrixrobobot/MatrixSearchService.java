@@ -13,8 +13,10 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -50,6 +52,7 @@ public class MatrixSearchService {
 
             List<String> results = new ArrayList<>();
             List<String> eventIds = new ArrayList<>();
+            Set<String> seenEventIds = new HashSet<>();
             int maxResults = 25;
             String nextBatch = null;
 
@@ -107,6 +110,11 @@ public class MatrixSearchService {
                     String body = resultObj.path("content").path("body").asText(null);
 
                     if (eventId != null && eventSender != null && body != null) {
+                        // Skip duplicate events (Matrix spec recommends deduplication by event ID)
+                        if (!seenEventIds.add(eventId)) {
+                            continue;
+                        }
+                        
                         String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
                                 .atZone(zoneId)
                                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
