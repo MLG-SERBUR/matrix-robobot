@@ -26,7 +26,6 @@ public class CommandDispatcher {
     private final DebugAIService debugAIService;
     private final SemanticSearchService semanticSearchService;
     private final TimezoneService timezoneService;
-    private final AISearchService aiSearchService;
 
     private static final List<String> ARLIAI_MODELS = List.of(
             "Qwen3.5-27B-Musica-v1",
@@ -38,7 +37,7 @@ public class CommandDispatcher {
             String commandRoomId, String exportRoomId, RoomHistoryManager historyManager,
             Map<String, AtomicBoolean> runningOperations, TextSearchService textSearchService,
             AIService aiService, SemanticSearchService semanticSearchService, TimezoneService timezoneService,
-            String arliApiKey, String cerebrasApiKey) {
+            String arliApiKey) {
         this.matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         this.historyManager = historyManager;
         this.runningOperations = runningOperations;
@@ -49,7 +48,6 @@ public class CommandDispatcher {
         this.debugAIService = new DebugAIService(client, mapper, homeserver, accessToken, arliApiKey);
         this.semanticSearchService = semanticSearchService;
         this.timezoneService = timezoneService;
-        this.aiSearchService = new AISearchService(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey);
     }
 
     /**
@@ -109,10 +107,6 @@ public class CommandDispatcher {
             return handleTextSearchCommand(trimmed, "!search\\s+(\\d+)([dh])\\s+(.+)", "search", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performSearch);
         } else if (trimmed.matches("!media\\s+(\\d+)([dh])\\s+(.+)")) {
             return handleTextSearchCommand(trimmed, "!media\\s+(\\d+)([dh])\\s+(.+)", "media search", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performMediaSearch);
-        } else if (trimmed.matches("!aisearch\\s+(\\d+)([dh])\\s+(.+)")) {
-            return handleAISearchWithDuration(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
-        } else if (trimmed.matches("!aisearch\\s+(.+)")) {
-            return handleAISearchNoDuration(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
         } else if ("!abort".equals(trimmed)) {
             handleAbort(sender, responseRoomId);
             return true;
@@ -517,79 +511,6 @@ public class CommandDispatcher {
         }
     }
 
-    /**
-     * Handle !aisearch without duration - searches all history
-     */
-    private boolean handleAISearchNoDuration(String trimmed, String roomId, String sender, String prevBatch, 
-                                              String responseRoomId, String exportRoomId) {
-        String query = trimmed.replaceFirst("^!aisearch\\s*", "").trim();
-        if (query.isEmpty()) {
-            matrixClient.sendText(responseRoomId, "Usage: !aisearch <query>\n" +
-                    "Example: !aisearch find the image of a cat\n" +
-                    "Example: !aisearch 7d video about VR\n" +
-                    "Example: !aisearch 24h picture from last week");
-            return true;
-        }
-
-        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-        if (zoneId == null)
-            return true;
-
-        System.out.println("Received !aisearch command (all history) in " + roomId + " from " + sender);
-
-        AtomicBoolean abortFlag = new AtomicBoolean(false);
-        runningOperations.put(sender, abortFlag);
-
-        final String fQuery = query;
-
-        new Thread(() -> {
-            try {
-                aiSearchService.performAISearch(responseRoomId, exportRoomId, 0, prevBatch, fQuery, zoneId, abortFlag);
-            } finally {
-                runningOperations.remove(sender);
-            }
-        }).start();
-        
-        return true;
-    }
-
-    /**
-     * Handle !aisearch with duration - searches specified time range
-     */
-    private boolean handleAISearchWithDuration(String trimmed, String roomId, String sender, String prevBatch, 
-                                                String responseRoomId, String exportRoomId) {
-        Matcher matcher = Pattern.compile("!aisearch\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
-        if (matcher.matches()) {
-            int duration = Integer.parseInt(matcher.group(1));
-            String unit = matcher.group(2);
-            String query = matcher.group(3).trim();
-
-            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return true;
-
-            int hours = unit.equals("d") ? duration * 24 : duration;
-
-            System.out.println("Received !aisearch command in " + roomId + " from " + sender);
-
-            AtomicBoolean abortFlag = new AtomicBoolean(false);
-            runningOperations.put(sender, abortFlag);
-
-            final String fQuery = query;
-            final int fHours = hours;
-
-            new Thread(() -> {
-                try {
-                    aiSearchService.performAISearch(responseRoomId, exportRoomId, fHours, prevBatch, fQuery, zoneId, abortFlag);
-                } finally {
-                    runningOperations.remove(sender);
-                }
-            }).start();
-            return true;
-        }
-        return false;
-    }
-
     private void handleTimezone(String trimmed, String responseRoomId, String sender) {
         String[] parts = trimmed.split("\\s+");
         if (parts.length < 2) {
@@ -852,7 +773,6 @@ public class CommandDispatcher {
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!grep, !grep-slow, !search, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
-                "**!aisearch [duration] <query>** - AI-powered search to find specific files, images, videos, or conversations (e.g., `!aisearch find the cat picture`, `!aisearch 7d video about VR`)\n\n" +
                 "**!abort** - Abort currently running operations";
         matrixClient.sendMarkdown(responseRoomId, helpText);
     }
