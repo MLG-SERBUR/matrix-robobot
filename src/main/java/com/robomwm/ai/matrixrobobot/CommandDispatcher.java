@@ -26,6 +26,7 @@ public class CommandDispatcher {
     private final DebugAIService debugAIService;
     private final SemanticSearchService semanticSearchService;
     private final TimezoneService timezoneService;
+    private final AiSearchService aiSearchService;
 
     private static final List<String> ARLIAI_MODELS = List.of(
             "Qwen3.5-27B-Musica-v1",
@@ -48,6 +49,7 @@ public class CommandDispatcher {
         this.debugAIService = new DebugAIService(client, mapper, homeserver, accessToken, arliApiKey);
         this.semanticSearchService = semanticSearchService;
         this.timezoneService = timezoneService;
+        this.aiSearchService = new AiSearchService(client, mapper, homeserver, accessToken, arliApiKey);
     }
 
     /**
@@ -95,6 +97,9 @@ public class CommandDispatcher {
             return true;
         } else if (trimmed.matches("!arliai(?:\\s+.*)?")) {
             handleArliai(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+            return true;
+        } else if (trimmed.matches("!aisearch\\s+(\\d+)([dh])\\s+(.+)")) {
+            handleAiSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!semantic\\s+(\\d+)h\\s+(.+)")) {
             handleSemanticSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
@@ -475,6 +480,35 @@ public class CommandDispatcher {
         }
     }
 
+    private void handleAiSearch(String trimmed, String roomId, String sender, String prevBatch,
+            String responseRoomId, String exportRoomId) {
+        Matcher matcher = Pattern.compile("!aisearch\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
+        if (matcher.matches()) {
+            int duration = Integer.parseInt(matcher.group(1));
+            String unit = matcher.group(2);
+            String query = matcher.group(3).trim();
+
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+            if (zoneId == null)
+                return;
+
+            int hours = unit.equals("d") ? duration * 24 : duration;
+
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+
+            System.out.println("Received aisearch command in " + roomId + " from " + sender);
+            new Thread(() -> {
+                try {
+                    aiSearchService.performAiSearch(responseRoomId, exportRoomId, hours, prevBatch,
+                        query, zoneId, abortFlag);
+                } finally {
+                    runningOperations.remove(sender);
+                }
+            }).start();
+        }
+    }
+
     @FunctionalInterface
     public interface TextSearchAction {
         void execute(String roomId, String sender, String responseRoomId, String exportRoomId, int hours, String prevBatch, String pattern, ZoneId zoneId);
@@ -772,6 +806,7 @@ public class CommandDispatcher {
                 "**!ask [question]** - Query AI backend with up to 16k tokens of history (no timestamps)\n"
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
+                "**!aisearch <hours>h <query>** - AI-powered agentic search for files, images, videos, or conversations (uses ArliAI)\n\n" +
                 "**!grep, !grep-slow, !search, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
                 "**!abort** - Abort currently running operations";
         matrixClient.sendMarkdown(responseRoomId, helpText);
