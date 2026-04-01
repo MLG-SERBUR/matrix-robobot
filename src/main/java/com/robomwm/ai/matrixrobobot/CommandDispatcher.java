@@ -23,6 +23,7 @@ public class CommandDispatcher {
     private final String exportRoomId;
     private final TextSearchService textSearchService;
     private final AIService aiService;
+    private final DebugAIService debugAIService;
     private final SemanticSearchService semanticSearchService;
     private final TimezoneService timezoneService;
 
@@ -35,7 +36,8 @@ public class CommandDispatcher {
     public CommandDispatcher(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
             String commandRoomId, String exportRoomId, RoomHistoryManager historyManager,
             Map<String, AtomicBoolean> runningOperations, TextSearchService textSearchService,
-            AIService aiService, SemanticSearchService semanticSearchService, TimezoneService timezoneService) {
+            AIService aiService, SemanticSearchService semanticSearchService, TimezoneService timezoneService,
+            String arliApiKey) {
         this.matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         this.historyManager = historyManager;
         this.runningOperations = runningOperations;
@@ -43,6 +45,7 @@ public class CommandDispatcher {
         this.exportRoomId = exportRoomId;
         this.textSearchService = textSearchService;
         this.aiService = aiService;
+        this.debugAIService = new DebugAIService(client, mapper, homeserver, accessToken, arliApiKey);
         this.semanticSearchService = semanticSearchService;
         this.timezoneService = timezoneService;
     }
@@ -86,6 +89,9 @@ public class CommandDispatcher {
             return true;
         } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
             handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, 300, AIService.Backend.AUTO);
+            return true;
+        } else if (trimmed.matches("!debugarliai(?:\\s+.*)?")) {
+            handleDebugArliai(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!arliai(?:\\s+.*)?")) {
             handleArliai(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
@@ -409,6 +415,40 @@ public class CommandDispatcher {
         }).start();
     }
 
+    private void handleDebugArliai(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
+                                   String exportRoomId) {
+        // Format: !debugarliai <model> [param=value ...] <prompt>
+        String args = trimmed.replaceFirst("^!debugarliai\\s*", "").trim();
+        
+        if (args.isEmpty()) {
+            matrixClient.sendMarkdown(responseRoomId, DebugAIService.getHelpText());
+            return;
+        }
+        
+        DebugAIService.ParseResult result = DebugAIService.parseArguments(args);
+        
+        if (result.hasError()) {
+            matrixClient.sendText(responseRoomId, "Error: " + result.error + "\n\n" + DebugAIService.getHelpText());
+            return;
+        }
+
+        System.out.println("Received !debugarliai command in " + roomId + " from " + sender + " (model: " + result.config.model + ")");
+
+        AtomicBoolean abortFlag = new AtomicBoolean(false);
+        runningOperations.put(sender, abortFlag);
+
+        final DebugAIService.DebugConfig fConfig = result.config;
+        final String fPrompt = result.prompt;
+
+        new Thread(() -> {
+            try {
+                debugAIService.queryDebugAI(responseRoomId, exportRoomId, prevBatch, fConfig, fPrompt, abortFlag, historyManager);
+            } finally {
+                runningOperations.remove(sender);
+            }
+        }).start();
+    }
+
     private void handleSemanticSearch(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
         Matcher matcher = Pattern.compile("!semantic\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
@@ -724,6 +764,8 @@ public class CommandDispatcher {
                 "**!debugai <link or count or duration> [question]** - Query AI backend with a custom prompt via question or chat logs\n"
                 +
                 "**!arliai <model> <prompt>** - Query ArliAI with specific model (models: Qwen3.5-27B-Musica-v1, Qwen3.5-27B-Vivid-Durian, Qwen3.5-27B-Derestricted; fuzzy matched)\n"
+                +
+                "**!debugarliai <model> [params...] <prompt>** - Query ArliAI with custom API parameters (temp, top_p, dry, rep_pen, etc.)\n"
                 +
                 "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n"
                 +

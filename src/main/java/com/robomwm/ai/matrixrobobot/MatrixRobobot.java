@@ -73,7 +73,7 @@ public class MatrixRobobot {
         TimezoneService timezoneService = new TimezoneService(mapper);
         CommandDispatcher dispatcher = new CommandDispatcher(client, mapper, url, config.accessToken,
                 config.commandRoomId, config.exportRoomId, historyManager, runningOperations, textSearchService,
-                aiService, semanticSearchService, timezoneService);
+                aiService, semanticSearchService, timezoneService, config.arliApiKey);
 
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, aiService,
