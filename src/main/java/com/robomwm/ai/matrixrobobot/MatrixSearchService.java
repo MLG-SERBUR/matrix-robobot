@@ -120,26 +120,6 @@ public class MatrixSearchService {
                 // Check for next batch
                 nextBatch = roomEvents.path("next_batch").asText(null);
 
-                // Update progress
-                if (eventMessageId != null && results.size() > 0) {
-                    StringBuilder updateMsg = new StringBuilder();
-                    updateMsg.append("Matrix search results for \"").append(query).append("\" in ").append(searchRoomId)
-                            .append(".\n");
-                    updateMsg.append(results.size()).append(" matches");
-                    if (nextBatch != null) {
-                        updateMsg.append(" (searching...)");
-                    }
-                    updateMsg.append(".\n\n");
-
-                    for (int i = 0; i < results.size(); i++) {
-                        updateMsg.append(results.get(i)).append(" ");
-                        String messageLink = "https://matrix.to/#/" + searchRoomId + "/" + eventIds.get(i);
-                        updateMsg.append(messageLink).append("\n");
-                    }
-
-                    matrixClient.updateTextMessage(responseRoomId, originalEventId, updateMsg.toString());
-                }
-
             } while (nextBatch != null && results.size() < maxResults);
 
             if (results.isEmpty()) {
