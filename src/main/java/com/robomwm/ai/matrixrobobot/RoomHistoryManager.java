@@ -116,11 +116,16 @@ public class RoomHistoryManager {
      */
     public ChatLogsWithIds fetchRoomHistoryWithIds(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId) {
-        return fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId, null);
+        return fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId, null, null);
     }
 
     public ChatLogsWithIds fetchRoomHistoryWithIds(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
+        return fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId, abortFlag, null);
+    }
+
+    public ChatLogsWithIds fetchRoomHistoryWithIds(String roomId, int hours, String fromToken, long startTimestamp,
+            long endTime, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
         List<String> logs = new ArrayList<>();
         List<String> eventIds = new ArrayList<>();
 
@@ -180,6 +185,13 @@ public class RoomHistoryManager {
                         logs.add("[" + timestamp + "] <" + sender + "> " + body);
                         eventIds.add(eventId);
                     }
+                }
+
+                // Report progress after each batch
+                if (progressCallback != null && !logs.isEmpty()) {
+                    int tokens = 0;
+                    for (String l : logs) tokens += estimateTokens(l);
+                    progressCallback.onProgress(logs.size(), tokens);
                 }
 
                 if (reachedStart) {

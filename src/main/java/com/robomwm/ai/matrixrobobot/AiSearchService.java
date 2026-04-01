@@ -451,7 +451,7 @@ public class AiSearchService {
                 .uri(URI.create("https://api.arliai.com/v1/chat/completions"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + arliApiKey)
-                .timeout(Duration.ofSeconds(120))
+                .timeout(Duration.ofSeconds(300))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
