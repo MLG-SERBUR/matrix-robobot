@@ -27,6 +27,7 @@ public class CommandDispatcher {
     private final SemanticSearchService semanticSearchService;
     private final TimezoneService timezoneService;
     private final AiSearchService aiSearchService;
+    private final MatrixSearchService matrixSearchService;
 
     private static final List<String> ARLIAI_MODELS = List.of(
             "Qwen3.5-27B-Musica-v1",
@@ -50,6 +51,7 @@ public class CommandDispatcher {
         this.semanticSearchService = semanticSearchService;
         this.timezoneService = timezoneService;
         this.aiSearchService = new AiSearchService(client, mapper, homeserver, accessToken, arliApiKey);
+        this.matrixSearchService = new MatrixSearchService(matrixClient, client, mapper, homeserver, accessToken, runningOperations);
     }
 
     /**
@@ -108,8 +110,11 @@ public class CommandDispatcher {
             return handleTextSearchCommand(trimmed, "!grep\\s+(\\d+)([dh])\\s+(.+)", "grep", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrep);
         } else if (trimmed.matches("!grep-slow\\s+(\\d+)([dh])\\s+(.+)")) {
             return handleTextSearchCommand(trimmed, "!grep-slow\\s+(\\d+)([dh])\\s+(.+)", "grep-slow", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrepSlow);
-        } else if (trimmed.matches("!search\\s+(\\d+)([dh])\\s+(.+)")) {
-            return handleTextSearchCommand(trimmed, "!search\\s+(\\d+)([dh])\\s+(.+)", "search", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performSearch);
+        } else if (trimmed.matches("!textsearch\\s+(\\d+)([dh])\\s+(.+)")) {
+            return handleTextSearchCommand(trimmed, "!textsearch\\s+(\\d+)([dh])\\s+(.+)", "textsearch", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performSearch);
+        } else if (trimmed.matches("!search\\s+(.+)")) {
+            handleMatrixSearch(trimmed, roomId, sender, responseRoomId, exportRoomId);
+            return true;
         } else if (trimmed.matches("!media\\s+(\\d+)([dh])\\s+(.+)")) {
             return handleTextSearchCommand(trimmed, "!media\\s+(\\d+)([dh])\\s+(.+)", "media search", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performMediaSearch);
         } else if ("!abort".equals(trimmed)) {
@@ -509,6 +514,30 @@ public class CommandDispatcher {
         }
     }
 
+    private void handleMatrixSearch(String trimmed, String roomId, String sender, String responseRoomId,
+            String searchRoomId) {
+        Matcher matcher = Pattern.compile("!search\\s+(.+)").matcher(trimmed);
+        if (matcher.matches()) {
+            String query = matcher.group(1).trim();
+
+            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+            if (zoneId == null)
+                return;
+
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+
+            System.out.println("Received Matrix search command in " + roomId + " from " + sender);
+            new Thread(() -> {
+                try {
+                    matrixSearchService.performMatrixSearch(roomId, sender, responseRoomId, searchRoomId, query, zoneId, abortFlag);
+                } finally {
+                    runningOperations.remove(sender);
+                }
+            }).start();
+        }
+    }
+
     @FunctionalInterface
     public interface TextSearchAction {
         void execute(String roomId, String sender, String responseRoomId, String exportRoomId, int hours, String prevBatch, String pattern, ZoneId zoneId);
@@ -807,7 +836,8 @@ public class CommandDispatcher {
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!aisearch <hours>h <query>** - AI-powered agentic search for files, images, videos, or conversations (uses ArliAI)\n\n" +
-                "**!grep, !grep-slow, !search, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
+                "**!search <query>** - Matrix protocol native search using server-side search\n\n" +
+                "**!grep, !grep-slow, !textsearch, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
                 "**!abort** - Abort currently running operations";
         matrixClient.sendMarkdown(responseRoomId, helpText);
     }
