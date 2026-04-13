@@ -19,7 +19,8 @@ public class VisionAIService extends AIService {
 
     public VisionAIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
                            String arliApiKey, String cerebrasApiKey, ImageFetcher imageFetcher) {
-        super(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey);
+        // Pass null for cerebrasApiKey to ensure Vision AI never falls back to Cerebras
+        super(client, mapper, homeserver, accessToken, arliApiKey, null);
         this.imageFetcher = imageFetcher;
     }
 
