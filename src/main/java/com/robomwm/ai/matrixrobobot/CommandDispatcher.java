@@ -30,8 +30,19 @@ public class CommandDispatcher {
     private final MatrixSearchService matrixSearchService;
 
     private static final List<String> ARLIAI_MODELS = List.of(
+            "Qwen3.5-27B-Anko",
+            "Qwen3.5-27B-BlueStar-Derestricted",
+            "Qwen3.5-27B-BlueStar-Derestricted-Lite",
+            "Qwen3.5-27B-BlueStar-v2-Derestricted",
+            "Qwen3.5-27B-BlueStar-v2-Derestricted-Lite",
             "Qwen3.5-27B-Musica-v1",
+            "Qwen3.5-27B-Omega-Evolution-v2.0-Derestricted",
+            "Qwen3.5-27B-Omega-Evolution-v2.0-Derestricted-Lite",
             "Qwen3.5-27B-Vivid-Durian",
+            "Qwen3.5-27B-Writer-Derestricted",
+            "Qwen3.5-27B-Writer-Derestricted-Lite",
+            "Qwen3.5-27B-Writer-V2-Derestricted",
+            "Qwen3.5-27B-Writer-V2-Derestricted-Lite",
             "Qwen3.5-27B-Derestricted"
     );
 
@@ -384,8 +395,8 @@ public class CommandDispatcher {
         
         if (args.isEmpty()) {
             matrixClient.sendText(responseRoomId, "Usage: !arliai <model> <prompt>\n" +
-                    "Available models: Qwen3.5-27B-Musica-v1, Qwen3.5-27B-Vivid-Durian, Qwen3.5-27B-Derestricted\n" +
-                    "Model names are fuzzy matched (e.g., 'musica', 'vivid', 'derestricted')");
+                    "Available models: " + String.join(", ", ARLIAI_MODELS) + "\n" +
+                    "Model names are fuzzy matched (e.g., 'musica', 'vivid', 'writer', 'bluestar')");
             return;
         }
         
@@ -397,8 +408,8 @@ public class CommandDispatcher {
         
         if (matchedModel == null) {
             matrixClient.sendText(responseRoomId, "Unknown model: " + modelInput + "\n" +
-                    "Available models: Qwen3.5-27B-Musica-v1, Qwen3.5-27B-Vivid-Durian, Qwen3.5-27B-Derestricted\n" +
-                    "Model names are fuzzy matched (e.g., 'musica', 'vivid', 'derestricted')");
+                    "Available models: " + String.join(", ", ARLIAI_MODELS) + "\n" +
+                    "Model names are fuzzy matched (e.g., 'musica', 'vivid', 'writer', 'bluestar')");
             return;
         }
         
