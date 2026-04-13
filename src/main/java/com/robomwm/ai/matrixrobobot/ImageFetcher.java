@@ -50,6 +50,9 @@ public class ImageFetcher {
                         mimeType = "image/gif";
                     }
                     encodedImages.add("data:" + mimeType + ";base64," + base64Data);
+                    System.out.println("Successfully fetched and encoded image " + matrixUrl);
+                } else {
+                    System.out.println("Skipped image " + matrixUrl + " (size limit or other issue)");
                 }
             } catch (Exception e) {
                 System.err.println("Failed to fetch image " + matrixUrl + ": " + e.getMessage());
@@ -57,6 +60,7 @@ public class ImageFetcher {
             }
         }
 
+        System.out.println("Fetched " + encodedImages.size() + " of " + imageUrls.size() + " images");
         return encodedImages;
     }
 
@@ -64,12 +68,13 @@ public class ImageFetcher {
         // Convert Matrix media URL to full HTTP URL
         String fullUrl;
         if (matrixUrl.startsWith("mxc://")) {
-            // mxc://server/media_id format
+            // mxc://server/media_id format - media is hosted on the specified server
             String[] parts = matrixUrl.substring(6).split("/");
             if (parts.length == 2) {
                 String server = parts[0];
                 String mediaId = parts[1];
-                fullUrl = homeserverUrl + "/_matrix/media/r0/download/" + server + "/" + mediaId;
+                // Use the server from the mxc URL, not the bot's homeserver
+                fullUrl = "https://" + server + "/_matrix/media/r0/download/" + server + "/" + mediaId;
             } else {
                 throw new Exception("Invalid mxc URL format: " + matrixUrl);
             }

@@ -90,7 +90,7 @@ public class VisionAIService {
                 return;
             }
 
-            performVisionAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, statusEventId);
+            performVisionAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, statusEventId, 900);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -100,7 +100,7 @@ public class VisionAIService {
 
     private void performVisionAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                      String question, String promptPrefix, AtomicBoolean abortFlag,
-                                     Backend preferredBackend, String statusEventId) {
+                                     Backend preferredBackend, String statusEventId, int timeoutSeconds) {
         if (abortFlag != null && abortFlag.get()) return;
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
@@ -126,11 +126,9 @@ public class VisionAIService {
             // Fetch and encode images
             List<String> base64Images = new ArrayList<>();
             if (history.imageUrls != null && !history.imageUrls.isEmpty()) {
+                System.out.println("Starting to fetch " + history.imageUrls.size() + " images for vision summary");
                 matrixClient.updateTextMessage(responseRoomId, statusEventId, "Fetching " + history.imageUrls.size() + " images...");
                 base64Images = imageFetcher.fetchAndEncodeImages(history.imageUrls);
-                if (base64Images.size() < history.imageUrls.size()) {
-                    System.out.println("Only fetched " + base64Images.size() + " of " + history.imageUrls.size() + " images");
-                }
             }
 
             // Build prompt
@@ -140,7 +138,7 @@ public class VisionAIService {
             List<Map<String, Object>> content = VisionPromptBuilder.buildVisionContent(prompt, base64Images);
 
             // Call vision AI
-            callVisionArliAI(content, responseRoomId, exportRoomId, history.firstEventId, abortFlag, statusEventId);
+            callVisionArliAI(content, responseRoomId, exportRoomId, history.firstEventId, abortFlag, statusEventId, timeoutSeconds);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -149,7 +147,7 @@ public class VisionAIService {
     }
 
     private void callVisionArliAI(List<Map<String, Object>> content, String responseRoomId, String exportRoomId,
-                                 String firstEventId, AtomicBoolean abortFlag, String statusEventId) throws Exception {
+                                 String firstEventId, AtomicBoolean abortFlag, String statusEventId, int timeoutSeconds) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");
@@ -172,7 +170,7 @@ public class VisionAIService {
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + arliApiKey)
                 .header("Accept", "text/event-stream")
-                .timeout(Duration.ofSeconds(900))
+                .timeout(Duration.ofSeconds(timeoutSeconds))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
@@ -182,8 +180,13 @@ public class VisionAIService {
         StringBuilder reasoning = new StringBuilder();
         StringBuilder responseContent = new StringBuilder();
         long lastUpdate = System.currentTimeMillis();
+        final long startTime = System.currentTimeMillis();
+
+        int updateCount = 0;
+        String[] clockFaces = {"🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦"};
 
         try {
+            System.out.println("Starting Vision ArliAI streaming request...");
             HttpResponse<java.util.stream.Stream<String>> httpResponse = client.send(request, HttpResponse.BodyHandlers.ofLines());
 
             if (httpResponse.statusCode() != 200) {
@@ -194,8 +197,10 @@ public class VisionAIService {
             try (java.util.stream.Stream<String> lines = httpResponse.body()) {
                 java.util.Iterator<String> it = lines.iterator();
                 while (it.hasNext()) {
-                    if (abortFlag != null && abortFlag.get()) break;
-
+                    if (abortFlag != null && abortFlag.get()) {
+                        System.out.println("Vision ArliAI streaming aborted by flag.");
+                        break;
+                    }
                     String line = it.next();
                     String data = line.trim();
                     if (data.isEmpty()) continue;
@@ -234,22 +239,31 @@ public class VisionAIService {
                                         output = output.substring(0, 15900) + "... [TRUNCATED]";
                                     }
 
+                                    // Append elapsed thinking time to clock emoji (e.g. 🕒 1m12s)
+                                    long elapsedMs = now - startTime;
+                                    long elapsedSec = elapsedMs / 1000;
+                                    String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
+                                    String indicator = clockFaces[updateCount++ % clockFaces.length] + " " + elapsedStr;
+
                                     if (eventIdHolder[0] == null) {
-                                        eventIdHolder[0] = matrixClient.sendMarkdownWithEventId(responseRoomId, output);
+                                        eventIdHolder[0] = matrixClient.sendMarkdownWithEventId(responseRoomId, output + " " + indicator);
                                     } else {
-                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], output);
+                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], output + " " + indicator);
                                     }
                                 }
                             }
                         } catch (Exception e) {
-                            System.err.println("Vision ArliAI Stream Parse Error: " + e.getMessage());
+                            System.err.println("Vision ArliAI Stream Parse Error: " + e.getMessage() + " | Line: " + line);
                         }
                     } else if (data.contains("[DONE]")) {
+                        System.out.println("Vision ArliAI streaming finished normally ([DONE] received).");
                         break;
                     }
                 }
             }
         } catch (Exception e) {
+            System.err.println("Error during Vision ArliAI streaming call: " + e.getMessage());
+            e.printStackTrace();
             throw new Exception("Error during vision ArliAI streaming: " + e.getMessage(), e);
         }
 
@@ -257,9 +271,12 @@ public class VisionAIService {
             throw new Exception("No response received from vision ArliAI.");
         }
 
+        System.out.println("Vision ArliAI Final State - Content size: " + responseContent.length() + ", Reasoning size: " + reasoning.length());
+
         String finalOutput;
         if (responseContent.toString().trim().isEmpty()) {
             if (reasoning.length() > 0) {
+                System.out.println("Vision ArliAI: Content is empty, falling back to trimmed reasoning.");
                 String trimmed = trimReasoning(reasoning.toString());
                 finalOutput = "> " + trimmed.replace("\n", "\n> ") + "\n\n**Vision ArliAI: No final response was generated.**";
             } else {
