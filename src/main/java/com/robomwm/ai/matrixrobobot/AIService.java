@@ -111,7 +111,7 @@ public class AIService {
         }
     }
 
-    private void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
+    protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId) {
         if (abortFlag != null && abortFlag.get()) return;

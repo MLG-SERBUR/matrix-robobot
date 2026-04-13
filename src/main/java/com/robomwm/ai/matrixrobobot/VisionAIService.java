@@ -8,12 +8,17 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Vision-enhanced AI service. Pre-describes images individually via vision API calls,
+ * injects text descriptions into chat logs, then delegates to parent's text-only summary.
+ * This avoids blowing out context limits with base64 image data.
+ */
 public class VisionAIService extends AIService {
     private final ImageFetcher imageFetcher;
 
@@ -29,7 +34,9 @@ public class VisionAIService extends AIService {
     }
 
     /**
-     * Query AI with vision support - fetches images and includes them in the prompt.
+     * Query AI with vision support.
+     * Phase 1: Describe each image individually via vision API (sequential, non-streaming).
+     * Phase 2: Inject descriptions into chat logs, run normal text-only summary.
      */
     public void queryAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
             String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
@@ -53,10 +60,11 @@ public class VisionAIService extends AIService {
 
             // Create progress callback
             final String fStatusEventId = statusEventId;
-            final long lastProgressUpdate = System.currentTimeMillis();
+            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
                 long now = System.currentTimeMillis();
-                if (now - lastProgressUpdate >= 5000) {
+                if (now - lastProgressUpdate.get() >= 5000) {
+                    lastProgressUpdate.set(now);
                     String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
                     matrixClient.updateTextMessage(responseRoomId, fStatusEventId,
                             "\uD83D\uDCE8 Gathering " + timeInfo + " with images... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
@@ -77,7 +85,40 @@ public class VisionAIService extends AIService {
                 return;
             }
 
-            performVisionAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, statusEventId, 900);
+            // Phase 1: Describe each image individually via vision API (sequential)
+            if (history.imageUrls != null && !history.imageUrls.isEmpty()) {
+                int imageCount = history.imageUrls.size();
+                matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                        "\uD83D\uDDBC\uFE0F Describing " + imageCount + " image(s)...");
+
+                List<String> imageDescriptions = new ArrayList<>();
+                for (int i = 0; i < imageCount; i++) {
+                    if (abortFlag != null && abortFlag.get()) return;
+
+                    String imageUrl = history.imageUrls.get(i);
+                    String caption = (history.imageCaptions != null && i < history.imageCaptions.size())
+                            ? history.imageCaptions.get(i) : "image";
+
+                    matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                            "\uD83D\uDDBC\uFE0F Describing image " + (i + 1) + "/" + imageCount + ": " + caption);
+
+                    String description = describeImage(imageUrl, caption);
+                    if (description != null && !description.isEmpty()) {
+                        imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 " + description + "]");
+                    } else {
+                        imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 (could not describe)]");
+                    }
+                }
+
+                // Inject image descriptions at end of chat logs
+                history.logs.addAll(imageDescriptions);
+                System.out.println("Injected " + imageDescriptions.size() + " image descriptions into chat logs");
+            }
+
+            // Phase 2: Run normal text-only summary with enriched logs
+            // Delegate to parent's performAIQuery which handles context limits, Cerebras fallback, etc.
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix,
+                    abortFlag, AIService.Backend.AUTO, null, 900, statusEventId);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -85,82 +126,69 @@ public class VisionAIService extends AIService {
         }
     }
 
-    private void performVisionAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
-                                     String question, String promptPrefix, AtomicBoolean abortFlag,
-                                     Backend preferredBackend, String statusEventId, int timeoutSeconds) {
-        if (abortFlag != null && abortFlag.get()) return;
-
-        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-
+    /**
+     * Describe a single image via ArliAI vision API. Sequential, non-streaming.
+     * Returns text description or null on failure.
+     */
+    private String describeImage(String mxcUrl, String caption) {
         try {
-            String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
-            String backendName = "Arli AI (Vision)";
-            String queryDescription = history.logs.size() + " messages";
-            if (history.imageUrls != null && !history.imageUrls.isEmpty()) {
-                queryDescription += " + " + history.imageUrls.size() + " images";
-            }
-            String queryStatusMsg = "\u23F3 Querying " + backendName + " with " + queryDescription + questionPart;
-
-            // Update status
-            if (statusEventId != null) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId, queryStatusMsg);
-            } else {
-                statusEventId = matrixClient.sendTextWithEventId(responseRoomId, queryStatusMsg);
+            // Fetch and encode single image
+            List<String> encoded = imageFetcher.fetchAndEncodeImages(List.of(mxcUrl));
+            if (encoded.isEmpty()) {
+                System.out.println("Failed to fetch image: " + mxcUrl);
+                return null;
             }
 
-            if (abortFlag != null && abortFlag.get()) return;
+            String base64Image = encoded.get(0);
 
-            // Fetch and encode images
-            List<String> base64Images = new ArrayList<>();
-            if (history.imageUrls != null && !history.imageUrls.isEmpty()) {
-                System.out.println("Starting to fetch " + history.imageUrls.size() + " images for vision summary");
-                matrixClient.updateTextMessage(responseRoomId, statusEventId, "Fetching " + history.imageUrls.size() + " images...");
-                base64Images = imageFetcher.fetchAndEncodeImages(history.imageUrls);
+            // Build vision content: text prompt + single image
+            String prompt = "Briefly describe this image in 1-2 sentences. Context: it was shared in a chat with caption '" + caption + "'.";
+            List<Map<String, Object>> content = VisionPromptBuilder.buildVisionContent(prompt, List.of(base64Image));
+
+            List<Map<String, Object>> messages = new ArrayList<>();
+            messages.add(Map.of("role", "system", "content", "You describe images concisely."));
+            messages.add(Map.of("role", "user", "content", content));
+
+            Map<String, Object> payload = Map.of(
+                    "model", "Qwen3.5-27B-Derestricted",
+                    "messages", messages,
+                    "stream", false,
+                    "max_completion_tokens", 200
+            );
+            String jsonPayload = mapper.writeValueAsString(payload);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.arliai.com/v1/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + arliApiKey)
+                    .timeout(Duration.ofSeconds(120))
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                System.err.println("Image description API error " + response.statusCode() + ": " + response.body());
+                return null;
             }
 
-            // Build prompt
-            String prompt = buildPrompt(question, history.logs, promptPrefix);
+            JsonNode root = mapper.readTree(response.body());
+            JsonNode choices = root.path("choices");
+            if (choices.isArray() && choices.size() > 0) {
+                String text = choices.get(0).path("message").path("content").asText(null);
+                // Strip thinking tags if present (Qwen reasoning models)
+                if (text != null) {
+                    text = text.replaceAll("(?s)<think>.*?</think>", "").trim();
+                }
+                System.out.println("Described image " + caption + ": "
+                        + (text != null ? text.substring(0, Math.min(100, text.length())) : "null"));
+                return text;
+            }
 
-            // Build content with text and images
-            List<Map<String, Object>> content = VisionPromptBuilder.buildVisionContent(prompt, base64Images);
-
-            // Call vision AI
-            callVisionArliAI(content, responseRoomId, exportRoomId, history.firstEventId, abortFlag, statusEventId, timeoutSeconds);
-
+            return null;
         } catch (Exception e) {
-            e.printStackTrace();
-            matrixClient.sendMarkdown(responseRoomId, "Error performing vision AI query: " + e.getMessage());
+            System.err.println("Error describing image " + mxcUrl + ": " + e.getMessage());
+            return null;
         }
-    }
-
-    private void callVisionArliAI(List<Map<String, Object>> content, String responseRoomId, String exportRoomId,
-                                 String firstEventId, AtomicBoolean abortFlag, String statusEventId, int timeoutSeconds) throws Exception {
-        String arliApiUrl = "https://api.arliai.com";
-        if (arliApiKey == null || arliApiKey.isEmpty()) {
-            throw new Exception("ARLI_API_KEY is not configured.");
-        }
-
-        List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content", AIService.Prompts.SYSTEM_OVERVIEW));
-        messages.add(Map.of("role", "user", "content", content));
-
-        Map<String, Object> arliPayload = Map.of(
-                "model", "Qwen3.5-27B-Derestricted", // Vision-capable model
-                "messages", messages,
-                "stream", true,
-                "output_kind", "delta"
-        );
-        String jsonPayload = mapper.writeValueAsString(arliPayload);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(arliApiUrl + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + arliApiKey)
-                .header("Accept", "text/event-stream")
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
-
-        streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "Vision ArliAI", abortFlag);
     }
 }

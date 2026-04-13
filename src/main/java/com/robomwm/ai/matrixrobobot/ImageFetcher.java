@@ -23,6 +23,10 @@ public class ImageFetcher {
     // Maximum image size to fetch (5MB)
     private static final long MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
+    // TODO: Add image downscaling before base64 encoding to reduce token cost for vision API calls.
+    // Could use javax.imageio to resize to e.g. 512x512 or 1024x1024 max dimension.
+    // The vision model only needs enough detail to describe the image, not full resolution.
+
     public ImageFetcher(HttpClient httpClient, ObjectMapper mapper, String homeserverUrl, String accessToken) {
         this.httpClient = httpClient;
         this.mapper = mapper;
