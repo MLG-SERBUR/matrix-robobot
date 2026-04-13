@@ -45,30 +45,23 @@ public class DebugAIService {
         public Double topP;
         public Integer topK;
         public Double minP;
-        public Double topA;
-        
+
         // Repetition control
         public Double repetitionPenalty;
         public Double frequencyPenalty;
         public Double presencePenalty;
-        
-        // DRY sampling parameters
-        public Double dryMultiplier;
-        public Double dryBase;
-        public Integer dryAllowedLength;
-        public Integer dryRange;
-        
+
         // Token limits
         public Integer maxTokens;
         public Integer minTokens;
-        
+
         // Other parameters
         public Integer seed;
         public List<String> stop;
-        
+
         // System prompt control
         public Boolean skipSystem;
-        
+
         // Model selection
         public String model;
         
@@ -78,14 +71,9 @@ public class DebugAIService {
             this.topP = null;
             this.topK = null;
             this.minP = null;
-            this.topA = null;
             this.repetitionPenalty = null;
             this.frequencyPenalty = null;
             this.presencePenalty = null;
-            this.dryMultiplier = null;
-            this.dryBase = null;
-            this.dryAllowedLength = null;
-            this.dryRange = null;
             this.maxTokens = null;
             this.minTokens = null;
             this.seed = null;
@@ -103,25 +91,20 @@ public class DebugAIService {
             payload.put("messages", messages);
             payload.put("stream", true);
             payload.put("output_kind", "delta");
-            
+
             // Add optional parameters if set
             if (temperature != null) payload.put("temperature", temperature);
             if (topP != null) payload.put("top_p", topP);
             if (topK != null) payload.put("top_k", topK);
             if (minP != null) payload.put("min_p", minP);
-            if (topA != null) payload.put("top_a", topA);
             if (repetitionPenalty != null) payload.put("repetition_penalty", repetitionPenalty);
             if (frequencyPenalty != null) payload.put("frequency_penalty", frequencyPenalty);
             if (presencePenalty != null) payload.put("presence_penalty", presencePenalty);
-            if (dryMultiplier != null) payload.put("dry_multiplier", dryMultiplier);
-            if (dryBase != null) payload.put("dry_base", dryBase);
-            if (dryAllowedLength != null) payload.put("dry_allowed_length", dryAllowedLength);
-            if (dryRange != null) payload.put("dry_range", dryRange);
             if (maxTokens != null) payload.put("max_tokens", maxTokens);
             if (minTokens != null) payload.put("min_tokens", minTokens);
             if (seed != null) payload.put("seed", seed);
             if (stop != null && !stop.isEmpty()) payload.put("stop", stop);
-            
+
             return payload;
         }
         
@@ -134,14 +117,9 @@ public class DebugAIService {
             if (topP != null) settings.add("top_p=" + topP);
             if (topK != null) settings.add("top_k=" + topK);
             if (minP != null) settings.add("min_p=" + minP);
-            if (topA != null) settings.add("top_a=" + topA);
             if (repetitionPenalty != null) settings.add("rep_pen=" + repetitionPenalty);
             if (frequencyPenalty != null) settings.add("freq_pen=" + frequencyPenalty);
             if (presencePenalty != null) settings.add("pres_pen=" + presencePenalty);
-            if (dryMultiplier != null) settings.add("dry=" + dryMultiplier);
-            if (dryBase != null) settings.add("dry_base=" + dryBase);
-            if (dryAllowedLength != null) settings.add("dry_len=" + dryAllowedLength);
-            if (dryRange != null) settings.add("dry_range=" + dryRange);
             if (maxTokens != null) settings.add("max_tokens=" + maxTokens);
             if (minTokens != null) settings.add("min_tokens=" + minTokens);
             if (seed != null) settings.add("seed=" + seed);
@@ -159,29 +137,24 @@ public class DebugAIService {
         this.arliApiKey = arliApiKey;
     }
 
-    /**
-     * Parse debug parameters from command arguments.
-     * Format: !debugarliai <model> [param=value ...] <prompt>
-     * 
-     * Supported parameter names (case-insensitive):
-     * - temp, temperature: temperature (0.0-2.0)
-     * - top_p, topP: nucleus sampling (0-1)
-     * - top_k, topK: top-k sampling
-     * - min_p, minP: min-p sampling (0-1)
-     * - top_a, topA: top-a sampling
-     * - rep_pen, repetition_penalty: repetition penalty (>=1)
-     * - freq_pen, frequency_penalty: frequency penalty
-     * - pres_pen, presence_penalty: presence penalty
-     * - dry, dry_multiplier: DRY sampling multiplier (>=0)
-     * - dry_base: DRY base for exponential growth (>1)
-     * - dry_len, dry_allowed_length: DRY allowed length (>=1)
-     * - dry_range: DRY range of tokens
-     * - max_tokens, maxTokens: max tokens to generate
-     * - min_tokens, minTokens: min tokens to generate
-     * - seed: random seed for reproducibility
-     * - no_system, nosystem: skip system prompt
-     * - stop: comma-separated stop sequences
-     */
+     /**
+      * Parse debug parameters from command arguments.
+      * Format: !debugarliai <model> [param=value ...] <prompt>
+      *
+      * Supported parameter names (case-insensitive):
+      * - temp, temperature: temperature (0.0-2.0)
+      * - top_p, topP: nucleus sampling (0-1)
+      * - top_k, topK: top-k sampling
+      * - min_p, minP: min-p sampling (0-1)
+      * - rep_pen, repetition_penalty: repetition penalty (>=1)
+      * - freq_pen, frequency_penalty: frequency penalty
+      * - pres_pen, presence_penalty: presence penalty
+      * - max_tokens, maxTokens: max tokens to generate
+      * - min_tokens, minTokens: min tokens to generate
+      * - seed: random seed for reproducibility
+      * - no_system, nosystem: skip system prompt
+      * - stop: comma-separated stop sequences
+      */
     public static ParseResult parseArguments(String args) {
         DebugConfig config = new DebugConfig();
         List<String> remainingParts = new ArrayList<>();
@@ -244,14 +217,7 @@ public class DebugAIService {
                             }
                             break;
                             
-                        // Top-a
-                        case "top_a":
-                        case "topa":
-                            config.topA = Double.parseDouble(paramValue);
-                            if (config.topA < 0) {
-                                return new ParseResult(null, null, "top_a must be >= 0");
-                            }
-                            break;
+
                             
                         // Repetition penalty
                         case "rep_pen":
@@ -274,36 +240,7 @@ public class DebugAIService {
                             config.presencePenalty = Double.parseDouble(paramValue);
                             break;
                             
-                        // DRY multiplier
-                        case "dry":
-                        case "dry_multiplier":
-                            config.dryMultiplier = Double.parseDouble(paramValue);
-                            if (config.dryMultiplier < 0) {
-                                return new ParseResult(null, null, "dry_multiplier must be >= 0");
-                            }
-                            break;
-                            
-                        // DRY base
-                        case "dry_base":
-                            config.dryBase = Double.parseDouble(paramValue);
-                            if (config.dryBase <= 1) {
-                                return new ParseResult(null, null, "dry_base must be > 1");
-                            }
-                            break;
-                            
-                        // DRY allowed length
-                        case "dry_len":
-                        case "dry_allowed_length":
-                            config.dryAllowedLength = Integer.parseInt(paramValue);
-                            if (config.dryAllowedLength < 1) {
-                                return new ParseResult(null, null, "dry_allowed_length must be >= 1");
-                            }
-                            break;
-                            
-                        // DRY range
-                        case "dry_range":
-                            config.dryRange = Integer.parseInt(paramValue);
-                            break;
+
                             
                         // Max tokens
                         case "max_tokens":
@@ -663,9 +600,6 @@ public class DebugAIService {
                "• `rep_pen` - Repetition penalty (>=1)\n" +
                "• `freq_pen` - Frequency penalty\n" +
                "• `pres_pen` - Presence penalty\n" +
-               "• `dry` - DRY sampling multiplier (>=0, helps prevent repetition)\n" +
-               "• `dry_base` - DRY exponential base (>1, default 1.75)\n" +
-               "• `dry_len` - DRY allowed length (>=1, default 2)\n" +
                "• `max_tokens` - Max tokens to generate\n" +
                "• `min_tokens` - Min tokens to generate\n" +
                "• `seed` - Random seed for reproducibility\n" +
@@ -673,7 +607,7 @@ public class DebugAIService {
                "• `stop` - Comma-separated stop sequences\n\n" +
                "**Examples:**\n" +
                "• `!debugarliai musica What is 2+2?`\n" +
-               "• `!debugarliai derestricted temp=0.9 dry=0.5 Tell me a story`\n" +
+               "• `!debugarliai derestricted temp=0.9 Tell me a story`\n" +
                "• `!debugarliai vivid temp=0.3 top_p=0.8 rep_pen=1.2 Explain quantum physics`\n" +
                "• `!debugarliai musica seed=42 max_tokens=500 Write a poem`";
     }

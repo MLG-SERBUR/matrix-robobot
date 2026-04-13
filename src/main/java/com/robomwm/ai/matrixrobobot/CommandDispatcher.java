@@ -839,7 +839,7 @@ public class CommandDispatcher {
                 +
                 "**!arliai <model> <prompt>** - Query ArliAI with specific model (models: Qwen3.5-27B-Musica-v1, Qwen3.5-27B-Vivid-Durian, Qwen3.5-27B-Derestricted; fuzzy matched)\n"
                 +
-                "**!debugarliai <model> [params...] <prompt>** - Query ArliAI with custom API parameters (temp, top_p, dry, rep_pen, etc.)\n"
+                                 "**!debugarliai <model> [params...] <prompt>** - Query ArliAI with custom API parameters (temp, top_p, rep_pen, etc.)\n"
                 +
                 "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n"
                 +
