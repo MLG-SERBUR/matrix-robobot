@@ -39,6 +39,9 @@ public class RoomHistoryManager {
         public List<String> logs;
         public String firstEventId;
         public String errorMessage;
+        // Optional fields for image support (null for text-only commands)
+        public List<String> imageUrls;
+        public List<String> imageCaptions;
 
         public ChatLogsResult(List<String> logs, String firstEventId) {
             this(logs, firstEventId, null);
@@ -48,6 +51,18 @@ public class RoomHistoryManager {
             this.logs = logs;
             this.firstEventId = firstEventId;
             this.errorMessage = errorMessage;
+            this.imageUrls = null;
+            this.imageCaptions = null;
+        }
+
+        // Constructor for vision commands
+        public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage,
+                            List<String> imageUrls, List<String> imageCaptions) {
+            this.logs = logs;
+            this.firstEventId = firstEventId;
+            this.errorMessage = errorMessage;
+            this.imageUrls = imageUrls;
+            this.imageCaptions = imageCaptions;
         }
     }
 
@@ -215,22 +230,31 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages) {
-        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, null, null);
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, null, null);
     }
 
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
-        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, abortFlag, null);
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, abortFlag, null);
     }
 
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             ProgressCallback progressCallback) {
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, abortFlag, progressCallback);
+    }
+
+    // New method with image collection
+    public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
+            boolean forward, ZoneId zoneId, int maxMessages, boolean collectImages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            ProgressCallback progressCallback) {
         if (startEventId == null) {
-            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages, abortFlag, progressCallback);
+            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages, collectImages, abortFlag, progressCallback);
         }
 
         List<String> lines = new ArrayList<>();
+        List<String> imageUrls = collectImages ? new ArrayList<>() : null;
+        List<String> imageCaptions = collectImages ? new ArrayList<>() : null;
         String firstEventId = null;
 
         TokenResult tokenRes = getTokenForEvent(roomId, startEventId, forward);
@@ -300,6 +324,7 @@ public class RoomHistoryManager {
                     String body = ev.path("content").path("body").asText(null);
                     String sender = ev.path("sender").asText(null);
                     String eventId = ev.path("event_id").asText(null);
+                    String msgtype = ev.path("content").path("msgtype").asText(null);
                     if (body != null && sender != null) {
                         String timestamp = Instant.ofEpochMilli(originServerTs)
                                 .atZone(zoneId)
@@ -308,6 +333,15 @@ public class RoomHistoryManager {
 
                         if (firstEventId == null)
                             firstEventId = eventId;
+
+                        // Collect image URLs if enabled
+                        if (collectImages && "m.image".equals(msgtype)) {
+                            String imageUrl = ev.path("content").path("url").asText(null);
+                            if (imageUrl != null && !imageUrl.isEmpty()) {
+                                imageUrls.add(imageUrl);
+                                imageCaptions.add(body);
+                            }
+                        }
 
                         if (maxMessages > 0 && lines.size() >= maxMessages) {
                             stop = true;
@@ -337,9 +371,13 @@ public class RoomHistoryManager {
         
         if (!forward) {
             Collections.reverse(lines);
+            if (collectImages) {
+                Collections.reverse(imageUrls);
+                Collections.reverse(imageCaptions);
+            }
         }
-        
-        return new ChatLogsResult(lines, firstEventId);
+
+        return new ChatLogsResult(lines, firstEventId, null, imageUrls, imageCaptions);
     }
 
     private TokenResult getTokenForEvent(String roomId, String eventId, boolean forward) {
@@ -374,18 +412,27 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, int maxMessages) {
-        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, null, null);
+        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, false, null, null);
     }
 
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
-        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, abortFlag, null);
+        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, false, abortFlag, null);
     }
 
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             ProgressCallback progressCallback) {
+        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, false, abortFlag, progressCallback);
+    }
+
+    // New method with image collection
+    public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
+            long endTime, ZoneId zoneId, int maxMessages, boolean collectImages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            ProgressCallback progressCallback) {
         List<String> lines = new ArrayList<>();
+        List<String> imageUrls = collectImages ? new ArrayList<>() : null;
+        List<String> imageCaptions = collectImages ? new ArrayList<>() : null;
         String firstEventId = null;
 
         long startTime = (startTimestamp > 0) ? startTimestamp
@@ -436,6 +483,8 @@ public class RoomHistoryManager {
                     String body = ev.path("content").path("body").asText(null);
                     String sender = ev.path("sender").asText(null);
                     String eventId = ev.path("event_id").asText(null);
+                    String msgtype = ev.path("content").path("msgtype").asText(null);
+
                     if (body != null && sender != null) {
                         String timestamp = Instant.ofEpochMilli(originServerTs)
                                 .atZone(zoneId)
@@ -443,6 +492,15 @@ public class RoomHistoryManager {
                         lines.add("[" + timestamp + "] <" + sender + "> " + body);
 
                         firstEventId = eventId;
+
+                        // Collect image URLs if enabled
+                        if (collectImages && "m.image".equals(msgtype)) {
+                            String imageUrl = ev.path("content").path("url").asText(null);
+                            if (imageUrl != null && !imageUrl.isEmpty()) {
+                                imageUrls.add(imageUrl);
+                                imageCaptions.add(body); // body is the caption/filename
+                            }
+                        }
 
                         // Check if we've reached the requested message count
                         if (maxMessages > 0 && lines.size() >= maxMessages) {
@@ -471,7 +529,11 @@ public class RoomHistoryManager {
             }
         }
         Collections.reverse(lines);
-        return new ChatLogsResult(lines, firstEventId);
+        if (collectImages) {
+            Collections.reverse(imageUrls);
+            Collections.reverse(imageCaptions);
+        }
+        return new ChatLogsResult(lines, firstEventId, null, imageUrls, imageCaptions);
     }
 
     /**

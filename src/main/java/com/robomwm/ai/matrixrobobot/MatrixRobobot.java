@@ -68,12 +68,15 @@ public class MatrixRobobot {
                 config, runningOperations);
         AIService aiService = new AIService(client, mapper, url, config.accessToken, config.arliApiKey,
                 config.cerebrasApiKey);
+        ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
+        VisionAIService visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
+                config.arliApiKey, historyManager, imageFetcher);
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
         TimezoneService timezoneService = new TimezoneService(mapper);
         CommandDispatcher dispatcher = new CommandDispatcher(client, mapper, url, config.accessToken,
                 config.commandRoomId, config.exportRoomId, historyManager, runningOperations, textSearchService,
-                aiService, semanticSearchService, timezoneService, config.arliApiKey);
+                aiService, visionAIService, semanticSearchService, timezoneService, config.arliApiKey);
 
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, aiService,

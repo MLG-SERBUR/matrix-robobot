@@ -23,6 +23,7 @@ public class CommandDispatcher {
     private final String exportRoomId;
     private final TextSearchService textSearchService;
     private final AIService aiService;
+    private final VisionAIService visionAIService;
     private final DebugAIService debugAIService;
     private final SemanticSearchService semanticSearchService;
     private final TimezoneService timezoneService;
@@ -49,8 +50,8 @@ public class CommandDispatcher {
     public CommandDispatcher(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
             String commandRoomId, String exportRoomId, RoomHistoryManager historyManager,
             Map<String, AtomicBoolean> runningOperations, TextSearchService textSearchService,
-            AIService aiService, SemanticSearchService semanticSearchService, TimezoneService timezoneService,
-            String arliApiKey) {
+            AIService aiService, VisionAIService visionAIService, SemanticSearchService semanticSearchService,
+            TimezoneService timezoneService, String arliApiKey) {
         this.matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         this.historyManager = historyManager;
         this.runningOperations = runningOperations;
@@ -58,6 +59,7 @@ public class CommandDispatcher {
         this.exportRoomId = exportRoomId;
         this.textSearchService = textSearchService;
         this.aiService = aiService;
+        this.visionAIService = visionAIService;
         this.debugAIService = new DebugAIService(client, mapper, homeserver, accessToken, arliApiKey);
         this.semanticSearchService = semanticSearchService;
         this.timezoneService = timezoneService;
@@ -90,17 +92,33 @@ public class CommandDispatcher {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!tldr",
                     AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
             return true;
+        } else if (trimmed.matches("!itldr(?:\\s+.*)?")) {
+            handleVisionAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!itldr",
+                    VisionAIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
+            return true;
         } else if (trimmed.matches("!longsummary(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!longsummary",
                     AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
+            return true;
+        } else if (trimmed.matches("!ilongsummary(?:\\s+.*)?")) {
+            handleVisionAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!ilongsummary",
+                    VisionAIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
         } else if (trimmed.matches("!summarylist(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summarylist",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARYLIST_PREFIX);
             return true;
+        } else if (trimmed.matches("!isummarylist(?:\\s+.*)?")) {
+            handleVisionAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummarylist",
+                    VisionAIService.Backend.AUTO, AIService.Prompts.SUMMARYLIST_PREFIX);
+            return true;
         } else if (trimmed.matches("!summary(?:\\s+.*)?")) {
             handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summary",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
+            return true;
+        } else if (trimmed.matches("!isummary(?:\\s+.*)?")) {
+            handleVisionAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummary",
+                    VisionAIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
         } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
             handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, 300, AIService.Backend.AUTO);
@@ -324,6 +342,108 @@ public class CommandDispatcher {
         new Thread(() -> {
             try {
                 aiService.queryAI(responseRoomId, exportRoomId, fHours, prevBatch, fQuestion, fEventId, fForward,
+                        zoneId, fMax, promptPrefix, abortFlag, backend);
+            } finally {
+                runningOperations.remove(sender);
+            }
+        }).start();
+    }
+
+    private void handleVisionAICommand(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
+            String exportRoomId, String commandName, VisionAIService.Backend backend, String promptPrefix) {
+
+        // Remove command name prefix
+        String args = trimmed.replaceFirst("^" + commandName + "\\s*", "").trim();
+
+        // Default values
+        int hours = -1;
+        int maxMessages = -1;
+        long startTimestamp = -1;
+        String question = null;
+
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+        if (zoneId == null)
+            return;
+
+        // Parse Args (same as handleAICommand)
+        String[] parts = args.split("\\s+", 2);
+        String firstArg = parts.length > 0 ? parts[0] : "";
+        String remaining = parts.length > 1 ? parts[1] : "";
+
+        String startEventId = null;
+        boolean forward = false;
+
+        // Check for Matrix link
+        if (firstArg.contains("/$") || firstArg.contains("/e/")) {
+            String eventId = null;
+            if (firstArg.contains("/$")) {
+                int start = firstArg.indexOf("/$") + 1;
+                int end = firstArg.indexOf("?", start);
+                if (end == -1) end = firstArg.length();
+                eventId = firstArg.substring(start, end);
+            } else if (firstArg.contains("/e/")) {
+                int start = firstArg.indexOf("/e/") + 3;
+                int end = firstArg.indexOf("/", start);
+                if (end == -1) end = firstArg.length();
+                eventId = firstArg.substring(start, end);
+            }
+
+            if (eventId != null && eventId.startsWith("$")) {
+                startEventId = eventId;
+
+                // Check if next arg is duration/limit
+                String[] subParts = remaining.split("\\s+", 2);
+                String possibleLimit = subParts.length > 0 ? subParts[0] : "";
+
+                if (possibleLimit.matches("[+-]?\\d+(h)?")) {
+                    if (possibleLimit.startsWith("+")) forward = true;
+                    String cleanLimit = possibleLimit.replace("+", "").replace("-", "");
+
+                    if (cleanLimit.endsWith("h")) {
+                        hours = Integer.parseInt(cleanLimit.replace("h", ""));
+                    } else {
+                        maxMessages = Integer.parseInt(cleanLimit);
+                    }
+                    question = subParts.length > 1 ? subParts[1].trim() : null;
+                } else {
+                    maxMessages = 100; // Default count
+                    question = remaining.trim();
+                }
+            }
+        } else if (firstArg.matches("[+-]?\\d+(h)?")) {
+            // Count/Duration mode
+            if (firstArg.startsWith("+")) forward = true;
+            String cleanArg = firstArg.replace("+", "").replace("-", "");
+
+            if (cleanArg.endsWith("h")) {
+                hours = Integer.parseInt(cleanArg.replace("h", ""));
+            } else {
+                maxMessages = Integer.parseInt(cleanArg);
+            }
+            question = remaining.trim().isEmpty() ? null : remaining.trim();
+        } else {
+            // No valid first arg? Show usage.
+            matrixClient.sendText(responseRoomId, "Usage: " + commandName + " <link|count|duration> [question]\n" +
+                    "Example: !isummary 1h what happened?\n" +
+                    "Example: !isummary 50 summarize this\n" +
+                    "Example: !isummary https://matrix.to/#/... 10 what is this about?");
+            return;
+        }
+
+        System.out.println("Received " + commandName + " command in " + roomId + " from " + sender);
+
+        AtomicBoolean abortFlag = new AtomicBoolean(false);
+        runningOperations.put(sender, abortFlag);
+
+        final int fHours = hours;
+        final int fMax = maxMessages;
+        final String fEventId = startEventId;
+        final boolean fForward = forward;
+        final String fQuestion = question;
+
+        new Thread(() -> {
+            try {
+                visionAIService.queryAI(responseRoomId, exportRoomId, fHours, prevBatch, fQuestion, fEventId, fForward,
                         zoneId, fMax, promptPrefix, abortFlag, backend);
             } finally {
                 runningOperations.remove(sender);
@@ -832,16 +952,20 @@ public class CommandDispatcher {
                 "**!autolast** - Toggle automatic DM of last message when reading export room\n\n" +
                 "**!autotldr** - Toggle automatic AI TLDR when reading export room (>100 msgs, >1h gap)\n\n" +
                 "**!summary <link or count or duration> [question]** - Condensed summary with auto-fallback (ArliAI)\n" +
+                "**!isummary <link or count or duration> [question]** - Condensed summary with images (Vision ArliAI)\n" +
                 "**!summarylist <link or count or duration> [question]** - Bullet list of tech/VR/gaming/ethics/philosophy chats with auto-fallback\n" +
-                "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI)\n"
+                "**!isummarylist <link or count or duration> [question]** - Bullet list with images (Vision ArliAI)\n" +
+                "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI)\n" +
+                "**!ilongsummary <link or count or duration> [question]** - Detailed overview with images (Vision ArliAI)\n"
                 +
                 "**!debugai <link or count or duration> [question]** - Query AI backend with a custom prompt via question or chat logs\n"
                 +
                 "**!arliai <model> <prompt>** - Query ArliAI with specific model (models: Qwen3.5-27B-Musica-v1, Qwen3.5-27B-Vivid-Durian, Qwen3.5-27B-Derestricted; fuzzy matched)\n"
                 +
-                                 "**!debugarliai <model> [params...] <prompt>** - Query ArliAI with custom API parameters (temp, top_p, rep_pen, etc.)\n"
+                                  "**!debugarliai <model> [params...] <prompt>** - Query ArliAI with custom API parameters (temp, top_p, rep_pen, etc.)\n"
                 +
-                "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n"
+                "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n" +
+                "**!itldr <link or count or duration> [question]** - Quick 15s summary with images (Vision ArliAI)\n"
                 +
                 "**!ask [question]** - Query AI backend with up to 16k tokens of history (no timestamps)\n"
                 +
