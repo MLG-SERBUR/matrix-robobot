@@ -70,7 +70,7 @@ public class MatrixRobobot {
                 config.cerebrasApiKey);
         ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
         VisionAIService visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
-                config.arliApiKey, historyManager, imageFetcher);
+                config.arliApiKey, config.cerebrasApiKey, imageFetcher);
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
         TimezoneService timezoneService = new TimezoneService(mapper);

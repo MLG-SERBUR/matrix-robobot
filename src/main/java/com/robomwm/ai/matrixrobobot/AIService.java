@@ -18,14 +18,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class AIService {
-    private final HttpClient client;
-    private final ObjectMapper mapper;
-    private final String homeserver;
-    private final String accessToken;
-    private final String arliApiKey;
-    private final String cerebrasApiKey;
-    private final RoomHistoryManager historyManager;
-    private final Random random;
+    protected final HttpClient client;
+    protected final ObjectMapper mapper;
+    protected final String homeserver;
+    protected final String accessToken;
+    protected final String arliApiKey;
+    protected final String cerebrasApiKey;
+    protected final RoomHistoryManager historyManager;
+    protected final Random random;
     public static final List<String> ARLI_MODELS = Arrays.asList(
             "Qwen3.5-27B-Derestricted"
     );
@@ -222,19 +222,23 @@ public class AIService {
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
+        return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "ArliAI", abortFlag);
+    }
+
+    protected String streamArliAIResponse(HttpRequest request, String responseRoomId, String exportRoomId, String firstEventId, String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-        java.util.concurrent.atomic.AtomicReference<String> eventIdObj = new java.util.concurrent.atomic.AtomicReference<>(null);
+        String[] eventIdHolder = new String[]{null};
 
         StringBuilder reasoning = new StringBuilder();
-        StringBuilder content = new StringBuilder();
-        AtomicLong lastUpdate = new AtomicLong(System.currentTimeMillis());
+        StringBuilder responseContent = new StringBuilder();
+        long lastUpdate = System.currentTimeMillis();
         final long startTime = System.currentTimeMillis();
 
-        AtomicInteger updateCount = new AtomicInteger(0);
+        int updateCount = 0;
         String[] clockFaces = {"🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦"};
 
         try {
-            System.out.println("Starting ArliAI streaming request...");
+            System.out.println("Starting " + aiName + " streaming request...");
             HttpResponse<java.util.stream.Stream<String>> response = client.send(request, HttpResponse.BodyHandlers.ofLines());
             
             if (response.statusCode() != 200) {
@@ -246,7 +250,7 @@ public class AIService {
                 java.util.Iterator<String> it = lines.iterator();
                 while (it.hasNext()) {
                     if (abortFlag != null && abortFlag.get()) {
-                        System.out.println("ArliAI streaming aborted by flag.");
+                        System.out.println(aiName + " streaming aborted by flag.");
                         break;
                     }
                     String line = it.next();
@@ -263,7 +267,7 @@ public class AIService {
                             if (choices.isArray() && choices.size() > 0) {
                                 JsonNode delta = choices.get(0).path("delta");
                                 if (delta.has("content")) {
-                                    content.append(delta.get("content").asText());
+                                    responseContent.append(delta.get("content").asText());
                                 } else if (delta.has("reasoning")) {
                                     reasoning.append(delta.get("reasoning").asText());
                                 } else if (delta.has("reasoning_content")) {
@@ -271,16 +275,15 @@ public class AIService {
                                 }
                                 
                                 long now = System.currentTimeMillis();
-                                int updateInterval = 10000;
-                                if ((content.length() > 0 || reasoning.length() > 0) && now - lastUpdate.get() > updateInterval) {
-                                    lastUpdate.set(now);
+                                if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
+                                    lastUpdate = now;
                                     StringBuilder streamingOutput = new StringBuilder();
                                     if (reasoning.length() > 0) {
                                         String r = trimReasoning(reasoning.toString());
                                         streamingOutput.append("> ").append(r.replace("\n", "\n> ")).append("\n\n");
                                     }
-                                    if (content.length() > 0) {
-                                        streamingOutput.append(content.toString());
+                                    if (responseContent.length() > 0) {
+                                        streamingOutput.append(responseContent.toString());
                                     }
                                     
                                     String output = streamingOutput.toString();
@@ -292,46 +295,46 @@ public class AIService {
                                     long elapsedMs = now - startTime;
                                     long elapsedSec = elapsedMs / 1000;
                                     String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
-                                    String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length] + " " + elapsedStr;
-                                    if (eventIdObj.get() == null) {
-                                        eventIdObj.set(matrixClient.sendMarkdownWithEventId(responseRoomId, output + " " + indicator));
+                                    String indicator = clockFaces[updateCount++ % clockFaces.length] + " " + elapsedStr;
+                                    if (eventIdHolder[0] == null) {
+                                        eventIdHolder[0] = matrixClient.sendMarkdownWithEventId(responseRoomId, output + " " + indicator);
                                     } else {
-                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), output + " " + indicator);
+                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], output + " " + indicator);
                                     }
                                 }
                             }
                         } catch (Exception e) {
-                            System.err.println("ArliAI Stream Parse Error: " + e.getMessage() + " | Line: " + line);
+                            System.err.println(aiName + " Stream Parse Error: " + e.getMessage() + " | Line: " + line);
                         }
                     } else if (data.contains("[DONE]")) {
-                        System.out.println("ArliAI streaming finished normally ([DONE] received).");
+                        System.out.println(aiName + " streaming finished normally ([DONE] received).");
                         break;
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("Error during ArliAI streaming call: " + e.getMessage());
+            System.err.println("Error during " + aiName + " streaming call: " + e.getMessage());
             e.printStackTrace();
-            throw new Exception("Error during ArliAI streaming: " + e.getMessage(), e);
+            throw new Exception("Error during " + aiName + " streaming: " + e.getMessage(), e);
         }
 
-        if (content.length() == 0 && reasoning.length() == 0) {
-            throw new Exception("No response received from ArliAI streaming.");
+        if (responseContent.length() == 0 && reasoning.length() == 0) {
+            throw new Exception("No response received from " + aiName + ".");
         }
 
-        System.out.println("ArliAI Final State - Content size: " + content.length() + ", Reasoning size: " + reasoning.length());
+        System.out.println(aiName + " Final State - Content size: " + responseContent.length() + ", Reasoning size: " + reasoning.length());
         
         String finalOutput;
-        if (content.toString().trim().isEmpty()) {
+        if (responseContent.toString().trim().isEmpty()) {
             if (reasoning.length() > 0) {
-                System.out.println("ArliAI: Content is empty, falling back to trimmed reasoning.");
+                System.out.println(aiName + ": Content is empty, falling back to trimmed reasoning.");
                 String trimmed = trimReasoning(reasoning.toString());
-                finalOutput = "> " + trimmed.replace("\n", "\n> ") + "\n\n**ArliAI: No final response was generated.**";
+                finalOutput = "> " + trimmed.replace("\n", "\n> ") + "\n\n**" + aiName + ": No final response was generated.**";
             } else {
-                finalOutput = "**ArliAI Error: No final response was generated.**";
+                finalOutput = "**" + aiName + " Error: No final response was generated.**";
             }
         } else {
-            finalOutput = content.toString();
+            finalOutput = responseContent.toString();
         }
 
         if (finalOutput.length() > 16000) {
@@ -339,10 +342,10 @@ public class AIService {
         }
 
         String answer = appendMessageLink(finalOutput, exportRoomId, firstEventId);
-        if (eventIdObj.get() == null) {
+        if (eventIdHolder[0] == null) {
             matrixClient.sendMarkdownWithEventId(responseRoomId, answer);
         } else {
-            matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), answer);
+            matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], answer);
         }
         return finalOutput;
     }
@@ -504,7 +507,7 @@ public class AIService {
     private static final List<String> IGNORED_USERS = List.of(
             "@bot:kitty.haus");
 
-    private String buildPrompt(String question, List<String> logs, String promptPrefix) {
+    protected String buildPrompt(String question, List<String> logs, String promptPrefix) {
         List<String> effectiveLogs = logs;
 
         // If no question is provided, filter out lines containing ignored domains
@@ -552,7 +555,7 @@ public class AIService {
         return messages;
     }
 
-    private String trimReasoning(String r) {
+    protected String trimReasoning(String r) {
         if (r == null || r.isEmpty()) return "";
         String[] lines = r.split("\n");
         List<Integer> stepIndices = new ArrayList<>();
@@ -591,7 +594,7 @@ public class AIService {
         return sb.toString().trim();
     }
 
-    private String appendMessageLink(String aiAnswer, String exportRoomId, String firstEventId) {
+    protected String appendMessageLink(String aiAnswer, String exportRoomId, String firstEventId) {
         if (firstEventId != null) {
             String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + firstEventId;
             return aiAnswer + "\n\n" + messageLink;
