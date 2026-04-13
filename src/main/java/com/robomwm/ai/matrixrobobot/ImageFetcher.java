@@ -68,13 +68,15 @@ public class ImageFetcher {
         // Convert Matrix media URL to full HTTP URL
         String fullUrl;
         if (matrixUrl.startsWith("mxc://")) {
-            // mxc://server/media_id format - media is hosted on the specified server
+            // mxc://server/media_id format
             String[] parts = matrixUrl.substring(6).split("/");
             if (parts.length == 2) {
                 String server = parts[0];
                 String mediaId = parts[1];
-                // Use the server from the mxc URL, not the bot's homeserver
-                fullUrl = "https://" + server + "/_matrix/media/r0/download/" + server + "/" + mediaId;
+                // Per Matrix spec, use client's homeserver to fetch/proxy media
+                // Use authenticated /_matrix/client/v1/media/download as per Matrix 1.11 / MSC3916
+                String base = homeserverUrl.endsWith("/") ? homeserverUrl.substring(0, homeserverUrl.length() - 1) : homeserverUrl;
+                fullUrl = base + "/_matrix/client/v1/media/download/" + server + "/" + mediaId;
             } else {
                 throw new Exception("Invalid mxc URL format: " + matrixUrl);
             }

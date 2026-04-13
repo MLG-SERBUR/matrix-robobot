@@ -55,6 +55,7 @@ public class MatrixRobobot {
 
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(300))
+                .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
         ObjectMapper mapper = new ObjectMapper();
 
