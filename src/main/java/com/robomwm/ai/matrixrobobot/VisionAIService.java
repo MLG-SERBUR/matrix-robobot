@@ -2,6 +2,9 @@ package com.robomwm.ai.matrixrobobot;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.File;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -18,9 +21,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * Vision-enhanced AI service. Pre-describes images individually via vision API calls,
  * injects text descriptions into chat logs, then delegates to parent's text-only summary.
  * This avoids blowing out context limits with base64 image data.
+ *
+ * Image descriptions are cached to a JSON file keyed by mxc:// URL to avoid redundant API calls.
  */
 public class VisionAIService extends AIService {
     private final ImageFetcher imageFetcher;
+    private static final String DESCRIPTION_CACHE_FILE = "image_description_cache.json";
 
     public VisionAIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
                            String arliApiKey, String cerebrasApiKey, ImageFetcher imageFetcher) {
@@ -36,6 +42,7 @@ public class VisionAIService extends AIService {
     /**
      * Query AI with vision support.
      * Phase 1: Describe each image individually via vision API (sequential, non-streaming).
+     *          Uses cache to skip already-described images.
      * Phase 2: Inject descriptions into chat logs, run normal text-only summary.
      */
     public void queryAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
@@ -91,6 +98,10 @@ public class VisionAIService extends AIService {
                 matrixClient.updateTextMessage(responseRoomId, statusEventId,
                         "\uD83D\uDDBC\uFE0F Describing " + imageCount + " image(s)...");
 
+                // Load description cache
+                ObjectNode cache = loadDescriptionCache();
+                int cachedCount = 0;
+
                 List<String> imageDescriptions = new ArrayList<>();
                 for (int i = 0; i < imageCount; i++) {
                     if (abortFlag != null && abortFlag.get()) return;
@@ -99,20 +110,38 @@ public class VisionAIService extends AIService {
                     String caption = (history.imageCaptions != null && i < history.imageCaptions.size())
                             ? history.imageCaptions.get(i) : "image";
 
+                    // Check cache first
+                    String cachedDescription = cache.has(imageUrl) ? cache.get(imageUrl).asText(null) : null;
+                    if (cachedDescription != null && !cachedDescription.isEmpty()) {
+                        System.out.println("Cache hit for image " + (i + 1) + "/" + imageCount + ": " + imageUrl);
+                        imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 " + cachedDescription + "]");
+                        cachedCount++;
+                        continue;
+                    }
+
                     matrixClient.updateTextMessage(responseRoomId, statusEventId,
-                            "\uD83D\uDDBC\uFE0F Describing image " + (i + 1) + "/" + imageCount + ": " + caption);
+                            "\uD83D\uDDBC\uFE0F Describing image " + (i + 1) + "/" + imageCount
+                            + " (" + cachedCount + " cached): " + caption);
 
                     String description = describeImage(imageUrl, caption);
                     if (description != null && !description.isEmpty()) {
                         imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 " + description + "]");
+                        // Store in cache
+                        cache.put(imageUrl, description);
                     } else {
+                        // describeImage logs the error and throws on fatal errors
+                        // If we got here with null, it was a non-fatal skip
                         imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 (could not describe)]");
                     }
                 }
 
+                // Save updated cache
+                saveDescriptionCache(cache);
+
                 // Inject image descriptions at end of chat logs
                 history.logs.addAll(imageDescriptions);
-                System.out.println("Injected " + imageDescriptions.size() + " image descriptions into chat logs");
+                System.out.println("Injected " + imageDescriptions.size() + " image descriptions into chat logs"
+                        + " (" + cachedCount + " from cache, " + (imageDescriptions.size() - cachedCount) + " newly described)");
             }
 
             // Phase 2: Run normal text-only summary with enriched logs
@@ -128,67 +157,100 @@ public class VisionAIService extends AIService {
 
     /**
      * Describe a single image via ArliAI vision API. Sequential, non-streaming.
-     * Returns text description or null on failure.
+     * Returns text description or null on non-fatal failure.
+     * Throws Exception on fatal API errors (403, rate limit, etc.) to abort the entire operation.
      */
-    private String describeImage(String mxcUrl, String caption) {
-        try {
-            // Fetch and encode single image
-            List<String> encoded = imageFetcher.fetchAndEncodeImages(List.of(mxcUrl));
-            if (encoded.isEmpty()) {
-                System.out.println("Failed to fetch image: " + mxcUrl);
-                return null;
+    private String describeImage(String mxcUrl, String caption) throws Exception {
+        // Fetch and encode single image
+        System.out.println("Fetching image from Matrix: " + mxcUrl);
+        List<String> encoded = imageFetcher.fetchAndEncodeImages(List.of(mxcUrl));
+        if (encoded.isEmpty()) {
+            System.out.println("Failed to fetch image from Matrix: " + mxcUrl);
+            return null;
+        }
+
+        String base64Image = encoded.get(0);
+        int base64Len = base64Image.length();
+        System.out.println("Image fetched and encoded: " + mxcUrl + " (" + (base64Len / 1024) + "KB base64)");
+
+        // Build vision content: text prompt + single image
+        String prompt = "Briefly describe this image in 1-2 sentences. Context: it was shared in a chat with caption '" + caption + "'.";
+        List<Map<String, Object>> content = VisionPromptBuilder.buildVisionContent(prompt, List.of(base64Image));
+
+        List<Map<String, Object>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", "You describe images concisely."));
+        messages.add(Map.of("role", "user", "content", content));
+
+        Map<String, Object> payload = Map.of(
+                "model", "Qwen3.5-27B-Derestricted",
+                "messages", messages,
+                "stream", false,
+                "max_completion_tokens", 200
+        );
+        String jsonPayload = mapper.writeValueAsString(payload);
+
+        System.out.println("Sending image to ArliAI vision API: " + mxcUrl + " (caption: " + caption + ")");
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.arliai.com/v1/chat/completions"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + arliApiKey)
+                .timeout(Duration.ofSeconds(120))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            String errorBody = response.body();
+            System.err.println("Image description API error " + response.statusCode() + ": " + errorBody);
+            // Fatal: throw to abort entire vision operation
+            throw new Exception("ArliAI vision API error " + response.statusCode() + ": " + errorBody);
+        }
+
+        System.out.println("ArliAI vision API responded 200 for: " + mxcUrl);
+
+        JsonNode root = mapper.readTree(response.body());
+        JsonNode choices = root.path("choices");
+        if (choices.isArray() && choices.size() > 0) {
+            String text = choices.get(0).path("message").path("content").asText(null);
+            // Strip thinking tags if present (Qwen reasoning models)
+            if (text != null) {
+                text = text.replaceAll("(?s)<think>.*?</think>", "").trim();
             }
+            System.out.println("Described image " + caption + ": "
+                    + (text != null ? text.substring(0, Math.min(100, text.length())) : "null"));
+            return text;
+        }
 
-            String base64Image = encoded.get(0);
+        System.out.println("No choices in ArliAI response for: " + mxcUrl);
+        return null;
+    }
 
-            // Build vision content: text prompt + single image
-            String prompt = "Briefly describe this image in 1-2 sentences. Context: it was shared in a chat with caption '" + caption + "'.";
-            List<Map<String, Object>> content = VisionPromptBuilder.buildVisionContent(prompt, List.of(base64Image));
+    // --- Description Cache ---
 
-            List<Map<String, Object>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "system", "content", "You describe images concisely."));
-            messages.add(Map.of("role", "user", "content", content));
-
-            Map<String, Object> payload = Map.of(
-                    "model", "Qwen3.5-27B-Derestricted",
-                    "messages", messages,
-                    "stream", false,
-                    "max_completion_tokens", 200
-            );
-            String jsonPayload = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.arliai.com/v1/chat/completions"))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + arliApiKey)
-                    .timeout(Duration.ofSeconds(120))
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                    .build();
-
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() != 200) {
-                System.err.println("Image description API error " + response.statusCode() + ": " + response.body());
-                return null;
-            }
-
-            JsonNode root = mapper.readTree(response.body());
-            JsonNode choices = root.path("choices");
-            if (choices.isArray() && choices.size() > 0) {
-                String text = choices.get(0).path("message").path("content").asText(null);
-                // Strip thinking tags if present (Qwen reasoning models)
-                if (text != null) {
-                    text = text.replaceAll("(?s)<think>.*?</think>", "").trim();
+    private ObjectNode loadDescriptionCache() {
+        File cacheFile = new File(DESCRIPTION_CACHE_FILE);
+        if (cacheFile.exists()) {
+            try {
+                JsonNode node = mapper.readTree(cacheFile);
+                if (node.isObject()) {
+                    System.out.println("Loaded image description cache: " + node.size() + " entries");
+                    return (ObjectNode) node;
                 }
-                System.out.println("Described image " + caption + ": "
-                        + (text != null ? text.substring(0, Math.min(100, text.length())) : "null"));
-                return text;
+            } catch (IOException e) {
+                System.err.println("Failed to load description cache, starting fresh: " + e.getMessage());
             }
+        }
+        return mapper.createObjectNode();
+    }
 
-            return null;
-        } catch (Exception e) {
-            System.err.println("Error describing image " + mxcUrl + ": " + e.getMessage());
-            return null;
+    private void saveDescriptionCache(ObjectNode cache) {
+        try {
+            mapper.writerWithDefaultPrettyPrinter().writeValue(new File(DESCRIPTION_CACHE_FILE), cache);
+            System.out.println("Saved image description cache: " + cache.size() + " entries");
+        } catch (IOException e) {
+            System.err.println("Failed to save description cache: " + e.getMessage());
         }
     }
 }
