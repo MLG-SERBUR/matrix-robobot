@@ -462,6 +462,7 @@ public class DebugAIService {
         StringBuilder reasoning = new StringBuilder();
         StringBuilder content = new StringBuilder();
         AtomicLong lastUpdate = new AtomicLong(System.currentTimeMillis());
+        final long startTime = System.currentTimeMillis();
 
         AtomicInteger updateCount = new AtomicInteger(0);
         String[] clockFaces = {"🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦"};
@@ -520,11 +521,15 @@ public class DebugAIService {
                                         output = output.substring(0, 15900) + "... [TRUNCATED]";
                                     }
                                     
-                                    String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length];
+                                    // Append elapsed thinking time to clock emoji (e.g. 🕒 1m12s)
+                                    long elapsedMs = now - startTime;
+                                    long elapsedSec = elapsedMs / 1000;
+                                    String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
+                                    String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length] + " " + elapsedStr;
                                     if (eventIdObj.get() == null) {
-                                        eventIdObj.set(matrixClient.sendMarkdownWithEventId(responseRoomId, output + indicator));
+                                        eventIdObj.set(matrixClient.sendMarkdownWithEventId(responseRoomId, output + " " + indicator));
                                     } else {
-                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), output + indicator);
+                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), output + " " + indicator);
                                     }
                                 }
                             }

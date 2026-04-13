@@ -103,7 +103,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, 300, statusEventId);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, 900, statusEventId);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -229,6 +229,7 @@ public class AIService {
         StringBuilder reasoning = new StringBuilder();
         StringBuilder content = new StringBuilder();
         AtomicLong lastUpdate = new AtomicLong(System.currentTimeMillis());
+        final long startTime = System.currentTimeMillis();
 
         AtomicInteger updateCount = new AtomicInteger(0);
         String[] clockFaces = {"🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦"};
@@ -288,11 +289,15 @@ public class AIService {
                                         output = output.substring(0, 15900) + "... [TRUNCATED]";
                                     }
                                     
-                                    String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length];
+                                    // Append elapsed thinking time to clock emoji (e.g. 🕒 1m12s)
+                                    long elapsedMs = now - startTime;
+                                    long elapsedSec = elapsedMs / 1000;
+                                    String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
+                                    String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length] + " " + elapsedStr;
                                     if (eventIdObj.get() == null) {
-                                        eventIdObj.set(matrixClient.sendMarkdownWithEventId(responseRoomId, output + indicator));
+                                        eventIdObj.set(matrixClient.sendMarkdownWithEventId(responseRoomId, output + " " + indicator));
                                     } else {
-                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), output + indicator);
+                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), output + " " + indicator);
                                     }
                                 }
                             }
@@ -385,7 +390,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, 300, statusEventId);
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, 900, statusEventId);
 
         } catch (Exception e) {
             e.printStackTrace();
