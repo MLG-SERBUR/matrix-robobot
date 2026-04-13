@@ -272,7 +272,7 @@ public class AIService {
                                 }
                                 
                                 long now = System.currentTimeMillis();
-                                int updateInterval = "Qwen3.5-27B-Vivid-Durian".equals(model) ? 10000 : 5000;
+                                int updateInterval = 10000;
                                 if ((content.length() > 0 || reasoning.length() > 0) && now - lastUpdate.get() > updateInterval) {
                                     lastUpdate.set(now);
                                     StringBuilder streamingOutput = new StringBuilder();
