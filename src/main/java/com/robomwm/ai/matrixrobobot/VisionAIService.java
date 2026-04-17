@@ -178,7 +178,7 @@ public class VisionAIService extends AIService {
         List<Map<String, Object>> content = VisionPromptBuilder.buildVisionContent(prompt, List.of(base64Image));
 
         List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content", "You describe images concisely. Respond DIRECTLY with the final answer. Do NOT explain your steps. Do NOT output a <think> block or use any reasoning tags."));
+        messages.add(Map.of("role", "system", "content", "You describe images concisely. Do not reason or think, start your output with <think></think>"));
         messages.add(Map.of("role", "user", "content", content));
 
         Map<String, Object> payload = Map.of(
@@ -209,6 +209,7 @@ public class VisionAIService extends AIService {
         }
 
         System.out.println("ArliAI vision API responded 200 for: " + mxcUrl);
+        System.out.println("Response body: " + response.body());
 
         JsonNode root = mapper.readTree(response.body());
         JsonNode choices = root.path("choices");
