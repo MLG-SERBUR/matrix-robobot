@@ -178,7 +178,7 @@ public class VisionAIService extends AIService {
         List<Map<String, Object>> content = VisionPromptBuilder.buildVisionContent(prompt, List.of(base64Image));
 
         List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content", "You describe images concisely."));
+        messages.add(Map.of("role", "system", "content", "You describe images concisely. Respond DIRECTLY with the final answer. Do NOT explain your steps. Do NOT output a <think> block or use any reasoning tags."));
         messages.add(Map.of("role", "user", "content", content));
 
         Map<String, Object> payload = Map.of(
