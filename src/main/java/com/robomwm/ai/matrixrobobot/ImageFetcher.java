@@ -69,7 +69,7 @@ public class ImageFetcher {
     }
 
     private String fetchImageAsBase64(String matrixUrl) throws Exception {
-        // Convert Matrix media URL to full HTTP URL
+        // Convert Matrix media URL to thumbnail HTTP URL
         String fullUrl;
         if (matrixUrl.startsWith("mxc://")) {
             // mxc://server/media_id format
@@ -77,17 +77,23 @@ public class ImageFetcher {
             if (parts.length == 2) {
                 String server = parts[0];
                 String mediaId = parts[1];
-                // Per Matrix spec, use client's homeserver to fetch/proxy media
-                // Use authenticated /_matrix/client/v1/media/download as per Matrix 1.11 / MSC3916
+                // Per Matrix spec, use media API for thumbnails
+                // Use /_matrix/media/v3/thumbnail as per Matrix spec
                 String base = homeserverUrl.endsWith("/") ? homeserverUrl.substring(0, homeserverUrl.length() - 1) : homeserverUrl;
-                fullUrl = base + "/_matrix/client/v1/media/download/" + server + "/" + mediaId;
+                fullUrl = base + "/_matrix/media/v3/thumbnail/" + server + "/" + mediaId + "?width=512&height=512&method=scale";
             } else {
                 throw new Exception("Invalid mxc URL format: " + matrixUrl);
             }
         } else {
-            // Assume it's already a full URL
-            fullUrl = matrixUrl;
+            // Assume it's already a full URL (append thumbnail parameters if not present)
+            if (matrixUrl.contains("thumbnail")) {
+                fullUrl = matrixUrl;
+            } else {
+                fullUrl = matrixUrl + (matrixUrl.contains("?") ? "&" : "?") + "width=512&height=512&method=scale";
+            }
         }
+
+        System.out.println("Requesting image from URL: " + fullUrl);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(fullUrl))
@@ -103,6 +109,9 @@ public class ImageFetcher {
         }
 
         byte[] imageData = response.body();
+        String contentType = response.headers().firstValue("content-type").orElse("unknown");
+        System.out.println("Received image: size=" + imageData.length + " bytes, content-type=" + contentType);
+
         if (imageData.length > MAX_IMAGE_SIZE) {
             System.out.println("Skipping image " + matrixUrl + " - size " + imageData.length + " exceeds limit " + MAX_IMAGE_SIZE);
             return null;
