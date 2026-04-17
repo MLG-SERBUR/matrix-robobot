@@ -148,27 +148,28 @@ public class AIService {
             boolean tryCerebras = preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS;
 
             boolean msgEdited = false;
+            String arliErrorMsg = null;
 
             if (tryArli) {
                 try {
                     callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag);
                     return; // Success
                 } catch (Exception e) {
-                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                    System.out.println("ArliAI Error: " + errorMsg);
+                    arliErrorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                    System.out.println("ArliAI Error: " + arliErrorMsg);
 
-                    boolean is403 = errorMsg.contains("Status: 403");
-                    boolean isContextExceeded = errorMsg.contains("exceeded the maximum context length");
+                    boolean is403 = arliErrorMsg.contains("Status: 403");
+                    boolean isContextExceeded = arliErrorMsg.contains("exceeded the maximum context length");
 
                     if (is403 && isContextExceeded) {
                         if (abortFlag != null && abortFlag.get()) return;
-                        String contextInfo = extractContextInfo(errorMsg);
+                        String contextInfo = extractContextInfo(arliErrorMsg);
                         matrixClient.updateTextMessage(responseRoomId, eventId,
                                 "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ". Querying Cerebras (" + cerebrasModel + ") with " + queryDescription + questionPart);
                         msgEdited = true;
                     } else {
                         if (abortFlag != null && abortFlag.get()) return;
-                        matrixClient.sendText(responseRoomId, "ArliAI (" + arliModel + ") failed: " + errorMsg);
+                        matrixClient.sendText(responseRoomId, "ArliAI (" + arliModel + ") failed: " + arliErrorMsg);
                         if (is403) return; // Don't fallback on other 403 errors
                     }
 
@@ -178,7 +179,9 @@ public class AIService {
 
             if (abortFlag != null && abortFlag.get()) return;
 
-            if (tryCerebras) {
+            if (tryCerebras && cerebrasApiKey != null && !cerebrasApiKey.isEmpty()) {
+                if (abortFlag != null && abortFlag.get()) return;
+
                 if (preferredBackend == Backend.AUTO && !eventId.isEmpty() && !msgEdited) {
                     if (abortFlag != null && abortFlag.get()) return;
                     matrixClient.sendText(responseRoomId, "Querying Cerebras (" + cerebrasModel + ")...");
@@ -191,6 +194,9 @@ public class AIService {
                 } catch (Exception e) {
                     matrixClient.sendMarkdown(responseRoomId, "Cerebras AI (" + cerebrasModel + ") failed: " + e.getMessage());
                 }
+            } else if (arliErrorMsg != null) {
+                // ArliAI failed and Cerebras is not available (e.g., VisionAI), send ArliAI error
+                matrixClient.sendMarkdown(responseRoomId, "Arli AI (" + arliModel + ") failed: " + arliErrorMsg);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -198,7 +204,7 @@ public class AIService {
         }
     }
 
-    private String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
+    protected String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");
@@ -493,7 +499,7 @@ public class AIService {
         }
     }
 
-    private String getRandomModel(List<String> models) {
+    protected String getRandomModel(List<String> models) {
         if (models == null || models.isEmpty()) {
             return "unknown-model";
         }
