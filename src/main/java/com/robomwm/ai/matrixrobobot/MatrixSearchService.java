@@ -188,7 +188,10 @@ public class MatrixSearchService {
 
         Map<String, Object> roomEvents = new HashMap<>();
         roomEvents.put("search_term", query);
-        roomEvents.put("keys", List.of("content.body", "sender"));
+        // Matrix search treats multiple keys as an AND clause, so including both
+        // "content.body" and "sender" can unintentionally filter out all message
+        // hits unless the query also appears in the sender MXID.
+        roomEvents.put("keys", List.of("content.body"));
         roomEvents.put("order_by", "recent");
         roomEvents.put("limit", 25);
 
