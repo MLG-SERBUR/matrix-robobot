@@ -647,9 +647,15 @@ public class CommandDispatcher {
 
     private void handleMatrixSearch(String trimmed, String roomId, String sender, String responseRoomId,
             String searchRoomId) {
-        Matcher matcher = Pattern.compile("!search\\s+(.+)").matcher(trimmed);
+        Matcher matcher = Pattern.compile("!search\\s+(?:(\\d+)([dh])\\s+)?(.+)").matcher(trimmed);
         if (matcher.matches()) {
-            String query = matcher.group(1).trim();
+            int hours = -1;
+            if (matcher.group(1) != null && matcher.group(2) != null) {
+                int duration = Integer.parseInt(matcher.group(1));
+                String unit = matcher.group(2);
+                hours = unit.equals("d") ? duration * 24 : duration;
+            }
+            String query = matcher.group(3).trim();
 
             ZoneId zoneId = resolveZoneId(sender, responseRoomId);
             if (zoneId == null)
@@ -659,9 +665,11 @@ public class CommandDispatcher {
             runningOperations.put(sender, abortFlag);
 
             System.out.println("Received Matrix search command in " + roomId + " from " + sender);
+            final int searchHours = hours;
             new Thread(() -> {
                 try {
-                    matrixSearchService.performMatrixSearch(roomId, sender, responseRoomId, searchRoomId, query, zoneId, abortFlag);
+                    matrixSearchService.performMatrixSearch(roomId, sender, responseRoomId, searchRoomId, query,
+                            searchHours, zoneId, abortFlag);
                 } finally {
                     runningOperations.remove(sender);
                 }
@@ -971,7 +979,7 @@ public class CommandDispatcher {
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!aisearch <hours>h <query>** - AI-powered agentic search for files, images, videos, or conversations (uses ArliAI)\n\n" +
-                "**!search <query>** - Matrix protocol native search using server-side search\n\n" +
+                "**!search [<hours>h|<days>d] <query>** - Matrix protocol native search (optionally limit lookback window)\n\n" +
                 "**!grep, !grep-slow, !textsearch, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
                 "**!abort** - Abort currently running operations";
         matrixClient.sendMarkdown(responseRoomId, helpText);

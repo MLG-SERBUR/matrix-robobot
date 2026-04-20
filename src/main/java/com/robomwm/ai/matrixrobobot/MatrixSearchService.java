@@ -45,9 +45,13 @@ public class MatrixSearchService {
      * Perform a Matrix native search using the server's search API
      */
     public void performMatrixSearch(String roomId, String sender, String responseRoomId, String searchRoomId,
-            String query, ZoneId zoneId, AtomicBoolean abortFlag) {
+            String query, int lookbackHours, ZoneId zoneId, AtomicBoolean abortFlag) {
         try {
-            String initialMessage = "Searching Matrix for: \"" + query + "\" in " + searchRoomId + "...";
+            long cutoffTimestampMs = lookbackHours > 0
+                    ? java.time.Instant.now().minus(java.time.Duration.ofHours(lookbackHours)).toEpochMilli()
+                    : -1;
+            String lookbackSuffix = lookbackHours > 0 ? " (last " + lookbackHours + "h)" : "";
+            String initialMessage = "Searching Matrix for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + "...";
             String eventMessageId = matrixClient.sendTextWithEventId(responseRoomId, initialMessage);
             String originalEventId = eventMessageId;
 
@@ -58,7 +62,7 @@ public class MatrixSearchService {
             System.out.println("Starting Matrix search for '" + query + "' in room " + searchRoomId);
             boolean usedTermFallback = false;
             boolean searchFailed = fetchSearchResults(searchRoomId, query, sender, responseRoomId, originalEventId,
-                    abortFlag, hits, seenEventIds, maxResults);
+                    abortFlag, hits, seenEventIds, maxResults, cutoffTimestampMs);
             if (searchFailed || abortFlag.get()) {
                 return;
             }
@@ -74,7 +78,7 @@ public class MatrixSearchService {
                             break;
                         }
                         searchFailed = fetchSearchResults(searchRoomId, token, sender, responseRoomId, originalEventId,
-                                abortFlag, hits, seenEventIds, maxResults);
+                                abortFlag, hits, seenEventIds, maxResults, cutoffTimestampMs);
                         if (searchFailed || abortFlag.get()) {
                             return;
                         }
@@ -91,14 +95,14 @@ public class MatrixSearchService {
 
             if (hits.isEmpty()) {
                 matrixClient.updateTextMessage(responseRoomId, originalEventId,
-                        "No Matrix search results found for: \"" + query + "\" in " + searchRoomId + ".");
+                        "No Matrix search results found for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + ".");
                 return;
             }
 
             // Final update
             StringBuilder finalMsg = new StringBuilder();
             finalMsg.append("Matrix search results for \"").append(query).append("\" in ").append(searchRoomId)
-                    .append(".\n");
+                    .append(lookbackSuffix).append(".\n");
             finalMsg.append(hits.size()).append(" matches.\n");
             if (usedTermFallback) {
                 finalMsg.append("No exact multi-term matches were found; showing matches for individual terms.\n");
@@ -125,7 +129,7 @@ public class MatrixSearchService {
 
     private boolean fetchSearchResults(String searchRoomId, String query, String sender, String responseRoomId,
             String originalEventId, AtomicBoolean abortFlag, List<SearchHit> hits, Set<String> seenEventIds,
-            int maxResults) throws Exception {
+            int maxResults, long cutoffTimestampMs) throws Exception {
         String nextBatch = null;
         int iteration = 0;
         int maxIterations = 5; // Prevent infinite loops
@@ -175,6 +179,7 @@ public class MatrixSearchService {
             }
 
             int addedCount = 0;
+            boolean reachedCutoff = false;
             for (JsonNode result : resultsArray) {
                 if (abortFlag.get()) {
                     System.out.println("Matrix search aborted by user: " + sender);
@@ -192,6 +197,11 @@ public class MatrixSearchService {
                 long originServerTs = resultObj.path("origin_server_ts").asLong(0);
                 String body = resultObj.path("content").path("body").asText(null);
 
+                if (cutoffTimestampMs > 0 && originServerTs > 0 && originServerTs < cutoffTimestampMs) {
+                    reachedCutoff = true;
+                    break;
+                }
+
                 if (eventId != null && eventSender != null && body != null && seenEventIds.add(eventId)) {
                     hits.add(new SearchHit(eventId, eventSender, body, originServerTs));
                     addedCount++;
@@ -203,6 +213,10 @@ public class MatrixSearchService {
 
             if (addedCount == 0) {
                 System.out.println("No new results in this iteration, exiting search loop");
+                break;
+            }
+            if (reachedCutoff) {
+                System.out.println("Reached lookback cutoff for query '" + query + "', exiting search loop");
                 break;
             }
         } while (nextBatch != null && hits.size() < maxResults && iteration < maxIterations);
