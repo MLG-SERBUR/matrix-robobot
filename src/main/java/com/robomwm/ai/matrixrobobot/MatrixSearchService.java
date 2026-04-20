@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -50,111 +51,45 @@ public class MatrixSearchService {
             String eventMessageId = matrixClient.sendTextWithEventId(responseRoomId, initialMessage);
             String originalEventId = eventMessageId;
 
-            List<String> results = new ArrayList<>();
-            List<String> eventIds = new ArrayList<>();
+            List<SearchHit> hits = new ArrayList<>();
             Set<String> seenEventIds = new HashSet<>();
             int maxResults = 25;
-            String nextBatch = null;
-            int iteration = 0;
-            int maxIterations = 5; // Prevent infinite loops
 
             System.out.println("Starting Matrix search for '" + query + "' in room " + searchRoomId);
+            boolean usedTermFallback = false;
+            boolean searchFailed = fetchSearchResults(searchRoomId, query, sender, responseRoomId, originalEventId,
+                    abortFlag, hits, seenEventIds, maxResults);
+            if (searchFailed || abortFlag.get()) {
+                return;
+            }
 
-            do {
-                iteration++;
-                System.out.println("Matrix search iteration " + iteration + ", results so far: " + results.size() + ", nextBatch: " + nextBatch);
-                
-                if (abortFlag.get()) {
-                    System.out.println("Matrix search aborted by user: " + sender);
-                    matrixClient.updateTextMessage(responseRoomId, originalEventId, "Matrix search aborted.");
-                    return;
-                }
-
-                // Build the search request body
-                Map<String, Object> searchBody = buildSearchRequest(searchRoomId, query, nextBatch);
-                String json = mapper.writeValueAsString(searchBody);
-
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(homeserverUrl + "/_matrix/client/v3/search"))
-                        .header("Authorization", "Bearer " + accessToken)
-                        .header("Content-Type", "application/json")
-                        .timeout(java.time.Duration.ofSeconds(30)) // Reduced timeout
-                        .POST(HttpRequest.BodyPublishers.ofString(json))
-                        .build();
-
-                System.out.println("Sending Matrix search request...");
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                System.out.println("Matrix search response status: " + response.statusCode());
-
-                if (response.statusCode() != 200) {
-                    System.out.println("Matrix search failed: " + response.statusCode() + " - " + response.body());
-                    matrixClient.updateTextMessage(responseRoomId, originalEventId,
-                            "Matrix search failed with status: " + response.statusCode());
-                    return;
-                }
-
-                JsonNode root = mapper.readTree(response.body());
-                JsonNode searchCategories = root.path("search_categories");
-                JsonNode roomEvents = searchCategories.path("room_events");
-                JsonNode resultsArray = roomEvents.path("results");
-
-                System.out.println("Matrix search returned " + resultsArray.size() + " results in this batch");
-
-                if (!resultsArray.isArray() || resultsArray.size() == 0) {
-                    System.out.println("No more results, exiting search loop");
-                    break;
-                }
-
-                int addedCount = 0;
-                for (JsonNode result : resultsArray) {
-                    if (abortFlag.get()) {
-                        System.out.println("Matrix search aborted by user: " + sender);
-                        return;
-                    }
-
-                    if (results.size() >= maxResults) {
-                        break;
-                    }
-
-                    JsonNode resultObj = result.path("result");
-                    String eventId = resultObj.path("event_id").asText(null);
-                    String eventSender = resultObj.path("sender").asText(null);
-                    long originServerTs = resultObj.path("origin_server_ts").asLong(0);
-                    String body = resultObj.path("content").path("body").asText(null);
-
-                    if (eventId != null && eventSender != null && body != null) {
-                        // Skip duplicate events (Matrix spec recommends deduplication by event ID)
-                        if (!seenEventIds.add(eventId)) {
-                            continue;
+            if (hits.isEmpty() && query.contains(" ")) {
+                List<String> tokens = tokenizeQuery(query);
+                if (tokens.size() > 1) {
+                    usedTermFallback = true;
+                    System.out.println("No exact Matrix search hits for '" + query
+                            + "', retrying with individual query terms: " + tokens);
+                    for (String token : tokens) {
+                        if (hits.size() >= maxResults || abortFlag.get()) {
+                            break;
                         }
-                        
-                        String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
-                                .atZone(zoneId)
-                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                        String formattedResult = "[" + timestamp + "] <" + eventSender + "> " + body;
-
-                        results.add(formattedResult);
-                        eventIds.add(eventId);
-                        addedCount++;
+                        searchFailed = fetchSearchResults(searchRoomId, token, sender, responseRoomId, originalEventId,
+                                abortFlag, hits, seenEventIds, maxResults);
+                        if (searchFailed || abortFlag.get()) {
+                            return;
+                        }
                     }
                 }
-                
-                System.out.println("Added " + addedCount + " new unique results in this iteration");
+            }
 
-                // Check for next batch
-                nextBatch = roomEvents.path("next_batch").asText(null);
-                
-                // Break if we got no new results in this iteration (avoids infinite loops)
-                if (addedCount == 0) {
-                    System.out.println("No new results in this iteration, exiting search loop");
-                    break;
-                }
+            hits.sort(Comparator.comparingLong(SearchHit::originServerTs).reversed());
+            if (hits.size() > maxResults) {
+                hits = new ArrayList<>(hits.subList(0, maxResults));
+            }
 
-            } while (nextBatch != null && results.size() < maxResults && iteration < maxIterations);
-            
-            System.out.println("Matrix search completed with " + results.size() + " total results");
+            System.out.println("Matrix search completed with " + hits.size() + " total results");
 
-            if (results.isEmpty()) {
+            if (hits.isEmpty()) {
                 matrixClient.updateTextMessage(responseRoomId, originalEventId,
                         "No Matrix search results found for: \"" + query + "\" in " + searchRoomId + ".");
                 return;
@@ -164,11 +99,19 @@ public class MatrixSearchService {
             StringBuilder finalMsg = new StringBuilder();
             finalMsg.append("Matrix search results for \"").append(query).append("\" in ").append(searchRoomId)
                     .append(".\n");
-            finalMsg.append(results.size()).append(" matches.\n\n");
+            finalMsg.append(hits.size()).append(" matches.\n");
+            if (usedTermFallback) {
+                finalMsg.append("No exact multi-term matches were found; showing matches for individual terms.\n");
+            }
+            finalMsg.append("\n");
 
-            for (int i = 0; i < results.size(); i++) {
-                finalMsg.append(results.get(i)).append(" ");
-                String messageLink = "https://matrix.to/#/" + searchRoomId + "/" + eventIds.get(i);
+            for (SearchHit hit : hits) {
+                String timestamp = java.time.Instant.ofEpochMilli(hit.originServerTs())
+                        .atZone(zoneId)
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                finalMsg.append("[").append(timestamp).append("] <").append(hit.sender()).append("> ")
+                        .append(hit.body()).append(" ");
+                String messageLink = "https://matrix.to/#/" + searchRoomId + "/" + hit.eventId();
                 finalMsg.append(messageLink).append("\n");
             }
 
@@ -178,6 +121,108 @@ public class MatrixSearchService {
             System.out.println("Failed to perform Matrix search: " + e.getMessage());
             matrixClient.sendText(responseRoomId, "Error performing Matrix search: " + e.getMessage());
         }
+    }
+
+    private boolean fetchSearchResults(String searchRoomId, String query, String sender, String responseRoomId,
+            String originalEventId, AtomicBoolean abortFlag, List<SearchHit> hits, Set<String> seenEventIds,
+            int maxResults) throws Exception {
+        String nextBatch = null;
+        int iteration = 0;
+        int maxIterations = 5; // Prevent infinite loops
+
+        do {
+            iteration++;
+            System.out.println("Matrix search iteration " + iteration + " for query '" + query + "', results so far: "
+                    + hits.size() + ", nextBatch: " + nextBatch);
+
+            if (abortFlag.get()) {
+                System.out.println("Matrix search aborted by user: " + sender);
+                matrixClient.updateTextMessage(responseRoomId, originalEventId, "Matrix search aborted.");
+                return true;
+            }
+
+            Map<String, Object> searchBody = buildSearchRequest(searchRoomId, query, nextBatch);
+            String json = mapper.writeValueAsString(searchBody);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(homeserverUrl + "/_matrix/client/v3/search"))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Content-Type", "application/json")
+                    .timeout(java.time.Duration.ofSeconds(30))
+                    .POST(HttpRequest.BodyPublishers.ofString(json))
+                    .build();
+
+            System.out.println("Sending Matrix search request...");
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            System.out.println("Matrix search response status: " + response.statusCode());
+
+            if (response.statusCode() != 200) {
+                System.out.println("Matrix search failed: " + response.statusCode() + " - " + response.body());
+                matrixClient.updateTextMessage(responseRoomId, originalEventId,
+                        "Matrix search failed with status: " + response.statusCode());
+                return true;
+            }
+
+            JsonNode root = mapper.readTree(response.body());
+            JsonNode roomEvents = root.path("search_categories").path("room_events");
+            JsonNode resultsArray = roomEvents.path("results");
+
+            System.out.println("Matrix search returned " + resultsArray.size() + " results in this batch");
+
+            if (!resultsArray.isArray() || resultsArray.size() == 0) {
+                System.out.println("No more results, exiting search loop");
+                break;
+            }
+
+            int addedCount = 0;
+            for (JsonNode result : resultsArray) {
+                if (abortFlag.get()) {
+                    System.out.println("Matrix search aborted by user: " + sender);
+                    matrixClient.updateTextMessage(responseRoomId, originalEventId, "Matrix search aborted.");
+                    return true;
+                }
+
+                if (hits.size() >= maxResults) {
+                    break;
+                }
+
+                JsonNode resultObj = result.path("result");
+                String eventId = resultObj.path("event_id").asText(null);
+                String eventSender = resultObj.path("sender").asText(null);
+                long originServerTs = resultObj.path("origin_server_ts").asLong(0);
+                String body = resultObj.path("content").path("body").asText(null);
+
+                if (eventId != null && eventSender != null && body != null && seenEventIds.add(eventId)) {
+                    hits.add(new SearchHit(eventId, eventSender, body, originServerTs));
+                    addedCount++;
+                }
+            }
+
+            System.out.println("Added " + addedCount + " new unique results in this iteration");
+            nextBatch = roomEvents.path("next_batch").asText(null);
+
+            if (addedCount == 0) {
+                System.out.println("No new results in this iteration, exiting search loop");
+                break;
+            }
+        } while (nextBatch != null && hits.size() < maxResults && iteration < maxIterations);
+
+        return false;
+    }
+
+    private List<String> tokenizeQuery(String query) {
+        String[] rawTokens = query.toLowerCase().split("\\s+");
+        List<String> tokens = new ArrayList<>();
+        for (String token : rawTokens) {
+            String cleaned = token.replaceAll("^[^\\p{Alnum}]+|[^\\p{Alnum}]+$", "");
+            if (cleaned.length() >= 2 && !tokens.contains(cleaned)) {
+                tokens.add(cleaned);
+            }
+        }
+        return tokens;
+    }
+
+    private record SearchHit(String eventId, String sender, String body, long originServerTs) {
     }
 
     /**
