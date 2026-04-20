@@ -77,10 +77,10 @@ public class ImageFetcher {
             if (parts.length == 2) {
                 String server = parts[0];
                 String mediaId = parts[1];
-                // Per Matrix spec, use media API for thumbnails
-                // Use /_matrix/media/v3/thumbnail as per Matrix spec
+                // Per Matrix spec, use authenticated client API for thumbnails (Matrix 1.11+)
+                // Use /_matrix/client/v1/media/thumbnail with standard size 640x480
                 String base = homeserverUrl.endsWith("/") ? homeserverUrl.substring(0, homeserverUrl.length() - 1) : homeserverUrl;
-                fullUrl = base + "/_matrix/media/v3/thumbnail/" + server + "/" + mediaId + "?width=512&height=512&method=scale";
+                fullUrl = base + "/_matrix/client/v1/media/thumbnail/" + server + "/" + mediaId + "?width=640&height=480&method=scale";
             } else {
                 throw new Exception("Invalid mxc URL format: " + matrixUrl);
             }
@@ -92,8 +92,6 @@ public class ImageFetcher {
                 fullUrl = matrixUrl + (matrixUrl.contains("?") ? "&" : "?") + "width=512&height=512&method=scale";
             }
         }
-
-        System.out.println("Requesting image from URL: " + fullUrl);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(fullUrl))
@@ -109,8 +107,6 @@ public class ImageFetcher {
         }
 
         byte[] imageData = response.body();
-        String contentType = response.headers().firstValue("content-type").orElse("unknown");
-        System.out.println("Received image: size=" + imageData.length + " bytes, content-type=" + contentType);
 
         if (imageData.length > MAX_IMAGE_SIZE) {
             System.out.println("Skipping image " + matrixUrl + " - size " + imageData.length + " exceeds limit " + MAX_IMAGE_SIZE);
