@@ -10,12 +10,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Vision-enhanced AI service. Pre-describes images individually via vision API calls,
@@ -29,130 +26,77 @@ public class VisionAIService extends AIService {
     private static final String DESCRIPTION_CACHE_FILE = "image_description_cache.json";
 
     public VisionAIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
-                           String arliApiKey, String cerebrasApiKey, ImageFetcher imageFetcher) {
+                           String arliApiKey, ImageFetcher imageFetcher) {
         // Pass null for cerebrasApiKey to ensure Vision AI never falls back to Cerebras
         super(client, mapper, homeserver, accessToken, arliApiKey, null);
         this.imageFetcher = imageFetcher;
     }
 
-    public enum Backend {
-        AUTO, ARLIAI
+    @Override
+    protected RoomHistoryManager.ChatLogsResult fetchHistoryForQuery(String exportRoomId, int hours, String fromToken,
+            String startEventId, boolean forward, java.time.ZoneId zoneId, int maxMessages,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, RoomHistoryManager.ProgressCallback progressCallback) {
+        return historyManager.fetchRoomHistoryRelative(
+                exportRoomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, true, abortFlag,
+                progressCallback);
     }
 
-    /**
-     * Query AI with vision support.
-     * Phase 1: Describe each image individually via vision API (sequential, non-streaming).
-     *          Uses cache to skip already-described images.
-     * Phase 2: Inject descriptions into chat logs, run normal text-only summary.
-     */
-    public void queryAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
-            String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
-            AtomicBoolean abortFlag, Backend preferredBackend) {
+    @Override
+    protected RoomHistoryManager.ChatLogsResult prepareHistoryForQuery(String responseRoomId, String exportRoomId,
+            RoomHistoryManager.ChatLogsResult history, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            String statusEventId) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
-        try {
-            final String timeInfo;
-            if (startEventId != null) {
-                timeInfo = (forward ? "after " : "before ") + "message " + startEventId + " (limit "
-                        + (maxMessages > 0 ? maxMessages + " messages" : hours + "h") + ")";
-            } else if (maxMessages > 0) {
-                timeInfo = "last " + maxMessages + " messages";
-            } else {
-                timeInfo = "last " + (hours > 0 ? hours + "h" : "all history");
-            }
-
-            // Send immediate status message
-            String gatherMsg = "\uD83D\uDCE8 Gathering " + timeInfo + " with images...";
-            String statusEventId = matrixClient.sendTextWithEventId(responseRoomId, gatherMsg);
-
-            // Create progress callback
-            final String fStatusEventId = statusEventId;
-            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
-            RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                long now = System.currentTimeMillis();
-                if (now - lastProgressUpdate.get() >= 5000) {
-                    lastProgressUpdate.set(now);
-                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateTextMessage(responseRoomId, fStatusEventId,
-                            "\uD83D\uDCE8 Gathering " + timeInfo + " with images... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
-                }
-            };
-
-            // Fetch history with images
-            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryRelative(
-                exportRoomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, true, abortFlag, progressCallback);
-
-            if (history.errorMessage != null) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId, history.errorMessage);
-                return;
-            }
-            if (history.logs.isEmpty()) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId,
-                        "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
-                return;
-            }
-
-            // Phase 1: Describe each image individually via vision API (sequential)
-            if (history.imageUrls != null && !history.imageUrls.isEmpty()) {
-                int imageCount = history.imageUrls.size();
-                matrixClient.updateTextMessage(responseRoomId, statusEventId,
-                        "\uD83D\uDDBC\uFE0F Describing " + imageCount + " image(s)...");
-
-                // Load description cache
-                ObjectNode cache = loadDescriptionCache();
-                int cachedCount = 0;
-
-                List<String> imageDescriptions = new ArrayList<>();
-                for (int i = 0; i < imageCount; i++) {
-                    if (abortFlag != null && abortFlag.get()) return;
-
-                    String imageUrl = history.imageUrls.get(i);
-                    String caption = (history.imageCaptions != null && i < history.imageCaptions.size())
-                            ? history.imageCaptions.get(i) : "image";
-
-                    // Check cache first
-                    String cachedDescription = cache.has(imageUrl) ? cache.get(imageUrl).asText(null) : null;
-                    if (cachedDescription != null && !cachedDescription.isEmpty()) {
-                        System.out.println("Cache hit for image " + (i + 1) + "/" + imageCount + ": " + imageUrl);
-                        imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 " + cachedDescription + "]");
-                        cachedCount++;
-                        continue;
-                    }
-
-                    matrixClient.updateTextMessage(responseRoomId, statusEventId,
-                            "\uD83D\uDDBC\uFE0F Describing image " + (i + 1) + "/" + imageCount
-                            + " (" + cachedCount + " cached): " + caption);
-
-                    String description = describeImage(imageUrl, caption);
-                    if (description != null && !description.isEmpty()) {
-                        imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 " + description + "]");
-                        // Store in cache
-                        cache.put(imageUrl, description);
-                    } else {
-                        // describeImage logs the error and throws on fatal errors
-                        // If we got here with null, it was a non-fatal skip
-                        imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 (could not describe)]");
-                    }
-                }
-
-                // Save updated cache
-                saveDescriptionCache(cache);
-
-                // Inject image descriptions at end of chat logs
-                history.logs.addAll(imageDescriptions);
-                System.out.println("Injected " + imageDescriptions.size() + " image descriptions into chat logs"
-                        + " (" + cachedCount + " from cache, " + (imageDescriptions.size() - cachedCount) + " newly described)");
-            }
-
-            // Phase 2: Run normal text-only summary with enriched logs
-            // Delegate to parent's performAIQuery which handles context limits, Cerebras fallback, etc.
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix,
-                    abortFlag, AIService.Backend.AUTO, null, 900, statusEventId);
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            matrixClient.sendMarkdown(responseRoomId, "Error querying vision AI: " + e.getMessage());
+        if (history.imageUrls == null || history.imageUrls.isEmpty()) {
+            return history;
         }
+
+        int imageCount = history.imageUrls.size();
+        matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                "\uD83D\uDDBC\uFE0F Describing " + imageCount + " image(s)...");
+
+        ObjectNode cache = loadDescriptionCache();
+        int cachedCount = 0;
+        List<String> imageDescriptions = new ArrayList<>();
+
+        for (int i = 0; i < imageCount; i++) {
+            if (abortFlag != null && abortFlag.get()) return history;
+
+            String imageUrl = history.imageUrls.get(i);
+            String caption = (history.imageCaptions != null && i < history.imageCaptions.size())
+                    ? history.imageCaptions.get(i) : "image";
+
+            String cachedDescription = cache.has(imageUrl) ? cache.get(imageUrl).asText(null) : null;
+            if (cachedDescription != null && !cachedDescription.isEmpty()) {
+                System.out.println("Cache hit for image " + (i + 1) + "/" + imageCount + ": " + imageUrl);
+                imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 " + cachedDescription + "]");
+                cachedCount++;
+                continue;
+            }
+
+            matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                    "\uD83D\uDDBC\uFE0F Describing image " + (i + 1) + "/" + imageCount
+                    + " (" + cachedCount + " cached): " + caption);
+
+            String description;
+            try {
+                description = describeImage(imageUrl, caption);
+            } catch (Exception e) {
+                throw new RuntimeException("Error describing image '" + caption + "': " + e.getMessage(), e);
+            }
+            if (description != null && !description.isEmpty()) {
+                imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 " + description + "]");
+                cache.put(imageUrl, description);
+            } else {
+                imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 (could not describe)]");
+            }
+        }
+
+        saveDescriptionCache(cache);
+        history.logs.addAll(imageDescriptions);
+        System.out.println("Injected " + imageDescriptions.size() + " image descriptions into chat logs"
+                + " (" + cachedCount + " from cache, " + (imageDescriptions.size() - cachedCount) + " newly described)");
+        return history;
     }
 
     /**

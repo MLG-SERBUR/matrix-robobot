@@ -85,40 +85,44 @@ public class CommandDispatcher {
             handleLastSummary(trimmed, roomId, sender, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!debugai(?:\\s+.*)?") || trimmed.matches("!debugai-ts(?:\\s+.*)?")) {
-            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!debugai",
+            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!debugai",
                     AIService.Backend.AUTO, AIService.Prompts.DEBUGAI_PREFIX);
             return true;
         } else if (trimmed.matches("!tldr(?:\\s+.*)?") || trimmed.matches("!tldr-ts(?:\\s+.*)?")) {
-            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!tldr",
+            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!tldr",
                     AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
             return true;
         } else if (trimmed.matches("!itldr(?:\\s+.*)?")) {
-            handleVisionAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!itldr",
-                    VisionAIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
+            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!itldr",
+                    AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
             return true;
         } else if (trimmed.matches("!longsummary(?:\\s+.*)?")) {
-            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!longsummary",
+            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!longsummary",
                     AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
+        } else if (trimmed.matches("!caveman(?:\\s+.*)?") || trimmed.matches("!caveman-ts(?:\\s+.*)?")) {
+            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!caveman",
+                    AIService.Backend.AUTO, AIService.Prompts.CAVEMAN_PREFIX);
+            return true;
         } else if (trimmed.matches("!ilongsummary(?:\\s+.*)?")) {
-            handleVisionAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!ilongsummary",
-                    VisionAIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
+            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!ilongsummary",
+                    AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
         } else if (trimmed.matches("!summarylist(?:\\s+.*)?")) {
-            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summarylist",
+            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summarylist",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARYLIST_PREFIX);
             return true;
         } else if (trimmed.matches("!isummarylist(?:\\s+.*)?")) {
-            handleVisionAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummarylist",
-                    VisionAIService.Backend.AUTO, AIService.Prompts.SUMMARYLIST_PREFIX);
+            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummarylist",
+                    AIService.Backend.AUTO, AIService.Prompts.SUMMARYLIST_PREFIX);
             return true;
         } else if (trimmed.matches("!summary(?:\\s+.*)?")) {
-            handleAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summary",
+            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summary",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
         } else if (trimmed.matches("!isummary(?:\\s+.*)?")) {
-            handleVisionAICommand(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummary",
-                    VisionAIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
+            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummary",
+                    AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
         } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
             handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, 300, AIService.Backend.AUTO);
@@ -240,7 +244,8 @@ public class CommandDispatcher {
         }
     }
 
-    private void handleAICommand(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
+    private void handleHistoryAICommand(AIService service, String trimmed, String roomId, String sender,
+            String prevBatch, String responseRoomId,
             String exportRoomId, String commandName, AIService.Backend backend, String promptPrefix) {
 
         // Remove command name prefix (handle both !cmd and !cmd-ts for backward
@@ -250,7 +255,6 @@ public class CommandDispatcher {
         // Default values
         int hours = -1;
         int maxMessages = -1;
-        long startTimestamp = -1;
         String question = null;
 
         ZoneId zoneId = resolveZoneId(sender, responseRoomId);
@@ -322,9 +326,9 @@ public class CommandDispatcher {
         } else {
             // No valid first arg? Show usage.
             matrixClient.sendText(responseRoomId, "Usage: " + commandName + " <link|count|duration> [question]\n" +
-                    "Example: !summary 1h what happened?\n" +
-                    "Example: !summary 50 summarize this\n" +
-                    "Example: !summary https://matrix.to/#/... 10 what is this about?");
+                    "Example: " + commandName + " 1h what happened?\n" +
+                    "Example: " + commandName + " 50 summarize this\n" +
+                    "Example: " + commandName + " https://matrix.to/#/... 10 what is this about?");
             return;
         }
 
@@ -341,109 +345,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAI(responseRoomId, exportRoomId, fHours, prevBatch, fQuestion, fEventId, fForward,
-                        zoneId, fMax, promptPrefix, abortFlag, backend);
-            } finally {
-                runningOperations.remove(sender);
-            }
-        }).start();
-    }
-
-    private void handleVisionAICommand(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-            String exportRoomId, String commandName, VisionAIService.Backend backend, String promptPrefix) {
-
-        // Remove command name prefix
-        String args = trimmed.replaceFirst("^" + commandName + "\\s*", "").trim();
-
-        // Default values
-        int hours = -1;
-        int maxMessages = -1;
-        long startTimestamp = -1;
-        String question = null;
-
-        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-        if (zoneId == null)
-            return;
-
-        // Parse Args (same as handleAICommand)
-        String[] parts = args.split("\\s+", 2);
-        String firstArg = parts.length > 0 ? parts[0] : "";
-        String remaining = parts.length > 1 ? parts[1] : "";
-
-        String startEventId = null;
-        boolean forward = false;
-
-        // Check for Matrix link
-        if (firstArg.contains("/$") || firstArg.contains("/e/")) {
-            String eventId = null;
-            if (firstArg.contains("/$")) {
-                int start = firstArg.indexOf("/$") + 1;
-                int end = firstArg.indexOf("?", start);
-                if (end == -1) end = firstArg.length();
-                eventId = firstArg.substring(start, end);
-            } else if (firstArg.contains("/e/")) {
-                int start = firstArg.indexOf("/e/") + 3;
-                int end = firstArg.indexOf("/", start);
-                if (end == -1) end = firstArg.length();
-                eventId = firstArg.substring(start, end);
-            }
-
-            if (eventId != null && eventId.startsWith("$")) {
-                startEventId = eventId;
-
-                // Check if next arg is duration/limit
-                String[] subParts = remaining.split("\\s+", 2);
-                String possibleLimit = subParts.length > 0 ? subParts[0] : "";
-
-                if (possibleLimit.matches("[+-]?\\d+(h)?")) {
-                    if (possibleLimit.startsWith("+")) forward = true;
-                    String cleanLimit = possibleLimit.replace("+", "").replace("-", "");
-
-                    if (cleanLimit.endsWith("h")) {
-                        hours = Integer.parseInt(cleanLimit.replace("h", ""));
-                    } else {
-                        maxMessages = Integer.parseInt(cleanLimit);
-                    }
-                    question = subParts.length > 1 ? subParts[1].trim() : null;
-                } else {
-                    maxMessages = 100; // Default count
-                    question = remaining.trim();
-                }
-            }
-        } else if (firstArg.matches("[+-]?\\d+(h)?")) {
-            // Count/Duration mode
-            if (firstArg.startsWith("+")) forward = true;
-            String cleanArg = firstArg.replace("+", "").replace("-", "");
-
-            if (cleanArg.endsWith("h")) {
-                hours = Integer.parseInt(cleanArg.replace("h", ""));
-            } else {
-                maxMessages = Integer.parseInt(cleanArg);
-            }
-            question = remaining.trim().isEmpty() ? null : remaining.trim();
-        } else {
-            // No valid first arg? Show usage.
-            matrixClient.sendText(responseRoomId, "Usage: " + commandName + " <link|count|duration> [question]\n" +
-                    "Example: !isummary 1h what happened?\n" +
-                    "Example: !isummary 50 summarize this\n" +
-                    "Example: !isummary https://matrix.to/#/... 10 what is this about?");
-            return;
-        }
-
-        System.out.println("Received " + commandName + " command in " + roomId + " from " + sender);
-
-        AtomicBoolean abortFlag = new AtomicBoolean(false);
-        runningOperations.put(sender, abortFlag);
-
-        final int fHours = hours;
-        final int fMax = maxMessages;
-        final String fEventId = startEventId;
-        final boolean fForward = forward;
-        final String fQuestion = question;
-
-        new Thread(() -> {
-            try {
-                visionAIService.queryAI(responseRoomId, exportRoomId, fHours, prevBatch, fQuestion, fEventId, fForward,
+                service.queryAI(responseRoomId, exportRoomId, fHours, prevBatch, fQuestion, fEventId, fForward,
                         zoneId, fMax, promptPrefix, abortFlag, backend);
             } finally {
                 runningOperations.remove(sender);
@@ -964,6 +866,7 @@ public class CommandDispatcher {
                 "**!summarylist <link or count or duration> [question]** - Bullet list of tech/VR/gaming/ethics/philosophy chats with auto-fallback\n" +
                 "**!isummarylist <link or count or duration> [question]** - Bullet list with images (Vision ArliAI)\n" +
                 "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI)\n" +
+                "**!caveman <link or count or duration> [question]** - Detailed overview in caveman style with auto-fallback (ArliAI)\n" +
                 "**!ilongsummary <link or count or duration> [question]** - Detailed overview with images (Vision ArliAI)\n"
                 +
                 "**!debugai <link or count or duration> [question]** - Query AI backend with a custom prompt via question or chat logs\n"

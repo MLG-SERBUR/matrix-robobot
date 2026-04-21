@@ -53,6 +53,7 @@ public class AIService {
         public static final String QUESTION_SUFFIX = "' Answer this prompt (don't use tables, table markdown is not supported) using these chat logs:\n\n";
         public static final String OVERVIEW_PREFIX = "Give a high level overview of the following chat logs. Use only a title and timestamp for each topic and only include one or more chat messages verbatim (with username) as bullet points for each topic; bias to include discovered solutions, unanswered questions, or interesting resources. Don't use table format. Then summarize with bullet points all of the chat at end, including discovered solutions or interesting resources; no complete sentences required, this should be brief and avoid analysis. Your entire response should be faster to read than reading the chat log itself:\n\n";
         public static final String SUMMARY_PREFIX = "Give a concise, high level overview of the following chat logs. No need for complete sentences. Use only a title and timestamp for each topic; include one chat message verbatim (with username) for each topic. Should take no more than a minute to read, ideally target less than 30 seconds. No table format. Do not reason. Do not think. Do not draft:\n\n";
+        public static final String CAVEMAN_PREFIX = "Give a high level overview of the following chat logs. Match the topic breadth of a long summary. Use only a title and timestamp for each topic; include one or more chat messages verbatim (with username) as bullet points for each topic. Bias to discovered solutions, unanswered questions, or interesting resources. No table format. Then summarize all chat at end with bullet points, including discovered solutions or interesting resources. Write in caveman style: terse fragments, no articles, no filler, no pleasantries, no hedging. Short synonyms. Technical substance exact. No complete sentences unless needed. Be brief and fast to read:\n\n";
         public static final String SUMMARYLIST_PREFIX = "Create a bullet list of chat messages that contain resources or discovered solutions for tech, automation/scripts, VR/gaming, ethics/philosophy:\n\n";
         public static final String TLDR_PREFIX = "Provide a very concise summary of the following chat logs that can be read in 15 seconds or less. Make use of bullet points of key topics with timestamp; be extremely brief, no need for complete sentences. Always include topics that are informative towards a discovered solution or resources; if the other topics are significantly discussed, these topics can be added on to increase reading time to no more than 30 seconds. Then directly include the best chat message verbatim; have bias towards one that is informative towards a discovered solution or informative resource. Do not reason. Do not think. Do not draft:\n\n";
         public static final String DEBUGAI_PREFIX = "\n\n";
@@ -90,8 +91,8 @@ public class AIService {
                 }
             };
 
-            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryRelative(exportRoomId, hours,
-                    fromToken, startEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
+            RoomHistoryManager.ChatLogsResult history = fetchHistoryForQuery(exportRoomId, hours, fromToken,
+                    startEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
 
             if (history.errorMessage != null) {
                 matrixClient.updateTextMessage(responseRoomId, statusEventId, history.errorMessage);
@@ -103,12 +104,30 @@ public class AIService {
                 return;
             }
 
+            history = prepareHistoryForQuery(responseRoomId, exportRoomId, history, abortFlag, statusEventId);
+            if (history == null || history.logs.isEmpty()) {
+                return;
+            }
+
             performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, 900, statusEventId);
 
         } catch (Exception e) {
             e.printStackTrace();
             matrixClient.sendMarkdown(responseRoomId, "Error querying AI: " + e.getMessage());
         }
+    }
+
+    protected RoomHistoryManager.ChatLogsResult fetchHistoryForQuery(String exportRoomId, int hours, String fromToken,
+            String startEventId, boolean forward, ZoneId zoneId, int maxMessages,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, RoomHistoryManager.ProgressCallback progressCallback) {
+        return historyManager.fetchRoomHistoryRelative(exportRoomId, hours, fromToken, startEventId, forward, zoneId,
+                maxMessages, abortFlag, progressCallback);
+    }
+
+    protected RoomHistoryManager.ChatLogsResult prepareHistoryForQuery(String responseRoomId, String exportRoomId,
+            RoomHistoryManager.ChatLogsResult history, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            String statusEventId) {
+        return history;
     }
 
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
