@@ -389,7 +389,7 @@ public class DebugAIService {
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + arliApiKey)
                 .header("Accept", "text/event-stream")
-                .timeout(Duration.ofSeconds(900))
+                .timeout(Duration.ofSeconds(AIService.AI_TIMEOUT_SECONDS))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 

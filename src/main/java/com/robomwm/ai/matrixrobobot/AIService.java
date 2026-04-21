@@ -26,6 +26,7 @@ public class AIService {
     protected final String cerebrasApiKey;
     protected final RoomHistoryManager historyManager;
     protected final Random random;
+    public static final int AI_TIMEOUT_SECONDS = 20 * 60;
     public static final List<String> ARLI_MODELS = Arrays.asList(
             "Qwen3.5-27B-Derestricted"
     );
@@ -109,7 +110,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, 900, statusEventId);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, AI_TIMEOUT_SECONDS, statusEventId);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -417,7 +418,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, 900, statusEventId);
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -494,7 +495,7 @@ public class AIService {
                 .uri(URI.create(cerebrasApiUrl + "/v1/chat/completions"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + cerebrasApiKey)
-                .timeout(Duration.ofSeconds(300))
+                .timeout(Duration.ofSeconds(AI_TIMEOUT_SECONDS))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 

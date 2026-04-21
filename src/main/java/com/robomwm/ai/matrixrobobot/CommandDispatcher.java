@@ -125,7 +125,7 @@ public class CommandDispatcher {
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
         } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
-            handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, 300, AIService.Backend.AUTO);
+            handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO);
             return true;
         } else if (trimmed.matches("!debugarliai(?:\\s+.*)?")) {
             handleDebugArliai(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
@@ -451,7 +451,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, fModel, 900, AIService.Backend.ARLIAI);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
             } finally {
                 runningOperations.remove(sender);
             }
