@@ -11,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -24,6 +25,9 @@ import java.util.Iterator;
  * Manages fetching and processing room chat history from the Matrix server.
  */
 public class RoomHistoryManager {
+    private static final DateTimeFormatter LEGACY_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z");
+    private static final DateTimeFormatter AI_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter AI_TIME_FORMATTER = DateTimeFormatter.ofPattern("H:mm");
 
     @FunctionalInterface
     public interface ProgressCallback {
@@ -34,6 +38,18 @@ public class RoomHistoryManager {
     private final ObjectMapper mapper;
     private final String homeserverUrl;
     private final String accessToken;
+
+    private static class RawLogLine {
+        final long timestamp;
+        final String sender;
+        final String body;
+
+        RawLogLine(long timestamp, String sender, String body) {
+            this.timestamp = timestamp;
+            this.sender = sender;
+            this.body = body;
+        }
+    }
 
     public static class ChatLogsResult {
         public List<String> logs;
@@ -113,6 +129,50 @@ public class RoomHistoryManager {
         this.accessToken = accessToken;
     }
 
+    private ZoneId normalizeZoneId(ZoneId zoneId) {
+        return zoneId != null ? zoneId : ZoneId.of("UTC");
+    }
+
+    private String formatLogLine(RawLogLine line, ZoneId zoneId, LocalDate previousDate, boolean aiFriendlyTimestamps) {
+        ZoneId effectiveZoneId = normalizeZoneId(zoneId);
+        var zonedTimestamp = Instant.ofEpochMilli(line.timestamp).atZone(effectiveZoneId);
+        String timestamp;
+        if (aiFriendlyTimestamps) {
+            String timePart = zonedTimestamp.format(AI_TIME_FORMATTER);
+            LocalDate currentDate = zonedTimestamp.toLocalDate();
+            timestamp = (previousDate == null || !previousDate.equals(currentDate))
+                    ? zonedTimestamp.format(AI_DATE_FORMATTER) + " " + timePart
+                    : timePart;
+        } else {
+            timestamp = zonedTimestamp.format(LEGACY_TIMESTAMP_FORMATTER);
+        }
+        return "[" + timestamp + "] <" + line.sender + "> " + line.body;
+    }
+
+    private List<String> formatLogLines(List<RawLogLine> rawLines, ZoneId zoneId, boolean aiFriendlyTimestamps) {
+        List<String> formatted = new ArrayList<>(rawLines.size());
+        LocalDate previousDate = null;
+        ZoneId effectiveZoneId = normalizeZoneId(zoneId);
+        for (RawLogLine line : rawLines) {
+            var zonedTimestamp = Instant.ofEpochMilli(line.timestamp).atZone(effectiveZoneId);
+            formatted.add(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps));
+            previousDate = zonedTimestamp.toLocalDate();
+        }
+        return formatted;
+    }
+
+    private int estimateFormattedTokens(List<RawLogLine> rawLines, ZoneId zoneId, boolean aiFriendlyTimestamps) {
+        int tokens = 0;
+        LocalDate previousDate = null;
+        ZoneId effectiveZoneId = normalizeZoneId(zoneId);
+        for (RawLogLine line : rawLines) {
+            var zonedTimestamp = Instant.ofEpochMilli(line.timestamp).atZone(effectiveZoneId);
+            tokens += estimateTokens(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps));
+            previousDate = zonedTimestamp.toLocalDate();
+        }
+        return tokens;
+    }
+
     /**
      * Fetch room history as simple log strings
      */
@@ -131,17 +191,23 @@ public class RoomHistoryManager {
      */
     public ChatLogsWithIds fetchRoomHistoryWithIds(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId) {
-        return fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId, null, null);
+        return fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId, false, null, null);
     }
 
     public ChatLogsWithIds fetchRoomHistoryWithIds(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
-        return fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId, abortFlag, null);
+        return fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId, false, abortFlag, null);
     }
 
     public ChatLogsWithIds fetchRoomHistoryWithIds(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
-        List<String> logs = new ArrayList<>();
+        return fetchRoomHistoryWithIds(roomId, hours, fromToken, startTimestamp, endTime, zoneId, false, abortFlag, progressCallback);
+    }
+
+    public ChatLogsWithIds fetchRoomHistoryWithIds(String roomId, int hours, String fromToken, long startTimestamp,
+            long endTime, ZoneId zoneId, boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            ProgressCallback progressCallback) {
+        List<RawLogLine> rawLines = new ArrayList<>();
         List<String> eventIds = new ArrayList<>();
 
         long startTime = (startTimestamp > 0) ? startTimestamp
@@ -194,19 +260,14 @@ public class RoomHistoryManager {
                     String sender = ev.path("sender").asText(null);
                     String eventId = ev.path("event_id").asText(null);
                     if (body != null && sender != null && eventId != null) {
-                        String timestamp = Instant.ofEpochMilli(originServerTs)
-                                .atZone(zoneId)
-                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                        logs.add("[" + timestamp + "] <" + sender + "> " + body);
+                        rawLines.add(new RawLogLine(originServerTs, sender, body));
                         eventIds.add(eventId);
                     }
                 }
 
                 // Report progress after each batch
-                if (progressCallback != null && !logs.isEmpty()) {
-                    int tokens = 0;
-                    for (String l : logs) tokens += estimateTokens(l);
-                    progressCallback.onProgress(logs.size(), tokens);
+                if (progressCallback != null && !rawLines.isEmpty()) {
+                    progressCallback.onProgress(rawLines.size(), estimateFormattedTokens(rawLines, zoneId, aiFriendlyTimestamps));
                 }
 
                 if (reachedStart) {
@@ -220,9 +281,9 @@ public class RoomHistoryManager {
                 break;
             }
         }
-        Collections.reverse(logs);
+        Collections.reverse(rawLines);
         Collections.reverse(eventIds);
-        return new ChatLogsWithIds(logs, eventIds);
+        return new ChatLogsWithIds(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), eventIds);
     }
 
     /**
@@ -230,36 +291,36 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages) {
-        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, null, null);
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, false, null, null);
     }
 
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
-        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, abortFlag, null);
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, false, abortFlag, null);
     }
 
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             ProgressCallback progressCallback) {
-        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, abortFlag, progressCallback);
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, false, abortFlag, progressCallback);
     }
 
     // New method with image collection
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
-            boolean forward, ZoneId zoneId, int maxMessages, boolean collectImages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            boolean forward, ZoneId zoneId, int maxMessages, boolean collectImages, boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             ProgressCallback progressCallback) {
         if (startEventId == null) {
-            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages, collectImages, abortFlag, progressCallback);
+            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages, collectImages, aiFriendlyTimestamps, abortFlag, progressCallback);
         }
 
-        List<String> lines = new ArrayList<>();
+        List<RawLogLine> rawLines = new ArrayList<>();
         List<String> imageUrls = collectImages ? new ArrayList<>() : null;
         List<String> imageCaptions = collectImages ? new ArrayList<>() : null;
         String firstEventId = null;
 
         TokenResult tokenRes = getTokenForEvent(roomId, startEventId, forward);
         if (tokenRes == null || tokenRes.errorMessage != null) {
-            return new ChatLogsResult(lines, null, tokenRes != null ? tokenRes.errorMessage : "Failed to get token for event " + startEventId);
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, tokenRes != null ? tokenRes.errorMessage : "Failed to get token for event " + startEventId);
         }
 
         String token = tokenRes.token;
@@ -326,10 +387,7 @@ public class RoomHistoryManager {
                     String eventId = ev.path("event_id").asText(null);
                     String msgtype = ev.path("content").path("msgtype").asText(null);
                     if (body != null && sender != null) {
-                        String timestamp = Instant.ofEpochMilli(originServerTs)
-                                .atZone(zoneId)
-                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                        lines.add("[" + timestamp + "] <" + sender + "> " + body);
+                        rawLines.add(new RawLogLine(originServerTs, sender, body));
 
                         if (firstEventId == null)
                             firstEventId = eventId;
@@ -343,7 +401,7 @@ public class RoomHistoryManager {
                             }
                         }
 
-                        if (maxMessages > 0 && lines.size() >= maxMessages) {
+                        if (maxMessages > 0 && rawLines.size() >= maxMessages) {
                             stop = true;
                             break;
                         }
@@ -351,10 +409,8 @@ public class RoomHistoryManager {
                 }
 
                 // Report progress after each batch
-                if (progressCallback != null && !lines.isEmpty()) {
-                    int tokens = 0;
-                    for (String l : lines) tokens += estimateTokens(l);
-                    progressCallback.onProgress(lines.size(), tokens);
+                if (progressCallback != null && !rawLines.isEmpty()) {
+                    progressCallback.onProgress(rawLines.size(), estimateFormattedTokens(rawLines, zoneId, aiFriendlyTimestamps));
                 }
 
                 if (stop) {
@@ -370,14 +426,14 @@ public class RoomHistoryManager {
         }
         
         if (!forward) {
-            Collections.reverse(lines);
+            Collections.reverse(rawLines);
             if (collectImages) {
                 Collections.reverse(imageUrls);
                 Collections.reverse(imageCaptions);
             }
         }
 
-        return new ChatLogsResult(lines, firstEventId, null, imageUrls, imageCaptions);
+        return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, imageUrls, imageCaptions);
     }
 
     private TokenResult getTokenForEvent(String roomId, String eventId, boolean forward) {
@@ -412,25 +468,25 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, int maxMessages) {
-        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, false, null, null);
+        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, false, false, null, null);
     }
 
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
-        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, false, abortFlag, null);
+        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, false, false, abortFlag, null);
     }
 
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
             long endTime, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             ProgressCallback progressCallback) {
-        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, false, abortFlag, progressCallback);
+        return fetchRoomHistoryDetailed(roomId, hours, fromToken, startTimestamp, endTime, zoneId, maxMessages, false, false, abortFlag, progressCallback);
     }
 
     // New method with image collection
     public ChatLogsResult fetchRoomHistoryDetailed(String roomId, int hours, String fromToken, long startTimestamp,
-            long endTime, ZoneId zoneId, int maxMessages, boolean collectImages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            long endTime, ZoneId zoneId, int maxMessages, boolean collectImages, boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             ProgressCallback progressCallback) {
-        List<String> lines = new ArrayList<>();
+        List<RawLogLine> rawLines = new ArrayList<>();
         List<String> imageUrls = collectImages ? new ArrayList<>() : null;
         List<String> imageCaptions = collectImages ? new ArrayList<>() : null;
         String firstEventId = null;
@@ -486,10 +542,7 @@ public class RoomHistoryManager {
                     String msgtype = ev.path("content").path("msgtype").asText(null);
 
                     if (body != null && sender != null) {
-                        String timestamp = Instant.ofEpochMilli(originServerTs)
-                                .atZone(zoneId)
-                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                        lines.add("[" + timestamp + "] <" + sender + "> " + body);
+                        rawLines.add(new RawLogLine(originServerTs, sender, body));
 
                         firstEventId = eventId;
 
@@ -503,7 +556,7 @@ public class RoomHistoryManager {
                         }
 
                         // Check if we've reached the requested message count
-                        if (maxMessages > 0 && lines.size() >= maxMessages) {
+                        if (maxMessages > 0 && rawLines.size() >= maxMessages) {
                             reachedStart = true;
                             break;
                         }
@@ -511,10 +564,8 @@ public class RoomHistoryManager {
                 }
 
                 // Report progress after each batch
-                if (progressCallback != null && !lines.isEmpty()) {
-                    int tokens = 0;
-                    for (String l : lines) tokens += estimateTokens(l);
-                    progressCallback.onProgress(lines.size(), tokens);
+                if (progressCallback != null && !rawLines.isEmpty()) {
+                    progressCallback.onProgress(rawLines.size(), estimateFormattedTokens(rawLines, zoneId, aiFriendlyTimestamps));
                 }
 
                 if (reachedStart) {
@@ -528,12 +579,12 @@ public class RoomHistoryManager {
                 break;
             }
         }
-        Collections.reverse(lines);
+        Collections.reverse(rawLines);
         if (collectImages) {
             Collections.reverse(imageUrls);
             Collections.reverse(imageCaptions);
         }
-        return new ChatLogsResult(lines, firstEventId, null, imageUrls, imageCaptions);
+        return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, imageUrls, imageCaptions);
     }
 
     /**
@@ -674,25 +725,30 @@ public class RoomHistoryManager {
      * Fetch all messages in a room from lastReadEventId to the latest message.
      */
     public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId) {
-        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, null, null);
+        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, false, null, null);
     }
 
     public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
-        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, abortFlag, null);
+        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, false, abortFlag, null);
     }
 
     public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
+        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, false, abortFlag, progressCallback);
+    }
+
+    public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId,
+            boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
         if (lastReadEventId == null)
             return new ChatLogsResult(new ArrayList<>(), null);
 
-        List<String> logs = new ArrayList<>();
+        List<RawLogLine> rawLines = new ArrayList<>();
         String firstEventId = null;
 
         try {
             String token = getPaginationToken(roomId, null);
             if (token == null)
-                return new ChatLogsResult(logs, null);
+                return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null);
 
             boolean foundLastRead = false;
 
@@ -730,32 +786,27 @@ public class RoomHistoryManager {
                         long originServerTs = ev.path("origin_server_ts").asLong(0);
 
                         if (body != null && sender != null) {
-                            String timestamp = Instant.ofEpochMilli(originServerTs)
-                                    .atZone(zoneId)
-                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                            logs.add("[" + timestamp + "] <" + sender + "> " + body);
+                            rawLines.add(new RawLogLine(originServerTs, sender, body));
                             firstEventId = eventId;
                         }
                     }
                 }
 
                 // Report progress after each batch
-                if (progressCallback != null && !logs.isEmpty()) {
-                    int tokens = 0;
-                    for (String l : logs) tokens += estimateTokens(l);
-                    progressCallback.onProgress(logs.size(), tokens);
+                if (progressCallback != null && !rawLines.isEmpty()) {
+                    progressCallback.onProgress(rawLines.size(), estimateFormattedTokens(rawLines, zoneId, aiFriendlyTimestamps));
                 }
 
-                if (foundLastRead || logs.size() > 500)
+                if (foundLastRead || rawLines.size() > 500)
                     break; // Safety limit
                 token = root.path("end").asText(null);
             }
 
-            Collections.reverse(logs);
-            return new ChatLogsResult(logs, firstEventId);
+            Collections.reverse(rawLines);
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId);
         } catch (Exception e) {
             System.err.println("Error fetching unread messages: " + e.getMessage());
-            return new ChatLogsResult(logs, null);
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null);
         }
     }
 
@@ -801,16 +852,22 @@ public class RoomHistoryManager {
      * Fetch room history backwards until a token limit is reached.
      */
     public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId) {
-        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, null, null);
+        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, false, null, null);
     }
 
     public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
-        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, abortFlag, null);
+        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, false, abortFlag, null);
     }
 
     public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
+        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, false, abortFlag, progressCallback);
+    }
+
+    public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId,
+            boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
         List<String> logs = new ArrayList<>();
+        List<RawLogLine> rawLines = includeTimestamp ? new ArrayList<>() : null;
         String firstEventId = null;
         int currentTokens = 0;
 
@@ -851,12 +908,11 @@ public class RoomHistoryManager {
                     String eventId = ev.path("event_id").asText(null);
                     if (body != null && sender != null) {
                         String line;
-                        if (includeTimestamp && zoneId != null) {
+                        if (includeTimestamp) {
                             long originServerTs = ev.path("origin_server_ts").asLong(0);
-                            String timestamp = Instant.ofEpochMilli(originServerTs)
-                                    .atZone(zoneId)
-                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                            line = "[" + timestamp + "] <" + sender + "> " + body;
+                            RawLogLine rawLine = new RawLogLine(originServerTs, sender, body);
+                            rawLines.add(rawLine);
+                            line = formatLogLine(rawLine, zoneId, null, aiFriendlyTimestamps);
                         } else {
                             line = "<" + sender + "> " + body;
                         }
@@ -864,6 +920,9 @@ public class RoomHistoryManager {
                         int lineTokens = estimateTokens(line);
 
                         if (currentTokens + lineTokens > tokenLimit) {
+                            if (includeTimestamp) {
+                                rawLines.remove(rawLines.size() - 1);
+                            }
                             reachedLimit = true;
                             break;
                         }
@@ -875,8 +934,9 @@ public class RoomHistoryManager {
                 }
 
                 // Report progress after each batch
-                if (progressCallback != null && !logs.isEmpty()) {
-                    progressCallback.onProgress(logs.size(), currentTokens);
+                int gatheredCount = includeTimestamp ? rawLines.size() : logs.size();
+                if (progressCallback != null && gatheredCount > 0) {
+                    progressCallback.onProgress(gatheredCount, currentTokens);
                 }
 
                 if (reachedLimit) {
@@ -890,6 +950,11 @@ public class RoomHistoryManager {
                 break;
             }
         }
+        if (includeTimestamp) {
+            Collections.reverse(rawLines);
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId);
+        }
+
         Collections.reverse(logs);
         return new ChatLogsResult(logs, firstEventId);
     }

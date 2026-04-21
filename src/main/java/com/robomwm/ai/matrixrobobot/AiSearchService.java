@@ -134,7 +134,7 @@ public class AiSearchService {
             };
 
             RoomHistoryManager.ChatLogsWithIds allMessages = historyManager.fetchRoomHistoryWithIds(
-                exportRoomId, hours, fromToken, startTime, endTime, zoneId, abortFlag);
+                exportRoomId, hours, fromToken, startTime, endTime, zoneId, true, abortFlag, progressCallback);
 
             if (abortFlag.get()) {
                 matrixClient.updateTextMessage(responseRoomId, statusEventId, "AI Search aborted.");

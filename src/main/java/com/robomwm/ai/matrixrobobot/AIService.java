@@ -122,7 +122,7 @@ public class AIService {
             String startEventId, boolean forward, ZoneId zoneId, int maxMessages,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, RoomHistoryManager.ProgressCallback progressCallback) {
         return historyManager.fetchRoomHistoryRelative(exportRoomId, hours, fromToken, startEventId, forward, zoneId,
-                maxMessages, abortFlag, progressCallback);
+                maxMessages, false, true, abortFlag, progressCallback);
     }
 
     protected RoomHistoryManager.ChatLogsResult prepareHistoryForQuery(String responseRoomId, String exportRoomId,
@@ -410,7 +410,7 @@ public class AIService {
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
                     lastReadEventId,
-                    zoneId, abortFlag, progressCallback);
+                    zoneId, true, abortFlag, progressCallback);
 
             if (result.logs.isEmpty()) {
                 matrixClient.updateTextMessage(responseRoomId, statusEventId,
@@ -426,7 +426,7 @@ public class AIService {
         }
     }
 
-    public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question,
+    public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question, ZoneId zoneId,
                          java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, Backend preferredBackend) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
@@ -461,7 +461,7 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, tokenLimit, false, null, abortFlag, progressCallback);
+                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
 
             if (history.logs.isEmpty()) {
                 matrixClient.updateTextMessage(responseRoomId, statusEventId,

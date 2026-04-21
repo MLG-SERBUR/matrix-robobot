@@ -357,6 +357,9 @@ public class CommandDispatcher {
                            String exportRoomId, String forcedModel, int timeoutSeconds, AIService.Backend preferredBackend) {
         String question = trimmed.replaceFirst("^!ask\\s*", "").trim();
         if (question.isEmpty()) question = null;
+        ZoneId resolvedZoneId = timezoneService.getZoneIdForUser(sender);
+        if (resolvedZoneId == null) resolvedZoneId = ZoneId.of("UTC");
+        final ZoneId zoneId = resolvedZoneId;
 
         System.out.println("Received !ask command in " + roomId + " from " + sender);
 
@@ -367,7 +370,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, forcedModel, timeoutSeconds, preferredBackend);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, zoneId, abortFlag, forcedModel, timeoutSeconds, preferredBackend);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -442,6 +445,9 @@ public class CommandDispatcher {
         }
 
         System.out.println("Received !arliai command in " + roomId + " from " + sender + " (model: " + matchedModel + ")");
+        ZoneId resolvedZoneId = timezoneService.getZoneIdForUser(sender);
+        if (resolvedZoneId == null) resolvedZoneId = ZoneId.of("UTC");
+        final ZoneId zoneId = resolvedZoneId;
 
         AtomicBoolean abortFlag = new AtomicBoolean(false);
         runningOperations.put(sender, abortFlag);
@@ -451,7 +457,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, zoneId, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
             } finally {
                 runningOperations.remove(sender);
             }
