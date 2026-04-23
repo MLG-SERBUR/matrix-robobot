@@ -96,12 +96,12 @@ public class CommandDispatcher {
             handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!itldr",
                     AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
             return true;
-        } else if (trimmed.matches("!longsummary(?:\\s+.*)?")) {
-            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!longsummary",
+        } else if (trimmed.matches("!overview(?:\\s+.*)?")) {
+            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!overview",
                     AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
-        } else if (trimmed.matches("!ilongsummary(?:\\s+.*)?")) {
-            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!ilongsummary",
+        } else if (trimmed.matches("!ioverview(?:\\s+.*)?")) {
+            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!ioverview",
                     AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
         } else if (trimmed.matches("!summary(?:\\s+.*)?")) {
@@ -857,8 +857,8 @@ public class CommandDispatcher {
                 "**!autotldr** - Toggle automatic AI TLDR when reading export room (>100 msgs, >1h gap)\n\n" +
                 "**!summary <link or count or duration> [question]** - Condensed summary with auto-fallback (ArliAI)\n" +
                 "**!isummary <link or count or duration> [question]** - Condensed summary with images (Vision ArliAI)\n" +
-                "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI)\n" +
-                "**!ilongsummary <link or count or duration> [question]** - Detailed overview with images (Vision ArliAI)\n"
+                "**!overview <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI)\n" +
+                "**!ioverview <link or count or duration> [question]** - Detailed overview with images (Vision ArliAI)\n"
                 +
                 "**!debugai <link or count or duration> [question]** - Query AI backend with a custom prompt via question or chat logs\n"
                 +
