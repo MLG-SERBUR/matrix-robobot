@@ -32,6 +32,23 @@ public class AIService {
     );
     public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
 
+    private static class AIContextExceededException extends Exception {
+        private final String contextInfo;
+
+        AIContextExceededException(String message) {
+            this(message, "");
+        }
+
+        AIContextExceededException(String message, String contextInfo) {
+            super(message);
+            this.contextInfo = contextInfo == null ? "" : contextInfo;
+        }
+
+        String getContextInfo() {
+            return contextInfo;
+        }
+    }
+
     public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
             String cerebrasApiKey) {
         this.client = client;
@@ -167,8 +184,12 @@ public class AIService {
 
             boolean msgEdited = false;
             String arliErrorMsg = null;
+            AIContextExceededException contextExceeded = null;
+            boolean attemptedBackend = false;
+            boolean allAttemptedBackendsContextExceeded = true;
 
             if (tryArli) {
+                attemptedBackend = true;
                 try {
                     callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag);
                     return; // Success
@@ -180,12 +201,18 @@ public class AIService {
                     boolean isContextExceeded = arliErrorMsg.contains("exceeded the maximum context length");
 
                     if (is403 && isContextExceeded) {
-                        if (abortFlag != null && abortFlag.get()) return;
                         String contextInfo = extractContextInfo(arliErrorMsg);
-                        matrixClient.updateTextMessage(responseRoomId, eventId,
-                                "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ". Querying Cerebras (" + cerebrasModel + ") with " + queryDescription + questionPart);
-                        msgEdited = true;
+                        contextExceeded = new AIContextExceededException(
+                                "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ".",
+                                contextInfo);
+                        if (abortFlag != null && abortFlag.get()) return;
+                        if (preferredBackend == Backend.AUTO && tryCerebras && cerebrasApiKey != null && !cerebrasApiKey.isEmpty()) {
+                            matrixClient.updateTextMessage(responseRoomId, eventId,
+                                    "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ". Querying Cerebras (" + cerebrasModel + ") with " + queryDescription + questionPart);
+                            msgEdited = true;
+                        }
                     } else {
+                        allAttemptedBackendsContextExceeded = false;
                         if (abortFlag != null && abortFlag.get()) return;
                         matrixClient.sendText(responseRoomId, "ArliAI (" + arliModel + ") failed: " + arliErrorMsg);
                         if (is403) return; // Don't fallback on other 403 errors
@@ -198,6 +225,7 @@ public class AIService {
             if (abortFlag != null && abortFlag.get()) return;
 
             if (tryCerebras && cerebrasApiKey != null && !cerebrasApiKey.isEmpty()) {
+                attemptedBackend = true;
                 if (abortFlag != null && abortFlag.get()) return;
 
                 if (preferredBackend == Backend.AUTO && !eventId.isEmpty() && !msgEdited) {
@@ -209,12 +237,20 @@ public class AIService {
                     String answer = callCerebras(prompt, cerebrasModel, skipSystem);
                     answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
                     matrixClient.sendMarkdown(responseRoomId, answer);
+                } catch (AIContextExceededException e) {
+                    contextExceeded = e;
                 } catch (Exception e) {
+                    allAttemptedBackendsContextExceeded = false;
                     matrixClient.sendMarkdown(responseRoomId, "Cerebras AI (" + cerebrasModel + ") failed: " + e.getMessage());
                 }
-            } else if (arliErrorMsg != null) {
+            } else if (arliErrorMsg != null && contextExceeded == null) {
                 // ArliAI failed and Cerebras is not available (e.g., VisionAI), send ArliAI error
                 matrixClient.sendMarkdown(responseRoomId, "Arli AI (" + arliModel + ") failed: " + arliErrorMsg);
+                return;
+            }
+
+            if (attemptedBackend && allAttemptedBackendsContextExceeded && contextExceeded != null) {
+                matrixClient.sendMarkdown(responseRoomId, contextExceeded.getMessage());
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -512,8 +548,37 @@ public class AIService {
                 throw new Exception("Unexpected 200 response from Cerebras AI (" + model + "). Body: " + response.body(), e);
             }
         } else {
+            if (isCerebrasContextExceeded(response)) {
+                throw new AIContextExceededException(
+                        "Cerebras AI (" + model + ") context exceeded.");
+            }
             throw new Exception("Failed to get response from Cerebras AI (" + model + "). Status: "
                     + response.statusCode() + ", Body: " + response.body());
+        }
+    }
+
+    private boolean isCerebrasContextExceeded(HttpResponse<String> response) {
+        if (response == null || response.body() == null) {
+            return false;
+        }
+
+        String body = response.body();
+        if (body.contains("\"code\":\"token_quota_exceeded\"")
+                || body.contains("\"type\":\"too_many_tokens_error\"")
+                || body.contains("Tokens per minute limit exceeded")) {
+            return true;
+        }
+
+        try {
+            JsonNode root = mapper.readTree(body);
+            String code = root.path("code").asText("");
+            String type = root.path("type").asText("");
+            String message = root.path("message").asText("");
+            return "token_quota_exceeded".equals(code)
+                    || "too_many_tokens_error".equals(type)
+                    || message.contains("Tokens per minute limit exceeded");
+        } catch (Exception ignored) {
+            return false;
         }
     }
 
