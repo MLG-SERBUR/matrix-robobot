@@ -92,10 +92,6 @@ public class CommandDispatcher {
             handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!tldr",
                     AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
             return true;
-        } else if (trimmed.matches("!itldr(?:\\s+.*)?")) {
-            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!itldr",
-                    AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
-            return true;
         } else if (trimmed.matches("!overview(?:\\s+.*)?")) {
             handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!overview",
                     AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
@@ -866,8 +862,7 @@ public class CommandDispatcher {
                 +
                                   "**!debugarliai <model> [params...] <prompt>** - Query ArliAI with custom API parameters (temp, top_p, rep_pen, etc.)\n"
                 +
-                "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n" +
-                "**!itldr <link or count or duration> [question]** - Quick 15s summary with images (Vision ArliAI)\n"
+                "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n"
                 +
                 "**!ask [question]** - Query AI backend with up to 16k tokens of history (no timestamps)\n"
                 +
