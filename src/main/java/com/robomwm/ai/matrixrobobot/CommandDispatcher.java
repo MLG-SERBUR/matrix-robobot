@@ -100,21 +100,9 @@ public class CommandDispatcher {
             handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!longsummary",
                     AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
-        } else if (trimmed.matches("!caveman(?:\\s+.*)?") || trimmed.matches("!caveman-ts(?:\\s+.*)?")) {
-            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!caveman",
-                    AIService.Backend.AUTO, AIService.Prompts.CAVEMAN_PREFIX);
-            return true;
         } else if (trimmed.matches("!ilongsummary(?:\\s+.*)?")) {
             handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!ilongsummary",
                     AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
-            return true;
-        } else if (trimmed.matches("!summarylist(?:\\s+.*)?")) {
-            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summarylist",
-                    AIService.Backend.AUTO, AIService.Prompts.SUMMARYLIST_PREFIX);
-            return true;
-        } else if (trimmed.matches("!isummarylist(?:\\s+.*)?")) {
-            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummarylist",
-                    AIService.Backend.AUTO, AIService.Prompts.SUMMARYLIST_PREFIX);
             return true;
         } else if (trimmed.matches("!summary(?:\\s+.*)?")) {
             handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summary",
@@ -869,10 +857,7 @@ public class CommandDispatcher {
                 "**!autotldr** - Toggle automatic AI TLDR when reading export room (>100 msgs, >1h gap)\n\n" +
                 "**!summary <link or count or duration> [question]** - Condensed summary with auto-fallback (ArliAI)\n" +
                 "**!isummary <link or count or duration> [question]** - Condensed summary with images (Vision ArliAI)\n" +
-                "**!summarylist <link or count or duration> [question]** - Bullet list of tech/VR/gaming/ethics/philosophy chats with auto-fallback\n" +
-                "**!isummarylist <link or count or duration> [question]** - Bullet list with images (Vision ArliAI)\n" +
                 "**!longsummary <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI)\n" +
-                "**!caveman <link or count or duration> [question]** - Detailed overview in caveman style with auto-fallback (ArliAI)\n" +
                 "**!ilongsummary <link or count or duration> [question]** - Detailed overview with images (Vision ArliAI)\n"
                 +
                 "**!debugai <link or count or duration> [question]** - Query AI backend with a custom prompt via question or chat logs\n"

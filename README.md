@@ -45,7 +45,6 @@ All commands must be sent in the **command room** specified in your config:
   - Example: `!arliai-ts 2024-12-30-23-59 PST 24h` — Analyzes 24 hours of chat starting at 23:59 PST on December 30, 2024
   - Example: `!arliai-ts 2024-12-30-14-30 EST 6h What was discussed?` — Analyzes 6 hours starting at 14:30 EST on December 30, 2024 with a specific question
   - Supported timezones: PST, PDT, MST, MDT, CST, CDT, EST, EDT, UTC, GMT
-- `!caveman <link or count or duration> [question]` — Detailed overview in caveman style with auto-fallback (ArliAI)
 
 ## Prerequisites
 - Java 17+
