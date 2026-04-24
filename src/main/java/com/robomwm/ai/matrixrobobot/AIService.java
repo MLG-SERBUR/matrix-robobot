@@ -237,6 +237,7 @@ public class AIService {
                     String answer = callCerebras(prompt, cerebrasModel, skipSystem);
                     answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
                     matrixClient.sendMarkdown(responseRoomId, answer);
+                    return;
                 } catch (AIContextExceededException e) {
                     contextExceeded = e;
                 } catch (Exception e) {
