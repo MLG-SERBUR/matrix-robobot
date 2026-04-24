@@ -21,7 +21,7 @@ import java.util.Map;
  *
  * Image descriptions are cached to a JSON file keyed by mxc:// URL to avoid redundant API calls.
  */
-public class VisionAIService extends AIService {
+public class VisionAIService extends ChunkedSummaryService {
     private final ImageFetcher imageFetcher;
     private static final String DESCRIPTION_CACHE_FILE = "image_description_cache.json";
 
@@ -93,6 +93,12 @@ public class VisionAIService extends AIService {
         }
 
         saveDescriptionCache(cache);
+        if (history.timestamps != null) {
+            long lastTimestamp = history.timestamps.isEmpty() ? 0L : history.timestamps.get(history.timestamps.size() - 1);
+            while (history.timestamps.size() < history.logs.size() + imageDescriptions.size()) {
+                history.timestamps.add(lastTimestamp);
+            }
+        }
         history.logs.addAll(imageDescriptions);
         System.out.println("Injected " + imageDescriptions.size() + " image descriptions into chat logs"
                 + " (" + cachedCount + " from cache, " + (imageDescriptions.size() - cachedCount) + " newly described)");

@@ -67,7 +67,7 @@ public class MatrixRobobot {
                 config.accessToken);
         TextSearchService textSearchService = new TextSearchService(matrixClient, historyManager, client, mapper, url,
                 config, runningOperations);
-        AIService aiService = new AIService(client, mapper, url, config.accessToken, config.arliApiKey,
+        AIService aiService = new ChunkedSummaryService(client, mapper, url, config.accessToken, config.arliApiKey,
                 config.cerebrasApiKey);
         ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
         VisionAIService visionAIService = new VisionAIService(client, mapper, url, config.accessToken,

@@ -55,18 +55,24 @@ public class RoomHistoryManager {
         public List<String> logs;
         public String firstEventId;
         public String errorMessage;
+        public List<Long> timestamps;
         // Optional fields for image support (null for text-only commands)
         public List<String> imageUrls;
         public List<String> imageCaptions;
 
         public ChatLogsResult(List<String> logs, String firstEventId) {
-            this(logs, firstEventId, null);
+            this(logs, firstEventId, null, null);
         }
 
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage) {
+            this(logs, firstEventId, errorMessage, null);
+        }
+
+        public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage, List<Long> timestamps) {
             this.logs = logs;
             this.firstEventId = firstEventId;
             this.errorMessage = errorMessage;
+            this.timestamps = timestamps;
             this.imageUrls = null;
             this.imageCaptions = null;
         }
@@ -74,9 +80,16 @@ public class RoomHistoryManager {
         // Constructor for vision commands
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage,
                             List<String> imageUrls, List<String> imageCaptions) {
+            this(logs, firstEventId, errorMessage, imageUrls, imageCaptions, null);
+        }
+
+        // Constructor for vision commands with timestamps
+        public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage,
+                            List<String> imageUrls, List<String> imageCaptions, List<Long> timestamps) {
             this.logs = logs;
             this.firstEventId = firstEventId;
             this.errorMessage = errorMessage;
+            this.timestamps = timestamps;
             this.imageUrls = imageUrls;
             this.imageCaptions = imageCaptions;
         }
@@ -171,6 +184,14 @@ public class RoomHistoryManager {
             previousDate = zonedTimestamp.toLocalDate();
         }
         return tokens;
+    }
+
+    private List<Long> extractTimestamps(List<RawLogLine> rawLines) {
+        List<Long> timestamps = new ArrayList<>(rawLines.size());
+        for (RawLogLine line : rawLines) {
+            timestamps.add(line.timestamp);
+        }
+        return timestamps;
     }
 
     /**
@@ -320,7 +341,11 @@ public class RoomHistoryManager {
 
         TokenResult tokenRes = getTokenForEvent(roomId, startEventId, forward);
         if (tokenRes == null || tokenRes.errorMessage != null) {
-            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, tokenRes != null ? tokenRes.errorMessage : "Failed to get token for event " + startEventId);
+            return new ChatLogsResult(
+                    formatLogLines(rawLines, zoneId, aiFriendlyTimestamps),
+                    null,
+                    tokenRes != null ? tokenRes.errorMessage : "Failed to get token for event " + startEventId,
+                    extractTimestamps(rawLines));
         }
 
         String token = tokenRes.token;
@@ -433,7 +458,13 @@ public class RoomHistoryManager {
             }
         }
 
-        return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, imageUrls, imageCaptions);
+        return new ChatLogsResult(
+                formatLogLines(rawLines, zoneId, aiFriendlyTimestamps),
+                firstEventId,
+                null,
+                imageUrls,
+                imageCaptions,
+                extractTimestamps(rawLines));
     }
 
     private TokenResult getTokenForEvent(String roomId, String eventId, boolean forward) {
@@ -584,7 +615,13 @@ public class RoomHistoryManager {
             Collections.reverse(imageUrls);
             Collections.reverse(imageCaptions);
         }
-        return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, imageUrls, imageCaptions);
+        return new ChatLogsResult(
+                formatLogLines(rawLines, zoneId, aiFriendlyTimestamps),
+                firstEventId,
+                null,
+                imageUrls,
+                imageCaptions,
+                extractTimestamps(rawLines));
     }
 
     /**
@@ -748,7 +785,7 @@ public class RoomHistoryManager {
         try {
             String token = getPaginationToken(roomId, null);
             if (token == null)
-                return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null);
+                return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, null, extractTimestamps(rawLines));
 
             boolean foundLastRead = false;
 
@@ -803,10 +840,10 @@ public class RoomHistoryManager {
             }
 
             Collections.reverse(rawLines);
-            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId);
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, extractTimestamps(rawLines));
         } catch (Exception e) {
             System.err.println("Error fetching unread messages: " + e.getMessage());
-            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null);
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, null, extractTimestamps(rawLines));
         }
     }
 
@@ -952,7 +989,7 @@ public class RoomHistoryManager {
         }
         if (includeTimestamp) {
             Collections.reverse(rawLines);
-            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId);
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, extractTimestamps(rawLines));
         }
 
         Collections.reverse(logs);

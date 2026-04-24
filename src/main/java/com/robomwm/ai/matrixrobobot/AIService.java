@@ -250,12 +250,21 @@ public class AIService {
             }
 
             if (attemptedBackend && allAttemptedBackendsContextExceeded && contextExceeded != null) {
-                matrixClient.sendMarkdown(responseRoomId, contextExceeded.getMessage());
+                handleContextExceeded(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
+                        preferredBackend, forcedModel, timeoutSeconds, statusEventId, contextExceeded.getMessage());
             }
         } catch (Exception e) {
             e.printStackTrace();
             matrixClient.sendMarkdown(responseRoomId, "Error performing AI query: " + e.getMessage());
         }
+    }
+
+    protected void handleContextExceeded(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
+            String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId,
+            String contextExceededMessage) {
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        matrixClient.sendMarkdown(responseRoomId, contextExceededMessage);
     }
 
     protected String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
@@ -283,6 +292,57 @@ public class AIService {
                 .build();
 
         return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "ArliAI", abortFlag);
+    }
+
+    protected String callArliAIBlocking(String prompt, String model, boolean skipSystem, int timeoutSeconds) throws Exception {
+        String arliApiUrl = "https://api.arliai.com";
+        if (arliApiKey == null || arliApiKey.isEmpty()) {
+            throw new Exception("ARLI_API_KEY is not configured.");
+        }
+
+        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
+
+        Map<String, Object> arliPayload = Map.of(
+                "model", model,
+                "messages", messages,
+                "stream", false);
+        String jsonPayload = mapper.writeValueAsString(arliPayload);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(arliApiUrl + "/v1/chat/completions"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + arliApiKey)
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            throw new Exception("Status: " + response.statusCode() + " Body: " + response.body());
+        }
+
+        try {
+            JsonNode arliResponse = mapper.readTree(response.body());
+            JsonNode choice = arliResponse.path("choices").get(0);
+            if (choice == null) {
+                throw new Exception("Missing 'choices' array");
+            }
+
+            String text = choice.path("message").path("content").asText(null);
+            if (text == null || text.trim().isEmpty()) {
+                text = choice.path("message").path("reasoning").asText(null);
+            }
+            if (text == null || text.trim().isEmpty()) {
+                text = choice.path("message").path("reasoning_content").asText(null);
+            }
+            if (text == null || text.trim().isEmpty()) {
+                throw new Exception("No response from Arli AI (" + model + ").");
+            }
+
+            return text.replaceAll("(?s)<think>.*?</think>", "").trim();
+        } catch (Exception e) {
+            throw new Exception("Unexpected response from Arli AI (" + model + "). Body: " + response.body(), e);
+        }
     }
 
     protected String streamArliAIResponse(HttpRequest request, String responseRoomId, String exportRoomId, String firstEventId, String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
@@ -511,7 +571,7 @@ public class AIService {
         }
     }
 
-    private String callCerebras(String prompt, String model, boolean skipSystem) throws Exception {
+    protected String callCerebras(String prompt, String model, boolean skipSystem) throws Exception {
         String cerebrasApiUrl = "https://api.cerebras.ai";
         if (cerebrasApiKey == null || cerebrasApiKey.isEmpty()) {
             throw new Exception("CEREBRAS_API_KEY is not configured.");
@@ -691,7 +751,20 @@ public class AIService {
         return aiAnswer;
     }
 
-    private String extractContextInfo(String errorMessage) {
+    protected boolean isContextExceededMessage(String errorMessage) {
+        if (errorMessage == null || errorMessage.isEmpty()) {
+            return false;
+        }
+
+        String lower = errorMessage.toLowerCase();
+        return lower.contains("exceeded the maximum context length")
+                || lower.contains("context exceeded")
+                || lower.contains("token_quota_exceeded")
+                || lower.contains("too_many_tokens_error")
+                || lower.contains("tokens per minute limit exceeded");
+    }
+
+    protected String extractContextInfo(String errorMessage) {
         try {
             int flags = java.util.regex.Pattern.DOTALL | java.util.regex.Pattern.CASE_INSENSITIVE;
             
