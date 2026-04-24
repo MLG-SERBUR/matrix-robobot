@@ -198,9 +198,9 @@ public class AIService {
                     System.out.println("ArliAI Error: " + arliErrorMsg);
 
                     boolean is403 = arliErrorMsg.contains("Status: 403");
-                    boolean isContextExceeded = arliErrorMsg.contains("exceeded the maximum context length");
+                    boolean isContextExceeded = isContextExceededMessage(arliErrorMsg);
 
-                    if (is403 && isContextExceeded) {
+                    if (isContextExceeded) {
                         String contextInfo = extractContextInfo(arliErrorMsg);
                         contextExceeded = new AIContextExceededException(
                                 "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ".",
@@ -218,7 +218,7 @@ public class AIService {
                         if (is403) return; // Don't fallback on other 403 errors
                     }
 
-                    if (preferredBackend == Backend.ARLIAI) return;
+                    if (preferredBackend != Backend.AUTO) return;
                 }
             }
 
@@ -234,7 +234,7 @@ public class AIService {
                 }
 
                 try {
-                    String answer = callCerebras(prompt, cerebrasModel, skipSystem);
+                    String answer = callCerebras(prompt, cerebrasModel, skipSystem, timeoutSeconds);
                     answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
                     matrixClient.sendMarkdown(responseRoomId, answer);
                     return;
@@ -244,6 +244,7 @@ public class AIService {
                     allAttemptedBackendsContextExceeded = false;
                     matrixClient.sendMarkdown(responseRoomId, "Cerebras AI (" + cerebrasModel + ") failed: " + e.getMessage());
                 }
+                if (preferredBackend != Backend.AUTO) return;
             } else if (arliErrorMsg != null && contextExceeded == null) {
                 // ArliAI failed and Cerebras is not available (e.g., VisionAI), send ArliAI error
                 matrixClient.sendMarkdown(responseRoomId, "Arli AI (" + arliModel + ") failed: " + arliErrorMsg);
@@ -716,7 +717,7 @@ public class AIService {
         }
     }
 
-    protected String callCerebras(String prompt, String model, boolean skipSystem) throws Exception {
+    protected String callCerebras(String prompt, String model, boolean skipSystem, int timeoutSeconds) throws Exception {
         String cerebrasApiUrl = "https://api.cerebras.ai";
         if (cerebrasApiKey == null || cerebrasApiKey.isEmpty()) {
             throw new Exception("CEREBRAS_API_KEY is not configured.");
@@ -734,7 +735,7 @@ public class AIService {
                 .uri(URI.create(cerebrasApiUrl + "/v1/chat/completions"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + cerebrasApiKey)
-                .timeout(Duration.ofSeconds(AI_TIMEOUT_SECONDS))
+                .timeout(Duration.ofSeconds(timeoutSeconds))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
@@ -747,8 +748,11 @@ public class AIService {
                 if (choice == null) {
                     throw new Exception("Missing 'choices' array");
                 }
-                return choice.path("message").path("content")
-                        .asText("No response from Cerebras AI (" + model + ").");
+                String text = choice.path("message").path("content").asText(null);
+                if (text == null || text.trim().isEmpty()) {
+                    throw new Exception("No response from Cerebras AI (" + model + ").");
+                }
+                return text;
             } catch (Exception e) {
                 throw new Exception("Unexpected 200 response from Cerebras AI (" + model + "). Body: " + response.body(), e);
             }

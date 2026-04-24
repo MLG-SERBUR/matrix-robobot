@@ -180,7 +180,7 @@ public class ChunkedSummaryService extends AIService {
             throw new Exception("Aborted");
         }
 
-        String directPrompt = buildChunkPrompt(question, logs, promptPrefix);
+        String directPrompt = buildPrompt(question, logs, promptPrefix);
         try {
             if (estimateTotalPromptTokens(directPrompt, config.skipSystem) <= contextLimit) {
                 String answer = executeInternalPrompt(directPrompt, config, abortFlag, responseRoomId, streamEventIdHolder, footer);
@@ -251,7 +251,7 @@ public class ChunkedSummaryService extends AIService {
                     String cerebrasNotice = "Using Cerebras...\n\n" + footer;
                     matrixClient.updateMarkdownNoticeMessage(responseRoomId, streamEventIdHolder[0], cerebrasNotice);
                 }
-                return callCerebras(prompt, config.cerebrasModel, config.skipSystem);
+                return callCerebras(prompt, config.cerebrasModel, config.skipSystem, config.timeoutSeconds);
             } catch (Exception e) {
                 if (!isContextExceededMessage(e.getMessage())) {
                     allContextExceeded = false;
@@ -273,7 +273,7 @@ public class ChunkedSummaryService extends AIService {
     }
 
     private int estimateChunkContentBudget(String question, String promptPrefix, int contextLimit) {
-        String basePrompt = buildChunkPrompt(question, Collections.emptyList(), promptPrefix);
+        String basePrompt = buildPrompt(question, Collections.emptyList(), promptPrefix);
         int baseTokens = estimateTotalPromptTokens(basePrompt, false);
         return Math.max(MIN_CONTENT_TOKENS, contextLimit - baseTokens);
     }
@@ -501,14 +501,6 @@ public class ChunkedSummaryService extends AIService {
             return new ArrayList<>();
         }
         return new ArrayList<>(values.subList(start, end));
-    }
-
-    private String buildChunkPrompt(String question, List<String> logs, String promptPrefix) {
-        return "This is one chunk of a larger chat log. Summarize only this chunk for later merging. "
-                + "Keep output dense and factual. Preserve timestamps, decisions, useful resources, and unresolved questions. "
-                + "Avoid intro and outro. Do not echo raw messages line-by-line unless explicitly asked. "
-                + "Do not mention chunk numbers.\n\n"
-                + buildPrompt(question, logs, promptPrefix);
     }
 
     private SummarySlice appendSummarySlices(List<SummarySlice> slices) throws Exception {
