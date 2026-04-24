@@ -44,6 +44,16 @@ public class ChunkedSummaryService extends AIService {
         }
     }
 
+    private static class ContextWindowInfo {
+        final int usedTokens;
+        final int limitTokens;
+
+        ContextWindowInfo(int usedTokens, int limitTokens) {
+            this.usedTokens = usedTokens;
+            this.limitTokens = limitTokens;
+        }
+    }
+
     private static class InternalContextExceededException extends Exception {
         InternalContextExceededException(String message) {
             super(message);
@@ -88,6 +98,10 @@ public class ChunkedSummaryService extends AIService {
                 return;
             }
 
+            ContextWindowInfo contextWindowInfo = parseContextWindowInfo(contextExceededMessage);
+            double estimatorScale = calculateEstimatorScale(history, question, promptPrefix, contextWindowInfo);
+            int preferredChunkCount = calculatePreferredChunkCount(contextWindowInfo);
+
             if (statusEventId != null) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "Context exceeded. Switching to smart chunked summary...");
@@ -107,8 +121,10 @@ public class ChunkedSummaryService extends AIService {
                     timeoutSeconds,
                     Prompts.DEBUGAI_PREFIX.equals(promptPrefix));
 
-            int chunkBudget = estimateChunkContentBudget(question, promptPrefix);
-            List<ChunkRange> initialChunks = planLogChunks(history.logs, history.timestamps, chunkBudget);
+            int contextLimit = contextWindowInfo != null ? contextWindowInfo.limitTokens : MAX_CONTEXT_TOKENS;
+            int chunkBudget = estimateChunkContentBudget(question, promptPrefix, contextLimit);
+            List<ChunkRange> initialChunks = planLogChunks(history.logs, history.timestamps, chunkBudget, estimatorScale,
+                    preferredChunkCount);
             if (initialChunks.isEmpty()) {
                 super.handleContextExceeded(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
                         preferredBackend, forcedModel, timeoutSeconds, statusEventId, contextExceededMessage);
@@ -132,11 +148,10 @@ public class ChunkedSummaryService extends AIService {
                 List<String> chunkLogs = new ArrayList<>(history.logs.subList(chunk.startIndex, chunk.endIndex));
                 List<Long> chunkTimestamps = subListOrEmpty(history.timestamps, chunk.startIndex, chunk.endIndex);
                 partialSummaries.add(summarizeLogChunk(chunkLogs, chunkTimestamps, question, promptPrefix, config,
-                        abortFlag, responseRoomId, streamEventIdHolder, chunkFooter));
+                        abortFlag, responseRoomId, streamEventIdHolder, chunkFooter, estimatorScale, contextLimit));
             }
 
-            SummarySlice finalSummary = reduceSummarySlicesToOne(partialSummaries, question, promptPrefix, config,
-                    abortFlag, true, responseRoomId, streamEventIdHolder, "Final merge");
+            SummarySlice finalSummary = appendSummarySlices(partialSummaries);
             String finalAnswer = appendMessageLink(finalSummary.text, exportRoomId, history.firstEventId);
 
             if (statusEventId != null) {
@@ -160,14 +175,14 @@ public class ChunkedSummaryService extends AIService {
 
     private SummarySlice summarizeLogChunk(List<String> logs, List<Long> timestamps, String question,
             String promptPrefix, InternalQueryConfig config, AtomicBoolean abortFlag, String responseRoomId,
-            String[] streamEventIdHolder, String footer) throws Exception {
+            String[] streamEventIdHolder, String footer, double estimatorScale, int contextLimit) throws Exception {
         if (abortFlag != null && abortFlag.get()) {
             throw new Exception("Aborted");
         }
 
         String directPrompt = buildChunkPrompt(question, logs, promptPrefix);
         try {
-            if (estimateTotalPromptTokens(directPrompt, config.skipSystem) <= MAX_CONTEXT_TOKENS) {
+            if (estimateTotalPromptTokens(directPrompt, config.skipSystem) <= contextLimit) {
                 String answer = executeInternalPrompt(directPrompt, config, abortFlag, responseRoomId, streamEventIdHolder, footer);
                 return createSummarySlice(answer, logs, timestamps);
             }
@@ -179,8 +194,8 @@ public class ChunkedSummaryService extends AIService {
             throw new Exception("Single message chunk still exceeds context budget.");
         }
 
-        int chunkBudget = estimateChunkContentBudget(question, promptPrefix);
-        List<ChunkRange> childRanges = planLogChunks(logs, timestamps, chunkBudget);
+        int chunkBudget = estimateChunkContentBudget(question, promptPrefix, contextLimit);
+        List<ChunkRange> childRanges = planLogChunks(logs, timestamps, chunkBudget, estimatorScale, -1);
         if (childRanges.size() <= 1) {
             childRanges = forceSplitRanges(logs.size());
         }
@@ -190,60 +205,10 @@ public class ChunkedSummaryService extends AIService {
             List<String> childLogs = new ArrayList<>(logs.subList(childRange.startIndex, childRange.endIndex));
             List<Long> childTimestamps = subListOrEmpty(timestamps, childRange.startIndex, childRange.endIndex);
             childSummaries.add(summarizeLogChunk(childLogs, childTimestamps, question, promptPrefix, config,
-                    abortFlag, responseRoomId, streamEventIdHolder, footer + " (split)"));
+                    abortFlag, responseRoomId, streamEventIdHolder, footer + " (split)", estimatorScale, contextLimit));
         }
 
-        return reduceSummarySlicesToOne(childSummaries, question, promptPrefix, config, abortFlag, false,
-                responseRoomId, streamEventIdHolder, footer + " (merge)");
-    }
-
-    private SummarySlice reduceSummarySlicesToOne(List<SummarySlice> slices, String question, String promptPrefix,
-            InternalQueryConfig config, AtomicBoolean abortFlag, boolean finalPass, String responseRoomId,
-            String[] streamEventIdHolder, String footer) throws Exception {
-        if (slices == null || slices.isEmpty()) {
-            throw new Exception("No summaries produced for reduction.");
-        }
-
-        if (!finalPass && slices.size() == 1) {
-            return slices.get(0);
-        }
-
-        String prompt = finalPass
-                ? buildFinalMergePrompt(question, promptPrefix, slices)
-                : buildReducePrompt(question, promptPrefix, slices);
-
-        try {
-            if (estimateTotalPromptTokens(prompt, config.skipSystem) <= MAX_CONTEXT_TOKENS) {
-                String answer = executeInternalPrompt(prompt, config, abortFlag, responseRoomId, streamEventIdHolder, footer);
-                return mergeSliceMetadata(answer, slices);
-            }
-        } catch (InternalContextExceededException ignored) {
-            // Estimator can be low. Reduce further.
-        }
-
-        if (slices.size() <= 1) {
-            return mergeSliceMetadata(slices.get(0).text, slices);
-        }
-
-        int groupBudget = estimateSummaryGroupBudget(question, promptPrefix);
-        List<ChunkRange> groups = planSummaryGroups(slices, groupBudget);
-        if (groups.size() <= 1) {
-            groups = forceSplitRanges(slices.size());
-        }
-
-        List<SummarySlice> reducedGroups = new ArrayList<>();
-        for (ChunkRange group : groups) {
-            List<SummarySlice> subset = new ArrayList<>(slices.subList(group.startIndex, group.endIndex));
-            if (subset.size() == 1) {
-                reducedGroups.add(subset.get(0));
-                continue;
-            }
-            reducedGroups.add(reduceSummarySlicesToOne(subset, question, promptPrefix, config, abortFlag, false,
-                    responseRoomId, streamEventIdHolder, footer + " (reduce)"));
-        }
-
-        return reduceSummarySlicesToOne(reducedGroups, question, promptPrefix, config, abortFlag, finalPass,
-                responseRoomId, streamEventIdHolder, footer);
+        return appendSummarySlices(childSummaries);
     }
 
     private String executeInternalPrompt(String prompt, InternalQueryConfig config, AtomicBoolean abortFlag,
@@ -307,16 +272,10 @@ public class ChunkedSummaryService extends AIService {
         throw new Exception("No AI backend available for chunked summary.");
     }
 
-    private int estimateChunkContentBudget(String question, String promptPrefix) {
+    private int estimateChunkContentBudget(String question, String promptPrefix, int contextLimit) {
         String basePrompt = buildChunkPrompt(question, Collections.emptyList(), promptPrefix);
         int baseTokens = estimateTotalPromptTokens(basePrompt, false);
-        return Math.max(MIN_CONTENT_TOKENS, MAX_CONTEXT_TOKENS - baseTokens);
-    }
-
-    private int estimateSummaryGroupBudget(String question, String promptPrefix) {
-        String basePrompt = buildReducePrompt(question, promptPrefix, Collections.emptyList());
-        int baseTokens = estimateTotalPromptTokens(basePrompt, false);
-        return Math.max(MIN_CONTENT_TOKENS, MAX_CONTEXT_TOKENS - baseTokens);
+        return Math.max(MIN_CONTENT_TOKENS, contextLimit - baseTokens);
     }
 
     private int estimateTotalPromptTokens(String prompt, boolean skipSystem) {
@@ -327,7 +286,8 @@ public class ChunkedSummaryService extends AIService {
         return total;
     }
 
-    private List<ChunkRange> planLogChunks(List<String> logs, List<Long> timestamps, int tokenBudget) {
+    private List<ChunkRange> planLogChunks(List<String> logs, List<Long> timestamps, int tokenBudget, double estimatorScale,
+            int preferredChunkCount) {
         List<ChunkRange> chunks = new ArrayList<>();
         if (logs == null || logs.isEmpty()) {
             return chunks;
@@ -335,7 +295,12 @@ public class ChunkedSummaryService extends AIService {
 
         List<Integer> lineTokens = new ArrayList<>(logs.size());
         for (String log : logs) {
-            lineTokens.add(RoomHistoryManager.estimateTokens(log) + 1);
+            int estimated = RoomHistoryManager.estimateTokens(log) + 1;
+            lineTokens.add(Math.max(1, (int) Math.ceil(estimated * estimatorScale)));
+        }
+
+        if (preferredChunkCount > 1) {
+            return planLogChunksByTargetCount(logs, timestamps, tokenBudget, lineTokens, preferredChunkCount);
         }
 
         int start = 0;
@@ -370,37 +335,63 @@ public class ChunkedSummaryService extends AIService {
         return chunks;
     }
 
-    private List<ChunkRange> planSummaryGroups(List<SummarySlice> slices, int tokenBudget) {
-        List<ChunkRange> groups = new ArrayList<>();
-        if (slices == null || slices.isEmpty()) {
-            return groups;
+    private List<ChunkRange> planLogChunksByTargetCount(List<String> logs, List<Long> timestamps, int tokenBudget,
+            List<Integer> lineTokens, int preferredChunkCount) {
+        List<ChunkRange> chunks = new ArrayList<>();
+        int[] suffixTotals = new int[lineTokens.size() + 1];
+        for (int i = lineTokens.size() - 1; i >= 0; i--) {
+            suffixTotals[i] = suffixTotals[i + 1] + lineTokens.get(i);
         }
 
         int start = 0;
-        while (start < slices.size()) {
-            int end = start;
+        int remainingChunks = preferredChunkCount;
+        while (start < logs.size()) {
+            if (remainingChunks <= 1) {
+                chunks.add(new ChunkRange(start, logs.size()));
+                break;
+            }
+
+            int remainingTokens = suffixTotals[start];
+            int targetTokens = Math.max(1, (int) Math.ceil(remainingTokens / (double) remainingChunks));
+            int softTarget = Math.min(tokenBudget, targetTokens);
+
             int currentTokens = 0;
-            while (end < slices.size()) {
-                int nextTokens = RoomHistoryManager.estimateTokens(renderSummarySlice(slices.get(end))) + 1;
-                if (end > start && currentTokens + nextTokens > tokenBudget) {
+            int softEnd = start;
+            int hardEnd = start;
+
+            while (hardEnd < logs.size()) {
+                int nextTokens = lineTokens.get(hardEnd);
+                if (hardEnd > start && currentTokens + nextTokens > tokenBudget) {
                     break;
                 }
                 currentTokens += nextTokens;
-                end++;
-                if (end == slices.size()) {
-                    break;
+                hardEnd++;
+                if (currentTokens >= softTarget && softEnd == start) {
+                    softEnd = hardEnd;
                 }
             }
 
-            if (end <= start) {
-                end = Math.min(start + 1, slices.size());
+            if (hardEnd <= start) {
+                hardEnd = Math.min(start + 1, logs.size());
+            }
+            if (softEnd <= start) {
+                softEnd = hardEnd;
             }
 
-            groups.add(new ChunkRange(start, end));
-            start = end;
+            int splitEnd = chooseSmartSplitEnd(timestamps, start, hardEnd);
+            if (splitEnd < softEnd) {
+                splitEnd = chooseSmartSplitEnd(timestamps, softEnd - 1, hardEnd);
+            }
+            if (splitEnd <= start || splitEnd > hardEnd) {
+                splitEnd = hardEnd;
+            }
+
+            chunks.add(new ChunkRange(start, splitEnd));
+            start = splitEnd;
+            remainingChunks--;
         }
 
-        return groups;
+        return chunks;
     }
 
     private int chooseSmartSplitEnd(List<Long> timestamps, int start, int hardEnd) {
@@ -515,61 +506,30 @@ public class ChunkedSummaryService extends AIService {
     private String buildChunkPrompt(String question, List<String> logs, String promptPrefix) {
         return "This is one chunk of a larger chat log. Summarize only this chunk for later merging. "
                 + "Keep output dense and factual. Preserve timestamps, decisions, useful resources, and unresolved questions. "
-                + "Avoid intro and outro.\n\n"
+                + "Avoid intro and outro. Do not echo raw messages line-by-line unless explicitly asked. "
+                + "Do not mention chunk numbers.\n\n"
                 + buildPrompt(question, logs, promptPrefix);
     }
 
-    private String buildReducePrompt(String question, String promptPrefix, List<SummarySlice> slices) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Merge these partial chat summaries into one denser intermediate summary for later merging. ")
-                .append("Preserve chronology, timestamps, decisions, useful resources, and unresolved questions. ")
-                .append("Remove duplicates. Keep output compact.\n\n");
-
-        appendPromptFocus(sb, question, promptPrefix);
-        appendSummarySlices(sb, slices);
-        return sb.toString();
-    }
-
-    private String buildFinalMergePrompt(String question, String promptPrefix, List<SummarySlice> slices) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Use these partial summaries of chat logs to produce final answer. ")
-                .append("Preserve chronology and remove duplicates. Use only information present below.\n\n");
-
-        appendPromptFocus(sb, question, promptPrefix);
-        appendSummarySlices(sb, slices);
-        return sb.toString();
-    }
-
-    private void appendPromptFocus(StringBuilder sb, String question, String promptPrefix) {
-        if (question != null && !question.isEmpty()) {
-            sb.append("Original question: '").append(question).append("'\n");
-        } else if (Prompts.TLDR_PREFIX.equals(promptPrefix)) {
-            sb.append("Target style: very concise TLDR.\n");
-        } else if (Prompts.OVERVIEW_PREFIX.equals(promptPrefix)) {
-            sb.append("Target style: high-level overview.\n");
-        } else if (Prompts.SUMMARY_PREFIX.equals(promptPrefix)) {
-            sb.append("Target style: condensed summary.\n");
+    private SummarySlice appendSummarySlices(List<SummarySlice> slices) throws Exception {
+        if (slices == null || slices.isEmpty()) {
+            throw new Exception("No summaries produced for append.");
         }
-        if (promptPrefix != null && !promptPrefix.isEmpty()) {
-            sb.append("Original output instructions:\n").append(promptPrefix).append("\n");
+        if (slices.size() == 1) {
+            return slices.get(0);
         }
-    }
 
-    private void appendSummarySlices(StringBuilder sb, List<SummarySlice> slices) {
-        sb.append("\nPartial summaries:\n\n");
+        StringBuilder combined = new StringBuilder();
         for (SummarySlice slice : slices) {
-            sb.append(renderSummarySlice(slice)).append("\n\n");
+            if (slice == null || slice.text == null || slice.text.trim().isEmpty()) {
+                continue;
+            }
+            if (combined.length() > 0) {
+                combined.append("\n\n");
+            }
+            combined.append(slice.text.trim());
         }
-    }
-
-    private String renderSummarySlice(SummarySlice slice) {
-        String range;
-        if (slice.startLabel != null && slice.endLabel != null && !slice.startLabel.isEmpty() && !slice.endLabel.isEmpty()) {
-            range = "[" + slice.startLabel + " -> " + slice.endLabel + "]";
-        } else {
-            range = "[partial summary]";
-        }
-        return range + "\n" + slice.text;
+        return mergeSliceMetadata(combined.toString(), slices);
     }
 
     private String extractTimestampLabel(String logLine) {
@@ -581,5 +541,42 @@ public class ChunkedSummaryService extends AIService {
             return "";
         }
         return logLine.substring(1, end);
+    }
+
+    private ContextWindowInfo parseContextWindowInfo(String message) {
+        if (message == null) {
+            return null;
+        }
+        try {
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\((\\d+)/(\\d+)\\)").matcher(message);
+            if (matcher.find()) {
+                return new ContextWindowInfo(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)));
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private double calculateEstimatorScale(RoomHistoryManager.ChatLogsResult history, String question, String promptPrefix,
+            ContextWindowInfo contextWindowInfo) {
+        if (contextWindowInfo == null || contextWindowInfo.usedTokens <= 0 || history == null || history.logs == null) {
+            return 1.0;
+        }
+
+        String oneShotPrompt = buildPrompt(question, history.logs, promptPrefix);
+        int estimated = estimateTotalPromptTokens(oneShotPrompt, Prompts.DEBUGAI_PREFIX.equals(promptPrefix));
+        if (estimated <= 0) {
+            return 1.0;
+        }
+
+        double scale = contextWindowInfo.usedTokens / (double) estimated;
+        return Math.max(0.25, Math.min(1.25, scale));
+    }
+
+    private int calculatePreferredChunkCount(ContextWindowInfo contextWindowInfo) {
+        if (contextWindowInfo == null || contextWindowInfo.usedTokens <= 0 || contextWindowInfo.limitTokens <= 0) {
+            return -1;
+        }
+        return Math.max(1, (int) Math.ceil(contextWindowInfo.usedTokens / (double) contextWindowInfo.limitTokens));
     }
 }
