@@ -92,7 +92,7 @@ public class AIService {
 
             // Send immediate status message
             String gatherMsg = "\uD83D\uDCE8 Gathering " + timeInfo + "...";
-            String statusEventId = matrixClient.sendTextWithEventId(responseRoomId, gatherMsg);
+            String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
 
             // Create progress callback that updates every 5 seconds
             final String fStatusEventId = statusEventId;
@@ -102,7 +102,7 @@ public class AIService {
                 if (now - lastProgressUpdate.get() >= 5000) {
                     lastProgressUpdate.set(now);
                     String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateTextMessage(responseRoomId, fStatusEventId,
+                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
                             "\uD83D\uDCE8 Gathering " + timeInfo + "... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
                 }
             };
@@ -111,11 +111,11 @@ public class AIService {
                     startEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
 
             if (history.errorMessage != null) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId, history.errorMessage);
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, history.errorMessage);
                 return;
             }
             if (history.logs.isEmpty()) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
                 return;
             }
@@ -163,15 +163,15 @@ public class AIService {
             // Reuse existing status message if available, otherwise send a new one
             String eventId;
             if (statusEventId != null) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId, queryStatusMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, queryStatusMsg);
                 eventId = statusEventId;
             } else {
-                eventId = matrixClient.sendTextWithEventId(responseRoomId, queryStatusMsg);
+                eventId = matrixClient.sendNoticeWithEventId(responseRoomId, queryStatusMsg);
             }
             if (eventId == null) return;
 
             if (abortFlag != null && abortFlag.get()) {
-                matrixClient.updateTextMessage(responseRoomId, eventId, queryStatusMsg + " [ABORTED]");
+                matrixClient.updateNoticeMessage(responseRoomId, eventId, queryStatusMsg + " [ABORTED]");
                 return;
             }
 
@@ -207,14 +207,14 @@ public class AIService {
                                 contextInfo);
                         if (abortFlag != null && abortFlag.get()) return;
                         if (preferredBackend == Backend.AUTO && tryCerebras && cerebrasApiKey != null && !cerebrasApiKey.isEmpty()) {
-                            matrixClient.updateTextMessage(responseRoomId, eventId,
+                            matrixClient.updateNoticeMessage(responseRoomId, eventId,
                                     "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ". Querying Cerebras (" + cerebrasModel + ") with " + queryDescription + questionPart);
                             msgEdited = true;
                         }
                     } else {
                         allAttemptedBackendsContextExceeded = false;
                         if (abortFlag != null && abortFlag.get()) return;
-                        matrixClient.sendText(responseRoomId, "ArliAI (" + arliModel + ") failed: " + arliErrorMsg);
+                        matrixClient.sendNotice(responseRoomId, "ArliAI (" + arliModel + ") failed: " + arliErrorMsg);
                         if (is403) return; // Don't fallback on other 403 errors
                     }
 
@@ -230,7 +230,7 @@ public class AIService {
 
                 if (preferredBackend == Backend.AUTO && !eventId.isEmpty() && !msgEdited) {
                     if (abortFlag != null && abortFlag.get()) return;
-                    matrixClient.sendText(responseRoomId, "Querying Cerebras (" + cerebrasModel + ")...");
+                    matrixClient.sendNotice(responseRoomId, "Querying Cerebras (" + cerebrasModel + ")...");
                 }
 
                 try {
@@ -292,6 +292,35 @@ public class AIService {
                 .build();
 
         return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "ArliAI", abortFlag);
+    }
+
+    protected String callArliAIStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
+            String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            boolean useNotice) throws Exception {
+        String arliApiUrl = "https://api.arliai.com";
+        if (arliApiKey == null || arliApiKey.isEmpty()) {
+            throw new Exception("ARLI_API_KEY is not configured.");
+        }
+
+        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
+
+        Map<String, Object> arliPayload = Map.of(
+                "model", model,
+                "messages", messages,
+                "stream", true,
+                "output_kind", "delta");
+        String jsonPayload = mapper.writeValueAsString(arliPayload);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(arliApiUrl + "/v1/chat/completions"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + arliApiKey)
+                .header("Accept", "text/event-stream")
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                .build();
+
+        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "ArliAI", abortFlag, footer, useNotice);
     }
 
     protected String callArliAIBlocking(String prompt, String model, boolean skipSystem, int timeoutSeconds) throws Exception {
@@ -417,9 +446,9 @@ public class AIService {
                                     String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
                                     String indicator = clockFaces[updateCount++ % clockFaces.length] + " " + elapsedStr;
                                     if (eventIdHolder[0] == null) {
-                                        eventIdHolder[0] = matrixClient.sendMarkdownWithEventId(responseRoomId, output + " " + indicator);
+                                        eventIdHolder[0] = matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, output + " " + indicator);
                                     } else {
-                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], output + " " + indicator);
+                                        matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], output + " " + indicator);
                                     }
                                 }
                             }
@@ -470,6 +499,121 @@ public class AIService {
         return finalOutput;
     }
 
+    protected String streamArliAIResponseToEvent(HttpRequest request, String responseRoomId, String[] eventIdHolder,
+            String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer, boolean useNotice) throws Exception {
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+
+        StringBuilder reasoning = new StringBuilder();
+        StringBuilder responseContent = new StringBuilder();
+        long lastUpdate = System.currentTimeMillis();
+        final long startTime = System.currentTimeMillis();
+
+        int updateCount = 0;
+        String[] clockFaces = {"🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦"};
+
+        try {
+            System.out.println("Starting " + aiName + " streaming request...");
+            HttpResponse<java.util.stream.Stream<String>> response = client.send(request, HttpResponse.BodyHandlers.ofLines());
+
+            if (response.statusCode() != 200) {
+                String errorBody = response.body().collect(java.util.stream.Collectors.joining("\n"));
+                throw new Exception("Status: " + response.statusCode() + " Body: " + errorBody);
+            }
+
+            try (java.util.stream.Stream<String> lines = response.body()) {
+                java.util.Iterator<String> it = lines.iterator();
+                while (it.hasNext()) {
+                    if (abortFlag != null && abortFlag.get()) {
+                        System.out.println(aiName + " streaming aborted by flag.");
+                        break;
+                    }
+                    String line = it.next();
+                    String data = line.trim();
+                    if (data.isEmpty()) continue;
+
+                    if (data.startsWith("data:") && !data.contains("[DONE]")) {
+                        try {
+                            String json = data.substring(5).trim();
+                            if (json.isEmpty()) continue;
+
+                            JsonNode node = mapper.readTree(json);
+                            JsonNode choices = node.path("choices");
+                            if (choices.isArray() && choices.size() > 0) {
+                                JsonNode delta = choices.get(0).path("delta");
+                                if (delta.has("content")) {
+                                    responseContent.append(delta.get("content").asText());
+                                } else if (delta.has("reasoning")) {
+                                    reasoning.append(delta.get("reasoning").asText());
+                                } else if (delta.has("reasoning_content")) {
+                                    reasoning.append(delta.get("reasoning_content").asText());
+                                }
+
+                                long now = System.currentTimeMillis();
+                                if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
+                                    lastUpdate = now;
+                                    String rendered = buildStreamingOutput(reasoning, responseContent, footer, clockFaces, updateCount++, startTime);
+                                    if (eventIdHolder[0] == null) {
+                                        eventIdHolder[0] = useNotice
+                                                ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, rendered)
+                                                : matrixClient.sendMarkdownWithEventId(responseRoomId, rendered);
+                                    } else if (useNotice) {
+                                        matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], rendered);
+                                    } else {
+                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], rendered);
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            System.err.println(aiName + " Stream Parse Error: " + e.getMessage() + " | Line: " + line);
+                        }
+                    } else if (data.contains("[DONE]")) {
+                        System.out.println(aiName + " streaming finished normally ([DONE] received).");
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error during " + aiName + " streaming call: " + e.getMessage());
+            e.printStackTrace();
+            throw new Exception("Error during " + aiName + " streaming: " + e.getMessage(), e);
+        }
+
+        if (responseContent.length() == 0 && reasoning.length() == 0) {
+            throw new Exception("No response received from " + aiName + ".");
+        }
+
+        String finalOutput;
+        if (responseContent.toString().trim().isEmpty()) {
+            if (reasoning.length() > 0) {
+                String trimmed = trimReasoning(reasoning.toString());
+                finalOutput = "> " + trimmed.replace("\n", "\n> ") + "\n\n**" + aiName + ": No final response was generated.**";
+            } else {
+                finalOutput = "**" + aiName + " Error: No final response was generated.**";
+            }
+        } else {
+            finalOutput = responseContent.toString();
+        }
+
+        if (finalOutput.length() > 16000) {
+            finalOutput = finalOutput.substring(0, 15900) + "... [TRUNCATED]";
+        }
+
+        if (footer != null && !footer.isEmpty()) {
+            finalOutput = finalOutput + "\n\n" + footer;
+        }
+
+        if (eventIdHolder[0] == null) {
+            eventIdHolder[0] = useNotice
+                    ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, finalOutput)
+                    : matrixClient.sendMarkdownWithEventId(responseRoomId, finalOutput);
+        } else if (useNotice) {
+            matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], finalOutput);
+        } else {
+            matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], finalOutput);
+        }
+        return finalOutput;
+    }
+
     public void queryAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
             String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             String startEventId) {
@@ -487,7 +631,7 @@ public class AIService {
 
             // Send immediate status message
             String gatherMsg = "\uD83D\uDCE8 Gathering unread messages...";
-            String statusEventId = matrixClient.sendTextWithEventId(responseRoomId, gatherMsg);
+            String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
 
             // Create progress callback that updates every 5 seconds
             final String fStatusEventId = statusEventId;
@@ -497,7 +641,7 @@ public class AIService {
                 if (now - lastProgressUpdate.get() >= 5000) {
                     lastProgressUpdate.set(now);
                     String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateTextMessage(responseRoomId, fStatusEventId,
+                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
                             "\uD83D\uDCE8 Gathering unread messages... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
                 }
             };
@@ -507,7 +651,7 @@ public class AIService {
                     zoneId, true, abortFlag, progressCallback);
 
             if (result.logs.isEmpty()) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "No unread messages found for you in " + exportRoomId + ".");
                 return;
             }
@@ -539,7 +683,7 @@ public class AIService {
 
             // Send immediate status message
             String gatherMsg = "\uD83D\uDCE8 Gathering messages (up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
-            String statusEventId = matrixClient.sendTextWithEventId(responseRoomId, gatherMsg);
+            String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
 
             // Create progress callback that updates every 5 seconds
             final String fStatusEventId = statusEventId;
@@ -549,7 +693,7 @@ public class AIService {
                 if (now - lastProgressUpdate.get() >= 5000) {
                     lastProgressUpdate.set(now);
                     String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateTextMessage(responseRoomId, fStatusEventId,
+                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
                             "\uD83D\uDCE8 Gathering messages... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
                 }
             };
@@ -558,7 +702,7 @@ public class AIService {
                     fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
 
             if (history.logs.isEmpty()) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "No chat logs found in " + exportRoomId + ".");
                 return;
             }
@@ -741,6 +885,35 @@ public class AIService {
         }
         
         return sb.toString().trim();
+    }
+
+    private String buildStreamingOutput(StringBuilder reasoning, StringBuilder responseContent, String footer,
+            String[] clockFaces, int updateCount, long startTime) {
+        StringBuilder streamingOutput = new StringBuilder();
+        if (reasoning.length() > 0) {
+            String r = trimReasoning(reasoning.toString());
+            streamingOutput.append("> ").append(r.replace("\n", "\n> ")).append("\n\n");
+        }
+        if (responseContent.length() > 0) {
+            streamingOutput.append(responseContent);
+        }
+
+        String output = streamingOutput.toString();
+        if (output.length() > 16000) {
+            output = output.substring(0, 15900) + "... [TRUNCATED]";
+        }
+
+        long elapsedMs = System.currentTimeMillis() - startTime;
+        long elapsedSec = elapsedMs / 1000;
+        String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
+        String indicator = clockFaces[updateCount % clockFaces.length] + " " + elapsedStr;
+
+        StringBuilder rendered = new StringBuilder(output);
+        rendered.append("\n\n").append(indicator);
+        if (footer != null && !footer.isEmpty()) {
+            rendered.append("\n").append(footer);
+        }
+        return rendered.toString();
     }
 
     protected String appendMessageLink(String aiAnswer, String exportRoomId, String firstEventId) {

@@ -89,12 +89,13 @@ public class ChunkedSummaryService extends AIService {
             }
 
             if (statusEventId != null) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "Context exceeded. Switching to smart chunked summary...");
             } else {
-                matrixClient.sendText(responseRoomId, "Context exceeded. Switching to smart chunked summary...");
+                matrixClient.sendNotice(responseRoomId, "Context exceeded. Switching to smart chunked summary...");
             }
 
+            String[] streamEventIdHolder = new String[]{statusEventId};
             String arliModel = (preferredBackend == Backend.ARLIAI && forcedModel != null)
                     ? forcedModel
                     : getRandomModel(ARLI_MODELS);
@@ -122,22 +123,24 @@ public class ChunkedSummaryService extends AIService {
                 }
 
                 ChunkRange chunk = initialChunks.get(i);
+                String chunkFooter = "Chunk " + (i + 1) + "/" + totalChunks;
                 if (statusEventId != null) {
-                    matrixClient.updateTextMessage(responseRoomId, statusEventId,
-                            "Smart chunked summary... (" + (i + 1) + "/" + totalChunks + ")");
+                    matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                            "Smart chunked summary...\n" + chunkFooter);
                 }
 
                 List<String> chunkLogs = new ArrayList<>(history.logs.subList(chunk.startIndex, chunk.endIndex));
                 List<Long> chunkTimestamps = subListOrEmpty(history.timestamps, chunk.startIndex, chunk.endIndex);
-                partialSummaries.add(summarizeLogChunk(chunkLogs, chunkTimestamps, question, promptPrefix, config, abortFlag));
+                partialSummaries.add(summarizeLogChunk(chunkLogs, chunkTimestamps, question, promptPrefix, config,
+                        abortFlag, responseRoomId, streamEventIdHolder, chunkFooter));
             }
 
             SummarySlice finalSummary = reduceSummarySlicesToOne(partialSummaries, question, promptPrefix, config,
-                    abortFlag, true);
+                    abortFlag, true, responseRoomId, streamEventIdHolder, "Final merge");
             String finalAnswer = appendMessageLink(finalSummary.text, exportRoomId, history.firstEventId);
 
             if (statusEventId != null) {
-                matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "Smart chunked summary complete (" + partialSummaries.size() + " chunk"
                                 + (partialSummaries.size() == 1 ? "" : "s") + ").");
             }
@@ -156,7 +159,8 @@ public class ChunkedSummaryService extends AIService {
     }
 
     private SummarySlice summarizeLogChunk(List<String> logs, List<Long> timestamps, String question,
-            String promptPrefix, InternalQueryConfig config, AtomicBoolean abortFlag) throws Exception {
+            String promptPrefix, InternalQueryConfig config, AtomicBoolean abortFlag, String responseRoomId,
+            String[] streamEventIdHolder, String footer) throws Exception {
         if (abortFlag != null && abortFlag.get()) {
             throw new Exception("Aborted");
         }
@@ -164,7 +168,7 @@ public class ChunkedSummaryService extends AIService {
         String directPrompt = buildChunkPrompt(question, logs, promptPrefix);
         try {
             if (estimateTotalPromptTokens(directPrompt, config.skipSystem) <= MAX_CONTEXT_TOKENS) {
-                String answer = executeInternalPrompt(directPrompt, config, abortFlag);
+                String answer = executeInternalPrompt(directPrompt, config, abortFlag, responseRoomId, streamEventIdHolder, footer);
                 return createSummarySlice(answer, logs, timestamps);
             }
         } catch (InternalContextExceededException ignored) {
@@ -185,14 +189,17 @@ public class ChunkedSummaryService extends AIService {
         for (ChunkRange childRange : childRanges) {
             List<String> childLogs = new ArrayList<>(logs.subList(childRange.startIndex, childRange.endIndex));
             List<Long> childTimestamps = subListOrEmpty(timestamps, childRange.startIndex, childRange.endIndex);
-            childSummaries.add(summarizeLogChunk(childLogs, childTimestamps, question, promptPrefix, config, abortFlag));
+            childSummaries.add(summarizeLogChunk(childLogs, childTimestamps, question, promptPrefix, config,
+                    abortFlag, responseRoomId, streamEventIdHolder, footer + " (split)"));
         }
 
-        return reduceSummarySlicesToOne(childSummaries, question, promptPrefix, config, abortFlag, false);
+        return reduceSummarySlicesToOne(childSummaries, question, promptPrefix, config, abortFlag, false,
+                responseRoomId, streamEventIdHolder, footer + " (merge)");
     }
 
     private SummarySlice reduceSummarySlicesToOne(List<SummarySlice> slices, String question, String promptPrefix,
-            InternalQueryConfig config, AtomicBoolean abortFlag, boolean finalPass) throws Exception {
+            InternalQueryConfig config, AtomicBoolean abortFlag, boolean finalPass, String responseRoomId,
+            String[] streamEventIdHolder, String footer) throws Exception {
         if (slices == null || slices.isEmpty()) {
             throw new Exception("No summaries produced for reduction.");
         }
@@ -207,7 +214,7 @@ public class ChunkedSummaryService extends AIService {
 
         try {
             if (estimateTotalPromptTokens(prompt, config.skipSystem) <= MAX_CONTEXT_TOKENS) {
-                String answer = executeInternalPrompt(prompt, config, abortFlag);
+                String answer = executeInternalPrompt(prompt, config, abortFlag, responseRoomId, streamEventIdHolder, footer);
                 return mergeSliceMetadata(answer, slices);
             }
         } catch (InternalContextExceededException ignored) {
@@ -231,14 +238,16 @@ public class ChunkedSummaryService extends AIService {
                 reducedGroups.add(subset.get(0));
                 continue;
             }
-            reducedGroups.add(reduceSummarySlicesToOne(subset, question, promptPrefix, config, abortFlag, false));
+            reducedGroups.add(reduceSummarySlicesToOne(subset, question, promptPrefix, config, abortFlag, false,
+                    responseRoomId, streamEventIdHolder, footer + " (reduce)"));
         }
 
-        return reduceSummarySlicesToOne(reducedGroups, question, promptPrefix, config, abortFlag, finalPass);
+        return reduceSummarySlicesToOne(reducedGroups, question, promptPrefix, config, abortFlag, finalPass,
+                responseRoomId, streamEventIdHolder, footer);
     }
 
-    private String executeInternalPrompt(String prompt, InternalQueryConfig config, AtomicBoolean abortFlag)
-            throws Exception {
+    private String executeInternalPrompt(String prompt, InternalQueryConfig config, AtomicBoolean abortFlag,
+            String responseRoomId, String[] streamEventIdHolder, String footer) throws Exception {
         if (abortFlag != null && abortFlag.get()) {
             throw new Exception("Aborted");
         }
@@ -252,7 +261,8 @@ public class ChunkedSummaryService extends AIService {
         if (tryArli) {
             attempted = true;
             try {
-                return callArliAIBlocking(prompt, config.arliModel, config.skipSystem, config.timeoutSeconds);
+                return callArliAIStreamingToEvent(prompt, config.arliModel, config.skipSystem, responseRoomId,
+                        streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
             } catch (Exception e) {
                 if (!isContextExceededMessage(e.getMessage())) {
                     allContextExceeded = false;
@@ -271,6 +281,11 @@ public class ChunkedSummaryService extends AIService {
         if (tryCerebras && cerebrasApiKey != null && !cerebrasApiKey.isEmpty()) {
             attempted = true;
             try {
+                if (streamEventIdHolder != null && streamEventIdHolder[0] != null) {
+                    MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+                    String cerebrasNotice = "Using Cerebras...\n\n" + footer;
+                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, streamEventIdHolder[0], cerebrasNotice);
+                }
                 return callCerebras(prompt, config.cerebrasModel, config.skipSystem);
             } catch (Exception e) {
                 if (!isContextExceededMessage(e.getMessage())) {

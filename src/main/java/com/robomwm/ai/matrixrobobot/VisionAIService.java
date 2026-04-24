@@ -52,7 +52,7 @@ public class VisionAIService extends ChunkedSummaryService {
         }
 
         int imageCount = history.imageUrls.size();
-        matrixClient.updateTextMessage(responseRoomId, statusEventId,
+        matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                 "\uD83D\uDDBC\uFE0F Describing " + imageCount + " image(s)...");
 
         ObjectNode cache = loadDescriptionCache();
@@ -74,7 +74,7 @@ public class VisionAIService extends ChunkedSummaryService {
                 continue;
             }
 
-            matrixClient.updateTextMessage(responseRoomId, statusEventId,
+            matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                     "\uD83D\uDDBC\uFE0F Describing image " + (i + 1) + "/" + imageCount
                     + " (" + cachedCount + " cached): " + caption);
 

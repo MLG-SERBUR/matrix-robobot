@@ -69,39 +69,29 @@ public class MatrixClient {
      * Send a plain text message to a room
      */
     public void sendText(String roomId, String message) {
-        try {
-            String txnId = "m" + Instant.now().toEpochMilli();
-            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
-                    + txnId;
+        sendMessage(roomId, message, false, "m.text");
+    }
 
-            String sanitizedMessage = sanitizeUserIds(message);
-
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("msgtype", "m.text");
-            payload.put("body", sanitizedMessage);
-            payload.put("m.mentions", Map.of());
-            String json = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(120))
-                    .PUT(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            System.out.println("Sent reply to " + roomId + " -> " + response.statusCode());
-        } catch (Exception e) {
-            System.out.println("Failed to send message: " + e.getMessage());
-        }
+    public void sendNotice(String roomId, String message) {
+        sendMessage(roomId, message, false, "m.notice");
     }
 
     /**
      * Send a text message and return the event ID
      */
     public String sendTextWithEventId(String roomId, String message) {
+        return sendMessageWithEventId(roomId, message, false, "m.text");
+    }
+
+    public String sendNoticeWithEventId(String roomId, String message) {
+        return sendMessageWithEventId(roomId, message, false, "m.notice");
+    }
+
+    private void sendMessage(String roomId, String message, boolean useMarkdown, String msgType) {
+        sendMessageWithEventId(roomId, message, useMarkdown, msgType);
+    }
+
+    private String sendMessageWithEventId(String roomId, String message, boolean useMarkdown, String msgType) {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
@@ -111,8 +101,12 @@ public class MatrixClient {
             String sanitizedMessage = sanitizeUserIds(message);
 
             Map<String, Object> payload = new HashMap<>();
-            payload.put("msgtype", "m.text");
+            payload.put("msgtype", msgType);
             payload.put("body", sanitizedMessage);
+            if (useMarkdown) {
+                payload.put("format", "org.matrix.custom.html");
+                payload.put("formatted_body", convertMarkdownToHtml(sanitizedMessage));
+            }
             payload.put("m.mentions", Map.of());
             String json = mapper.writeValueAsString(payload);
 
@@ -141,14 +135,22 @@ public class MatrixClient {
      * Update a previously sent text message
      */
     public String updateTextMessage(String roomId, String originalEventId, String message) {
-        return updateMarkdownMessage(roomId, originalEventId, message, false);
+        return updateMessage(roomId, originalEventId, message, false, "m.text");
+    }
+
+    public String updateNoticeMessage(String roomId, String originalEventId, String message) {
+        return updateMessage(roomId, originalEventId, message, false, "m.notice");
     }
 
     public String updateMarkdownMessage(String roomId, String originalEventId, String message) {
-        return updateMarkdownMessage(roomId, originalEventId, message, true);
+        return updateMessage(roomId, originalEventId, message, true, "m.text");
     }
 
-    private String updateMarkdownMessage(String roomId, String originalEventId, String message, boolean useMarkdown) {
+    public String updateMarkdownNoticeMessage(String roomId, String originalEventId, String message) {
+        return updateMessage(roomId, originalEventId, message, true, "m.notice");
+    }
+
+    private String updateMessage(String roomId, String originalEventId, String message, boolean useMarkdown, String msgType) {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
@@ -158,12 +160,12 @@ public class MatrixClient {
             String sanitizedMessage = sanitizeUserIds(message);
 
             Map<String, Object> payload = new HashMap<>();
-            payload.put("msgtype", "m.text");
+            payload.put("msgtype", msgType);
             payload.put("body", "* " + sanitizedMessage);
             payload.put("m.mentions", Map.of());
 
             Map<String, Object> newContent = new HashMap<>();
-            newContent.put("msgtype", "m.text");
+            newContent.put("msgtype", msgType);
             newContent.put("body", sanitizedMessage);
             newContent.put("m.mentions", Map.of());
             
@@ -207,78 +209,22 @@ public class MatrixClient {
      * Send a markdown formatted message and return the event ID
      */
     public String sendMarkdownWithEventId(String roomId, String message) {
-        try {
-            String txnId = "m" + Instant.now().toEpochMilli();
-            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
-                    + txnId;
+        return sendMessageWithEventId(roomId, message, true, "m.text");
+    }
 
-            String sanitizedMessage = sanitizeUserIds(message);
-            String htmlBody = convertMarkdownToHtml(sanitizedMessage);
-
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("msgtype", "m.text");
-            payload.put("body", sanitizedMessage);
-            payload.put("format", "org.matrix.custom.html");
-            payload.put("formatted_body", htmlBody);
-            payload.put("m.mentions", Map.of());
-            String json = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(120))
-                    .PUT(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 200) {
-                JsonNode root = mapper.readTree(response.body());
-                return root.path("event_id").asText(null);
-            }
-            System.out.println("Sent markdown reply to " + roomId + " -> " + response.statusCode());
-            return null;
-        } catch (Exception e) {
-            System.out.println("Failed to send markdown message: " + e.getMessage());
-            return null;
-        }
+    public String sendMarkdownNoticeWithEventId(String roomId, String message) {
+        return sendMessageWithEventId(roomId, message, true, "m.notice");
     }
 
     /**
      * Send a markdown formatted message
      */
     public void sendMarkdown(String roomId, String message) {
-        try {
-            String txnId = "m" + Instant.now().toEpochMilli();
-            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
-                    + txnId;
+        sendMessage(roomId, message, true, "m.text");
+    }
 
-            String sanitizedMessage = sanitizeUserIds(message);
-            String htmlBody = convertMarkdownToHtml(sanitizedMessage);
-
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("msgtype", "m.text");
-            payload.put("body", sanitizedMessage);
-            payload.put("format", "org.matrix.custom.html");
-            payload.put("formatted_body", htmlBody);
-            payload.put("m.mentions", Map.of());
-            String json = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(120))
-                    .PUT(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            System.out.println("Sent markdown reply to " + roomId + " -> " + response.statusCode());
-        } catch (Exception e) {
-            System.out.println("Failed to send markdown message: " + e.getMessage());
-        }
+    public void sendMarkdownNotice(String roomId, String message) {
+        sendMessage(roomId, message, true, "m.notice");
     }
 
     /**
