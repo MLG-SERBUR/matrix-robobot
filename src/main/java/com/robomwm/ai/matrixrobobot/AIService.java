@@ -26,7 +26,7 @@ public class AIService {
     protected final String cerebrasApiKey;
     protected final RoomHistoryManager historyManager;
     protected final Random random;
-    public static final int AI_TIMEOUT_SECONDS = 20 * 60;
+    public static final int AI_TIMEOUT_SECONDS = 1200;
     public static final List<String> ARLI_MODELS = Arrays.asList(
             "Qwen3.5-27B-Derestricted"
     );
