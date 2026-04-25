@@ -437,6 +437,7 @@ public class AiSearchService {
             List<Map<String, String>> messages = new ArrayList<>();
             messages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
             messages.add(Map.of("role", "user", "content", userPrompt));
+            messages.add(Map.of("role", "assistant", "content", "<think></think>\n"));
 
             Map<String, Object> payload = Map.of(
                 "model", "Qwen3.5-27B-Derestricted",

@@ -359,6 +359,7 @@ public class DebugAIService {
                 messages.add(Map.of("role", "system", "content", AIService.Prompts.SYSTEM_OVERVIEW));
             }
             messages.add(Map.of("role", "user", "content", prompt));
+            messages.add(Map.of("role", "assistant", "content", "<think></think>\n"));
             
             // Call Arli AI with custom parameters
             callArliAIDebug(responseRoomId, exportRoomId, model, messages, config, abortFlag, statusEventId, prevBatch, historyManager);

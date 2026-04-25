@@ -130,6 +130,7 @@ public class VisionAIService extends ChunkedSummaryService {
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(Map.of("role", "system", "content", "You are a vision assistant. Do not reason. Do not think. Do not draft. Output only the final terse one sentence (incomplete sentence ok) caption immediately."));
         messages.add(Map.of("role", "user", "content", content));
+        messages.add(Map.of("role", "assistant", "content", "<think></think>\n"));
 
         Map<String, Object> payload = Map.of(
                 "model", "Qwen3.5-27B-Derestricted",
