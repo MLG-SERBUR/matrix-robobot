@@ -276,7 +276,6 @@ public class AIService {
         }
 
         List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
-        messages.add(Map.of("role", "assistant", "content", "<think></think>\n"));
 
         Map<String, Object> arliPayload = Map.of(
                 "model", model,
@@ -306,7 +305,6 @@ public class AIService {
         }
 
         List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
-        messages.add(Map.of("role", "assistant", "content", "<think></think>\n"));
 
         Map<String, Object> arliPayload = Map.of(
                 "model", model,
