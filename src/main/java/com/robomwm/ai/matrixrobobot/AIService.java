@@ -327,57 +327,6 @@ public class AIService {
         return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "ArliAI", abortFlag, footer, useNotice);
     }
 
-    protected String callArliAIBlocking(String prompt, String model, boolean skipSystem, int timeoutSeconds) throws Exception {
-        String arliApiUrl = "https://api.arliai.com";
-        if (arliApiKey == null || arliApiKey.isEmpty()) {
-            throw new Exception("ARLI_API_KEY is not configured.");
-        }
-
-        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
-        messages.add(Map.of("role", "assistant", "content", "<think></think>\n"));
-
-        Map<String, Object> arliPayload = Map.of(
-                "model", model,
-                "messages", messages,
-                "stream", false);
-        String jsonPayload = mapper.writeValueAsString(arliPayload);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(arliApiUrl + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + arliApiKey)
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
-
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            throw new Exception("Status: " + response.statusCode() + " Body: " + response.body());
-        }
-
-        try {
-            JsonNode arliResponse = mapper.readTree(response.body());
-            JsonNode choice = arliResponse.path("choices").get(0);
-            if (choice == null) {
-                throw new Exception("Missing 'choices' array");
-            }
-
-            String text = choice.path("message").path("content").asText(null);
-            if (text == null || text.trim().isEmpty()) {
-                text = choice.path("message").path("reasoning").asText(null);
-            }
-            if (text == null || text.trim().isEmpty()) {
-                text = choice.path("message").path("reasoning_content").asText(null);
-            }
-            if (text == null || text.trim().isEmpty()) {
-                throw new Exception("No response from Arli AI (" + model + ").");
-            }
-
-            return text.replaceAll("(?s)<think>.*?</think>", "").trim();
-        } catch (Exception e) {
-            throw new Exception("Unexpected response from Arli AI (" + model + "). Body: " + response.body(), e);
-        }
-    }
 
     protected String streamArliAIResponse(HttpRequest request, String responseRoomId, String exportRoomId, String firstEventId, String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
