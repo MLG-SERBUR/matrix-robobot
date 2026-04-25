@@ -116,7 +116,7 @@ public class AiSearchService {
             String timeInfo = "last " + hours + "h";
             
             // Send initial status
-            String statusEventId = matrixClient.sendTextWithEventId(responseRoomId, 
+            String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, 
                 "\uD83D\uDD0D AI Search: Searching for \"" + query + "\" in " + timeInfo + "...");
 
             // Step 1: Fetch all messages in the time range
@@ -128,7 +128,7 @@ public class AiSearchService {
                 long now = System.currentTimeMillis();
                 if (now - lastProgressUpdate.get() >= 3000) {
                     lastProgressUpdate.set(now);
-                    matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                    matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "\uD83D\uDD0D AI Search: Gathering messages... (" + msgCount + " found)");
                 }
             };
@@ -147,7 +147,7 @@ public class AiSearchService {
                 return;
             }
 
-            matrixClient.updateTextMessage(responseRoomId, statusEventId,
+            matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                 "\uD83D\uDD0D AI Search: Found " + allMessages.logs.size() + " messages. Pre-filtering...");
 
             // Step 2: Pre-filter using semantic + text search
@@ -164,7 +164,7 @@ public class AiSearchService {
                 return;
             }
 
-            matrixClient.updateTextMessage(responseRoomId, statusEventId,
+            matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                 "\uD83D\uDD0D AI Search: Found " + candidates.size() + " candidates. Analyzing with AI...");
 
             // Step 3: Agentic loop - iteratively analyze with AI
@@ -181,7 +181,7 @@ public class AiSearchService {
                 List<SearchCandidate> batchCandidates = currentCandidates.subList(0, 
                     Math.min(maxCandidates, currentCandidates.size()));
 
-                matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                     "\uD83D\uDD0D AI Search: Analyzing batch " + iteration + "/" + MAX_ITERATIONS + 
                     " (" + batchCandidates.size() + " candidates)...");
 
@@ -226,7 +226,7 @@ public class AiSearchService {
                     String contextEventId = parseResult.requestedContextEventId;
                     
                     if (!examinedEventIds.contains(contextEventId)) {
-                        matrixClient.updateTextMessage(responseRoomId, statusEventId,
+                        matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                             "\uD83D\uDD0D AI Search: Fetching context around message...");
                         
                         // Fetch context around the requested message

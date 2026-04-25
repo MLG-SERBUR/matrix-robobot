@@ -349,7 +349,7 @@ public class DebugAIService {
             if (!settingsSummary.isEmpty()) {
                 statusMsg += "\nSettings: " + settingsSummary;
             }
-            String statusEventId = matrixClient.sendTextWithEventId(responseRoomId, statusMsg);
+            String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, statusMsg);
             
             if (statusEventId == null) return;
             
@@ -464,9 +464,9 @@ public class DebugAIService {
                                     String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
                                     String indicator = clockFaces[updateCount.getAndIncrement() % clockFaces.length] + " " + elapsedStr;
                                     if (eventIdObj.get() == null) {
-                                        eventIdObj.set(matrixClient.sendMarkdownWithEventId(responseRoomId, output + " " + indicator));
+                                        eventIdObj.set(matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, output + " " + indicator));
                                     } else {
-                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdObj.get(), output + " " + indicator);
+                                        matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdObj.get(), output + " " + indicator);
                                     }
                                 }
                             }

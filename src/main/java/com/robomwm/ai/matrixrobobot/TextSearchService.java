@@ -50,7 +50,7 @@ public class TextSearchService {
             // Send initial message and get event ID for updates
             String initialMessage = "Performing grep search in " + exportRoomId + " for: \"" + pattern + "\" ("
                     + timeInfo + ")...";
-            String eventMessageId = matrixClient.sendTextWithEventId(responseRoomId, initialMessage);
+            String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
             String originalEventId = eventMessageId; // Track the original event ID for all updates
 
             // Calculate the time range
@@ -169,7 +169,7 @@ public class TextSearchService {
                                         updateMsg.append(messageLink).append("\n");
                                     }
                                     // Always use original event ID for updates
-                                    matrixClient.updateTextMessage(responseRoomId, originalEventId,
+                                    matrixClient.updateNoticeMessage(responseRoomId, originalEventId,
                                             updateMsg.toString());
                                     lastUpdateTime = System.currentTimeMillis();
                                     lastResultCount = results.size();
@@ -250,7 +250,7 @@ public class TextSearchService {
 
             String timeInfo = "last " + hours + "h";
 
-            matrixClient.sendText(responseRoomId, "Performing slow grep search in " + exportRoomId + " for: \""
+            matrixClient.sendNotice(responseRoomId, "Performing slow grep search in " + exportRoomId + " for: \""
                     + pattern + "\" (" + timeInfo + ")...");
 
             // Calculate the time range
@@ -340,7 +340,7 @@ public class TextSearchService {
             // Send initial message and get event ID for updates
             String initialMessage = "Performing search in " + exportRoomId + " for: \"" + query + "\" (" + timeInfo
                     + ")...";
-            String eventMessageId = matrixClient.sendTextWithEventId(responseRoomId, initialMessage);
+            String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
             String originalEventId = eventMessageId; // Track the original event ID for all updates
 
             // Calculate the time range
@@ -468,7 +468,7 @@ public class TextSearchService {
                                         updateMsg.append(messageLink).append("\n");
                                     }
                                     // Always use original event ID for updates
-                                    matrixClient.updateTextMessage(responseRoomId, originalEventId,
+                                    matrixClient.updateNoticeMessage(responseRoomId, originalEventId,
                                             updateMsg.toString());
                                     lastUpdateTime = System.currentTimeMillis();
                                     lastResultCount = results.size();
@@ -553,7 +553,7 @@ public class TextSearchService {
             // Send initial message and get event ID for updates
             String initialMessage = "Performing media search in " + exportRoomId + " for: \"" + query + "\" (" + timeInfo
                     + ")...";
-            String eventMessageId = matrixClient.sendTextWithEventId(responseRoomId, initialMessage);
+            String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
             String originalEventId = eventMessageId; // Track the original event ID for all updates
 
             // Calculate the time range
@@ -728,7 +728,7 @@ public class TextSearchService {
                                         updateMsg.append(messageLink).append("\n");
                                     }
                                     // Always use original event ID for updates
-                                    matrixClient.updateTextMessage(responseRoomId, originalEventId,
+                                    matrixClient.updateNoticeMessage(responseRoomId, originalEventId,
                                             updateMsg.toString());
                                     lastUpdateTime = System.currentTimeMillis();
                                     lastResultCount = results.size();

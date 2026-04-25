@@ -52,7 +52,7 @@ public class MatrixSearchService {
                     : -1;
             String lookbackSuffix = lookbackHours > 0 ? " (last " + lookbackHours + "h)" : "";
             String initialMessage = "Searching Matrix for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + "...";
-            String eventMessageId = matrixClient.sendTextWithEventId(responseRoomId, initialMessage);
+            String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
             String originalEventId = eventMessageId;
 
             List<SearchHit> hits = new ArrayList<>();
