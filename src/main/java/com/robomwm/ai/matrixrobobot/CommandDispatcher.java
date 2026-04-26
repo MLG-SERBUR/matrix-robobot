@@ -834,9 +834,8 @@ public class CommandDispatcher {
                 helpText = "**Search Commands (Page 1/3)**\n" +
                         "* `!search [<hours>h|<days>d] <query>` - Matrix protocol native search (optionally limit lookback window)\n" +
                         "* `!semantic <hours>h <query>` - AI-free semantic search using local embeddings\n" +
-                        "* `!aisearch <hours>h <query>` - AI-powered agentic search for files, images, videos, or conversations (uses ArliAI)\n" +
-                        "* `!grep <hours>h <pattern>` - Fast pattern-based search\n" +
-                        "* `!grep-slow <hours>h <pattern>` - Thorough pattern-based search\n" +
+                        "* `!grep <hours>h <pattern>` - Fast pattern-based search (100 result limit)\n" +
+                        "* `!grep-slow <hours>h <pattern>` - Complete history search, no result limit\n" +
                         "* `!searchtext <hours>h <pattern>` - Term-based search\n" +
                         "* `!media <hours>h <pattern>` - Search for file attachments\n\n" +
                         "Use `!help 2` for AI commands, `!help 3` for other commands";
@@ -851,7 +850,8 @@ public class CommandDispatcher {
                         "* `!tldr <link or count or duration> [question]` - Quick 15s summary with auto-fallback\n" +
                         "* `!debugai <link or count or duration> [question]` - Query AI backend with a custom prompt via question or chat logs\n" +
                         "* `!arliai <model> <prompt>` - Query ArliAI with specific model (fuzzy matched)\n" +
-                        "* `!debugarliai <model> [params...] <prompt>` - Query ArliAI with custom API parameters\n\n" +
+                        "* `!debugarliai <model> [params...] <prompt>` - Query ArliAI with custom API parameters\n" +
+                        "* `!aisearch <hours>h <query>` - AI-powered agentic search (files, images, videos, conversations)\n\n" +
                         "Use `!help 1` for search commands, `!help 3` for other commands";
                 break;
             case 3:
