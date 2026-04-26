@@ -218,8 +218,6 @@ public class CommandDispatcher {
             String question = matcher.group(1) != null ? matcher.group(1).trim() : null;
 
             ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return;
 
             AtomicBoolean abortFlag = new AtomicBoolean(false);
             runningOperations.put(sender, abortFlag);
@@ -250,8 +248,6 @@ public class CommandDispatcher {
         String question = null;
 
         ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-        if (zoneId == null)
-            return;
 
         // Parse Args
         // Pattern 1: Matrix Link [Duration/Count] [Question]
@@ -346,12 +342,10 @@ public class CommandDispatcher {
     }
 
     private void handleAsk(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-                           String exportRoomId, String forcedModel, int timeoutSeconds, AIService.Backend preferredBackend) {
+                            String exportRoomId, String forcedModel, int timeoutSeconds, AIService.Backend preferredBackend) {
         String question = trimmed.replaceFirst("^!ask\\s*", "").trim();
         if (question.isEmpty()) question = null;
-        ZoneId resolvedZoneId = timezoneService.getZoneIdForUser(sender);
-        if (resolvedZoneId == null) resolvedZoneId = ZoneId.of("UTC");
-        final ZoneId zoneId = resolvedZoneId;
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
 
         System.out.println("Received !ask command in " + roomId + " from " + sender);
 
@@ -437,9 +431,7 @@ public class CommandDispatcher {
         }
 
         System.out.println("Received !arliai command in " + roomId + " from " + sender + " (model: " + matchedModel + ")");
-        ZoneId resolvedZoneId = timezoneService.getZoneIdForUser(sender);
-        if (resolvedZoneId == null) resolvedZoneId = ZoneId.of("UTC");
-        final ZoneId zoneId = resolvedZoneId;
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
 
         AtomicBoolean abortFlag = new AtomicBoolean(false);
         runningOperations.put(sender, abortFlag);
@@ -498,8 +490,6 @@ public class CommandDispatcher {
             String query = matcher.group(2).trim();
 
             ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return;
 
             AtomicBoolean abortFlag = new AtomicBoolean(false);
             runningOperations.put(sender, abortFlag);
@@ -525,8 +515,6 @@ public class CommandDispatcher {
             String query = matcher.group(3).trim();
 
             ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return;
 
             int hours = unit.equals("d") ? duration * 24 : duration;
 
@@ -558,8 +546,6 @@ public class CommandDispatcher {
             String query = matcher.group(3).trim();
 
             ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return;
 
             AtomicBoolean abortFlag = new AtomicBoolean(false);
             runningOperations.put(sender, abortFlag);
@@ -590,8 +576,6 @@ public class CommandDispatcher {
             String input = matcher.group(3).trim();
 
             ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-            if (zoneId == null)
-                return true;
 
             int hours = unit.equals("d") ? duration * 24 : duration;
 
@@ -655,9 +639,9 @@ public class CommandDispatcher {
         if (saved != null)
             return saved;
 
-        matrixClient.sendMarkdown(responseRoomId, "Timezone not set for your account. " +
-                "Please set it permanently with `!timezone <TZ>` or by providing your current time: `!timezone 1:14am` or `!timezone 14:30`.");
-        return null;
+        matrixClient.sendMarkdown(responseRoomId, "Timezone not set. Using UTC by default. " +
+                "Set it with `!timezone <TZ>` or your local time: `!timezone 1:14am` or `!timezone 14:30`.");
+        return ZoneId.of("UTC");
     }
 
     private void handleTTSExport(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,

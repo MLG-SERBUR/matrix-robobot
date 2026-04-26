@@ -183,19 +183,22 @@ public class AutoLastService {
         }
     }
 
-    private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo) {
-        String dmRoomId = findDirectMessageRoom(userId);
-        if (dmRoomId != null) {
-            System.out.println("Triggering Auto-TLDR for " + userId);
-            java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(userId);
-            if (zoneId == null) {
-                System.out.println("No timezone set for " + userId + ", skipping auto-tldr trigger.");
-                return;
-            }
-
-            new Thread(() -> {
-                try {
-                    aiService.queryAIUnread(dmRoomId, exportRoomId, userId, zoneId, null,
+     private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo) {
+         String dmRoomId = findDirectMessageRoom(userId);
+         if (dmRoomId != null) {
+             System.out.println("Triggering Auto-TLDR for " + userId);
+             java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(userId);
+             if (zoneId == null) {
+                 zoneId = java.time.ZoneId.of("UTC");
+                 if (dmRoomId != null) {
+                     matrixClient.sendMarkdown(dmRoomId, "Timezone not set. Using UTC by default. " +
+                             "Set it with `!timezone <TZ>` or your local time: `!timezone 1:14am` or `!timezone 14:30`.");
+                 }
+             }
+ 
+             new Thread(() -> {
+                 try {
+                     aiService.queryAIUnread(dmRoomId, exportRoomId, userId, zoneId, null,
                             AIService.Prompts.TLDR_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false),
                             previousReadInfo != null ? previousReadInfo.eventId : null);
                 } catch (Exception e) {
