@@ -831,43 +831,43 @@ public class CommandDispatcher {
         String helpText;
         switch (page) {
             case 1:
-                helpText = "**Search Commands (Page 1/3)**\n\n" +
-                        "**!search [<hours>h|<days>d] <query>** - Matrix protocol native search (optionally limit lookback window)\n\n" +
-                        "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
-                        "**!aisearch <hours>h <query>** - AI-powered agentic search for files, images, videos, or conversations (uses ArliAI)\n\n" +
-                        "**!grep <hours>h <pattern>** - Fast pattern-based search\n" +
-                        "**!grep-slow <hours>h <pattern>** - Thorough pattern-based search\n" +
-                        "**!searchtext <hours>h <pattern>** - Term-based search\n" +
-                        "**!media <hours>h <pattern>** - Search for file attachments\n\n" +
+                helpText = "**Search Commands (Page 1/3)**\n" +
+                        "* `!search [<hours>h|<days>d] <query>` - Matrix protocol native search (optionally limit lookback window)\n" +
+                        "* `!semantic <hours>h <query>` - AI-free semantic search using local embeddings\n" +
+                        "* `!aisearch <hours>h <query>` - AI-powered agentic search for files, images, videos, or conversations (uses ArliAI)\n" +
+                        "* `!grep <hours>h <pattern>` - Fast pattern-based search\n" +
+                        "* `!grep-slow <hours>h <pattern>` - Thorough pattern-based search\n" +
+                        "* `!searchtext <hours>h <pattern>` - Term-based search\n" +
+                        "* `!media <hours>h <pattern>` - Search for file attachments\n\n" +
                         "Use `!help 2` for AI commands, `!help 3` for other commands";
                 break;
             case 2:
-                helpText = "**AI Commands (Page 2/3)**\n\n" +
-                        "**!ask [question]** - Query AI backend with up to 12k tokens of history (no timestamps)\n\n" +
-                        "**!summary <link or count or duration> [question]** - Condensed summary with auto-fallback (ArliAI)\n" +
-                        "**!isummary <link or count or duration> [question]** - Condensed summary with images (Vision ArliAI)\n\n" +
-                        "**!overview <link or count or duration> [question]** - Detailed overview with auto-fallback (ArliAI)\n" +
-                        "**!ioverview <link or count or duration> [question]** - Detailed overview with images (Vision ArliAI)\n\n" +
-                        "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n\n" +
-                        "**!debugai <link or count or duration> [question]** - Query AI backend with a custom prompt via question or chat logs\n\n" +
-                        "**!arliai <model> <prompt>** - Query ArliAI with specific model (models: Qwen3.5-27B-Musica-v1, Qwen3.5-27B-Vivid-Durian, Qwen3.5-27B-Derestricted; fuzzy matched)\n\n" +
-                        "**!debugarliai <model> [params...] <prompt>** - Query ArliAI with custom API parameters (temp, top_p, rep_pen, etc.)\n\n" +
+                helpText = "**AI Commands (Page 2/3)**\n" +
+                        "* `!ask [question]` - Query AI backend with up to 12k tokens of history (no timestamps)\n" +
+                        "* `!summary <link or count or duration> [question]` - Condensed summary with auto-fallback (ArliAI)\n" +
+                        "* `!isummary <link or count or duration> [question]` - Condensed summary with images (Vision ArliAI)\n" +
+                        "* `!overview <link or count or duration> [question]` - Detailed overview with auto-fallback (ArliAI)\n" +
+                        "* `!ioverview <link or count or duration> [question]` - Detailed overview with images (Vision ArliAI)\n" +
+                        "* `!tldr <link or count or duration> [question]` - Quick 15s summary with auto-fallback\n" +
+                        "* `!debugai <link or count or duration> [question]` - Query AI backend with a custom prompt via question or chat logs\n" +
+                        "* `!arliai <model> <prompt>` - Query ArliAI with specific model (fuzzy matched)\n" +
+                        "* `!debugarliai <model> [params...] <prompt>` - Query ArliAI with custom API parameters\n\n" +
                         "Use `!help 1` for search commands, `!help 3` for other commands";
                 break;
             case 3:
             default:
-                helpText = "**Other Commands (Page 3/3)**\n\n" +
-                        "**!last** - Show your last message and read receipt status in export room (PRIMARY)\n\n" +
-                        "**!ping** - Measure and report ping latency\n\n" +
-                        "**!testcommand** - Test if the bot is responding\n\n" +
-                        "**!timezone <TZ or Time>** - Set your preferred timezone (e.g. `!timezone PST`, `!timezone 1:14am` or `!timezone 14:30`)\n\n" +
-                        "**!export<duration>h** - Export chat history (e.g., `!export24h`)\n\n" +
-                        "**!ttsexport <count>** - Export specified number of messages with TTS-friendly formatting\n" +
-                        "**!ttsexport <duration>h** - Export messages from the last specified hours with TTS-friendly formatting\n\n" +
-                        "**!lastsummary [question]** - Summarize all unread messages (uses saved TZ)\n\n" +
-                        "**!autolast** - Toggle automatic DM of last message when reading export room\n\n" +
-                        "**!autotldr** - Toggle automatic AI TLDR when reading export room (>100 msgs, >1h gap)\n\n" +
-                        "**!abort** - Abort currently running operations\n\n" +
+                helpText = "**Other Commands (Page 3/3)**\n" +
+                        "* `!last` - Show your last message and read receipt status in export room (PRIMARY)\n" +
+                        "* `!ping` - Measure and report ping latency\n" +
+                        "* `!testcommand` - Test if the bot is responding\n" +
+                        "* `!timezone <TZ or Time>` - Set your preferred timezone\n" +
+                        "* `!export<duration>h` - Export chat history (e.g., `!export24h`)\n" +
+                        "* `!ttsexport <count>` - Export messages with TTS-friendly formatting\n" +
+                        "* `!ttsexport <duration>h` - Export messages from last specified hours with TTS-friendly formatting\n" +
+                        "* `!lastsummary [question]` - Summarize all unread messages (uses saved TZ)\n" +
+                        "* `!autolast` - Toggle automatic DM of last message when reading export room\n" +
+                        "* `!autotldr` - Toggle automatic AI TLDR when reading export room\n" +
+                        "* `!abort` - Abort currently running operations\n\n" +
                         "Use `!help 1` for search commands, `!help 2` for AI commands";
                 break;
         }
