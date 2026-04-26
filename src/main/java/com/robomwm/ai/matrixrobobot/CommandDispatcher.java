@@ -127,8 +127,11 @@ public class CommandDispatcher {
             return handleTextSearchCommand(trimmed, "!grep\\s+(\\d+)([dh])\\s+(.+)", "grep", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrep);
         } else if (trimmed.matches("!grep-slow\\s+(\\d+)([dh])\\s+(.+)")) {
             return handleTextSearchCommand(trimmed, "!grep-slow\\s+(\\d+)([dh])\\s+(.+)", "grep-slow", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrepSlow);
-        } else if (trimmed.matches("!textsearch\\s+(\\d+)([dh])\\s+(.+)")) {
-            return handleTextSearchCommand(trimmed, "!textsearch\\s+(\\d+)([dh])\\s+(.+)", "textsearch", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performSearch);
+        } else if (trimmed.matches("!searchtext\\s*")) {
+            matrixClient.sendText(responseRoomId, "Usage: !searchtext <hours>h <pattern>\nSearches message text for the given pattern.");
+            return true;
+        } else if (trimmed.matches("!searchtext\\s+(\\d+)([dh])\\s+(.+)")) {
+            return handleTextSearchCommand(trimmed, "!searchtext\\s+(\\d+)([dh])\\s+(.+)", "searchtext", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performSearch);
         } else if (trimmed.matches("!search\\s+(.+)")) {
             handleMatrixSearch(trimmed, roomId, sender, responseRoomId, exportRoomId);
             return true;
@@ -864,12 +867,12 @@ public class CommandDispatcher {
                 +
                 "**!tldr <link or count or duration> [question]** - Quick 15s summary with auto-fallback\n"
                 +
-                "**!ask [question]** - Query AI backend with up to 16k tokens of history (no timestamps)\n"
+                "**!ask [question]** - Query AI backend with up to 12k tokens of history (no timestamps)\n"
                 +
                 "**!semantic <hours>h <query>** - AI-free semantic search using local embeddings\n\n" +
                 "**!aisearch <hours>h <query>** - AI-powered agentic search for files, images, videos, or conversations (uses ArliAI)\n\n" +
                 "**!search [<hours>h|<days>d] <query>** - Matrix protocol native search (optionally limit lookback window)\n\n" +
-                "**!grep, !grep-slow, !textsearch, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
+                "**!grep, !grep-slow, !searchtext, !media <hours>h <pattern>** - Pattern and term-based searches (media searches for file attachments)\n\n" +
                 "**!abort** - Abort currently running operations";
         matrixClient.sendMarkdown(responseRoomId, helpText);
     }
