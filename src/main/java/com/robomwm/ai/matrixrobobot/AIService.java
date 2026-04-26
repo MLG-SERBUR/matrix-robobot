@@ -616,7 +616,7 @@ public class AIService {
         }
     }
 
-    public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question, ZoneId zoneId,
+    public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question,
                          java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, Backend preferredBackend) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
@@ -651,7 +651,7 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
+                    fromToken, tokenLimit, false, null, false, abortFlag, progressCallback);
 
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,

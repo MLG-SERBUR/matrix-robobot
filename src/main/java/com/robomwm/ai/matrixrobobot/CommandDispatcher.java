@@ -345,7 +345,6 @@ public class CommandDispatcher {
                             String exportRoomId, String forcedModel, int timeoutSeconds, AIService.Backend preferredBackend) {
         String question = trimmed.replaceFirst("^!ask\\s*", "").trim();
         if (question.isEmpty()) question = null;
-        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
 
         System.out.println("Received !ask command in " + roomId + " from " + sender);
 
@@ -356,7 +355,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, zoneId, abortFlag, forcedModel, timeoutSeconds, preferredBackend);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, forcedModel, timeoutSeconds, preferredBackend);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -431,7 +430,6 @@ public class CommandDispatcher {
         }
 
         System.out.println("Received !arliai command in " + roomId + " from " + sender + " (model: " + matchedModel + ")");
-        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
 
         AtomicBoolean abortFlag = new AtomicBoolean(false);
         runningOperations.put(sender, abortFlag);
@@ -441,7 +439,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, zoneId, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -639,8 +637,8 @@ public class CommandDispatcher {
         if (saved != null)
             return saved;
 
-        matrixClient.sendMarkdown(responseRoomId, "Timezone not set. Using UTC by default. " +
-                "Set it with `!timezone <TZ>` or your local time: `!timezone 1:14am` or `!timezone 14:30`.");
+        matrixClient.sendNotice(responseRoomId, "Timezone not set. Using UTC by default. " +
+                "Set it with !timezone <TZ> or your local time: !timezone 1:14am or !timezone 14:30");
         return ZoneId.of("UTC");
     }
 

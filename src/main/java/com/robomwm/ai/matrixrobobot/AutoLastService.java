@@ -191,14 +191,15 @@ public class AutoLastService {
              if (zoneId == null) {
                  zoneId = java.time.ZoneId.of("UTC");
                  if (dmRoomId != null) {
-                     matrixClient.sendMarkdown(dmRoomId, "Timezone not set. Using UTC by default. " +
-                             "Set it with `!timezone <TZ>` or your local time: `!timezone 1:14am` or `!timezone 14:30`.");
+                     matrixClient.sendNotice(dmRoomId, "Timezone not set. Using UTC by default. " +
+                             "Set it with !timezone <TZ> or your local time: !timezone 1:14am or !timezone 14:30");
                  }
              }
- 
+             final java.time.ZoneId finalZoneId = zoneId;
+             
              new Thread(() -> {
                  try {
-                     aiService.queryAIUnread(dmRoomId, exportRoomId, userId, zoneId, null,
+                     aiService.queryAIUnread(dmRoomId, exportRoomId, userId, finalZoneId, null,
                             AIService.Prompts.TLDR_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false),
                             previousReadInfo != null ? previousReadInfo.eventId : null);
                 } catch (Exception e) {
