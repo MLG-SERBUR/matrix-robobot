@@ -85,10 +85,11 @@ public class MatrixSearchService {
     public boolean goToPage(String sender, int pageNum) {
         SearchPaginationState state = getSearchState(sender);
         if (state == null) return false;
-        if (!ensurePageLoaded(state, pageNum)) {
+        int targetPage = ensurePageLoaded(state, pageNum);
+        if (targetPage < 1) {
             return false;
         }
-        if (state.goToPage(pageNum)) {
+        if (state.goToPage(targetPage)) {
             matrixClient.updateMarkdownNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
                     state.renderPage());
             return true;
@@ -240,14 +241,14 @@ public class MatrixSearchService {
         return false;
     }
 
-    private boolean ensurePageLoaded(SearchPaginationState state, int pageNum) {
+    private int ensurePageLoaded(SearchPaginationState state, int pageNum) {
         if (pageNum < 1) {
-            return false;
+            return -1;
         }
         boolean needsMore = pageNum > state.getTotalPages()
                 || (pageNum == state.getTotalPages() && state.hasMoreResults());
         if (!needsMore) {
-            return true;
+            return pageNum;
         }
 
         matrixClient.updateTextMessage(state.getResponseRoomId(), state.getEventMessageId(),
@@ -258,7 +259,7 @@ public class MatrixSearchService {
                     break;
                 }
                 if (fetchSearchResults(state, state.getSender(), new AtomicBoolean(false), 1)) {
-                    return false;
+                    return -1;
                 }
                 state.sortHits();
                 if (!state.hasMoreResults()) {
@@ -268,10 +269,15 @@ public class MatrixSearchService {
         } catch (Exception e) {
             System.out.println("Failed to load additional Matrix search results: " + e.getMessage());
             matrixClient.sendText(state.getResponseRoomId(), "Error loading more Matrix search results: " + e.getMessage());
-            return false;
+            return -1;
         }
 
-        return pageNum <= state.getTotalPages();
+        // Clamp to last available page if we exhausted results
+        if (pageNum > state.getTotalPages()) {
+            pageNum = state.getTotalPages();
+        }
+
+        return pageNum;
     }
 
     private record SearchHit(String eventId, String sender, String body, long originServerTs) {
