@@ -60,30 +60,10 @@ public class MatrixSearchService {
             int maxResults = 25;
 
             System.out.println("Starting Matrix search for '" + query + "' in room " + searchRoomId);
-            boolean usedTermFallback = false;
             boolean searchFailed = fetchSearchResults(searchRoomId, query, sender, responseRoomId, originalEventId,
                     abortFlag, hits, seenEventIds, maxResults, cutoffTimestampMs);
             if (searchFailed || abortFlag.get()) {
                 return;
-            }
-
-            if (hits.isEmpty() && query.contains(" ")) {
-                List<String> tokens = tokenizeQuery(query);
-                if (tokens.size() > 1) {
-                    usedTermFallback = true;
-                    System.out.println("No exact Matrix search hits for '" + query
-                            + "', retrying with individual query terms: " + tokens);
-                    for (String token : tokens) {
-                        if (hits.size() >= maxResults || abortFlag.get()) {
-                            break;
-                        }
-                        searchFailed = fetchSearchResults(searchRoomId, token, sender, responseRoomId, originalEventId,
-                                abortFlag, hits, seenEventIds, maxResults, cutoffTimestampMs);
-                        if (searchFailed || abortFlag.get()) {
-                            return;
-                        }
-                    }
-                }
             }
 
             hits.sort(Comparator.comparingLong(SearchHit::originServerTs).reversed());
@@ -103,11 +83,7 @@ public class MatrixSearchService {
             StringBuilder finalMsg = new StringBuilder();
             finalMsg.append("Matrix search results for \"").append(query).append("\" in ").append(searchRoomId)
                     .append(lookbackSuffix).append(".\n");
-            finalMsg.append(hits.size()).append(" matches.\n");
-            if (usedTermFallback) {
-                finalMsg.append("No exact multi-term matches were found; showing matches for individual terms.\n");
-            }
-            finalMsg.append("\n");
+            finalMsg.append(hits.size()).append(" matches.\n\n");
 
             for (SearchHit hit : hits) {
                 String timestamp = java.time.Instant.ofEpochMilli(hit.originServerTs())
@@ -222,18 +198,6 @@ public class MatrixSearchService {
         } while (nextBatch != null && hits.size() < maxResults && iteration < maxIterations);
 
         return false;
-    }
-
-    private List<String> tokenizeQuery(String query) {
-        String[] rawTokens = query.toLowerCase().split("\\s+");
-        List<String> tokens = new ArrayList<>();
-        for (String token : rawTokens) {
-            String cleaned = token.replaceAll("^[^\\p{Alnum}]+|[^\\p{Alnum}]+$", "");
-            if (cleaned.length() >= 2 && !tokens.contains(cleaned)) {
-                tokens.add(cleaned);
-            }
-        }
-        return tokens;
     }
 
     private record SearchHit(String eventId, String sender, String body, long originServerTs) {
