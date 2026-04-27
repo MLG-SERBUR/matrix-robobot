@@ -148,7 +148,7 @@ public class TextSearchService {
                             // Format timestamp with timezone (convert UTC to user's timezone)
                             String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
                                     .atZone(zoneId)
-                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
                             String formattedLog = "[" + timestamp + "] <" + senderMsg + "> " + body;
 
                             // Case-insensitive literal search on the formatted log line
@@ -438,7 +438,7 @@ public class TextSearchService {
                             // Format timestamp with timezone (convert UTC to user's timezone)
                             String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
                                     .atZone(zoneId)
-                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
                             String formattedLog = "[" + timestamp + "] <" + senderMsg + "> " + body;
 
                             // Check if formatted log contains ALL search terms (case-insensitive)
@@ -684,7 +684,7 @@ public class TextSearchService {
                             // Format timestamp with timezone (convert UTC to user's timezone)
                             String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
                                     .atZone(zoneId)
-                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
                             
                             // Build the formatted log with media type and filename
                             StringBuilder formattedLogBuilder = new StringBuilder();

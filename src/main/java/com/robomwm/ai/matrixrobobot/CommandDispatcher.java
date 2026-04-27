@@ -807,8 +807,8 @@ public class CommandDispatcher {
         String lastUser = null;
 
         for (String line : logs) {
-            // Remove timestamp [yyyy-MM-dd HH:mm z]
-            String noTimestamp = line.replaceAll("\\[\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} [A-Z]+\\]", "").trim();
+            // Remove timestamp [yyyy-MM-dd HH:mm]
+            String noTimestamp = line.replaceAll("\\[\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}\\]", "").trim();
             
             // Remove angle brackets and extract username and message
             // Format: <@username:server> message

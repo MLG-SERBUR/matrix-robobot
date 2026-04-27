@@ -25,7 +25,7 @@ import java.util.Iterator;
  * Manages fetching and processing room chat history from the Matrix server.
  */
 public class RoomHistoryManager {
-    private static final DateTimeFormatter LEGACY_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z");
+    private static final DateTimeFormatter LEGACY_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter AI_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter AI_TIME_FORMATTER = DateTimeFormatter.ofPattern("H:mm");
 

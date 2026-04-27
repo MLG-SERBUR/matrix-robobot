@@ -631,7 +631,7 @@ public class AiSearchService {
 
         String timestamp = Instant.ofEpochMilli(originServerTs)
             .atZone(zoneId)
-            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
 
         String formattedLog = "[" + timestamp + "] <" + sender + "> " + body;
         

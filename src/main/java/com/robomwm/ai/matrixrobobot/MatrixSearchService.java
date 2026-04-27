@@ -345,7 +345,7 @@ public class MatrixSearchService {
             for (SearchHit hit : pageHits) {
                 String timestamp = java.time.Instant.ofEpochMilli(hit.originServerTs())
                         .atZone(zoneId)
-                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
                 String messageLink = "https://matrix.to/#/" + searchRoomId + "/" + hit.eventId();
                 sb.append("- **").append(timestamp).append("** <").append(hit.sender()).append(">: ")
                         .append(hit.body()).append(" [link](").append(messageLink).append(")\n");
