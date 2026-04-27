@@ -85,6 +85,9 @@ public class MatrixSearchService {
     public boolean goToPage(String sender, int pageNum) {
         SearchPaginationState state = getSearchState(sender);
         if (state == null) return false;
+        if (!ensurePageLoaded(state, pageNum)) {
+            return false;
+        }
         if (state.goToPage(pageNum)) {
             matrixClient.updateNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
                     state.renderPage());
@@ -106,29 +109,26 @@ public class MatrixSearchService {
             String initialMessage = "Searching Matrix for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + "...";
             String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
 
-            List<SearchHit> hits = new ArrayList<>();
-            Set<String> seenEventIds = new HashSet<>();
+            SearchPaginationState paginationState = new SearchPaginationState(new ArrayList<>(), new HashSet<>(), sender,
+                    query, searchRoomId, responseRoomId, eventMessageId, zoneId, cutoffTimestampMs);
 
             System.out.println("Starting Matrix search for '" + query + "' in room " + searchRoomId);
-            boolean searchFailed = fetchSearchResults(searchRoomId, query, sender, responseRoomId, eventMessageId,
-                    abortFlag, hits, seenEventIds, cutoffTimestampMs);
+            boolean searchFailed = fetchSearchResults(paginationState, sender, abortFlag, 20);
             if (searchFailed || abortFlag.get()) {
                 return;
             }
 
-            hits.sort(Comparator.comparingLong(SearchHit::originServerTs).reversed());
+            paginationState.sortHits();
 
-            System.out.println("Matrix search completed with " + hits.size() + " total results");
+            System.out.println("Matrix search completed with " + paginationState.getHitCount() + " total results");
 
-            if (hits.isEmpty()) {
+            if (paginationState.isEmpty()) {
                 matrixClient.updateTextMessage(responseRoomId, eventMessageId,
                         "No Matrix search results found for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + ".");
                 return;
             }
 
             // Create pagination state and cache it (replaces any existing search for this user)
-            SearchPaginationState paginationState = new SearchPaginationState(hits, query, searchRoomId,
-                    responseRoomId, eventMessageId, zoneId);
             searchCache.put(sender, paginationState);
 
             // Render first page
@@ -140,25 +140,23 @@ public class MatrixSearchService {
         }
     }
 
-    private boolean fetchSearchResults(String searchRoomId, String query, String sender, String responseRoomId,
-            String originalEventId, AtomicBoolean abortFlag, List<SearchHit> hits, Set<String> seenEventIds,
-            long cutoffTimestampMs) throws Exception {
-        String nextBatch = null;
+    private boolean fetchSearchResults(SearchPaginationState state, String sender, AtomicBoolean abortFlag,
+            int maxIterations) throws Exception {
+        String nextBatch = state.getNextBatch();
         int iteration = 0;
-        int maxIterations = 20; // Allow more iterations to fetch all results
 
         do {
             iteration++;
-            System.out.println("Matrix search iteration " + iteration + " for query '" + query + "', results so far: "
-                    + hits.size() + ", nextBatch: " + nextBatch);
+            System.out.println("Matrix search iteration " + iteration + " for query '" + state.getQuery() + "', results so far: "
+                    + state.getHitCount() + ", nextBatch: " + nextBatch);
 
             if (abortFlag.get()) {
                 System.out.println("Matrix search aborted by user: " + sender);
-                matrixClient.updateTextMessage(responseRoomId, originalEventId, "Matrix search aborted.");
+                matrixClient.updateTextMessage(state.getResponseRoomId(), state.getEventMessageId(), "Matrix search aborted.");
                 return true;
             }
 
-            Map<String, Object> searchBody = buildSearchRequest(searchRoomId, query);
+            Map<String, Object> searchBody = buildSearchRequest(state.getSearchRoomId(), state.getQuery());
             String json = mapper.writeValueAsString(searchBody);
 
             HttpRequest request = HttpRequest.newBuilder()
@@ -175,7 +173,7 @@ public class MatrixSearchService {
 
             if (response.statusCode() != 200) {
                 System.out.println("Matrix search failed: " + response.statusCode() + " - " + response.body());
-                matrixClient.updateTextMessage(responseRoomId, originalEventId,
+                matrixClient.updateTextMessage(state.getResponseRoomId(), state.getEventMessageId(),
                         "Matrix search failed with status: " + response.statusCode());
                 return true;
             }
@@ -196,7 +194,7 @@ public class MatrixSearchService {
             for (JsonNode result : results) {
                 if (abortFlag.get()) {
                     System.out.println("Matrix search aborted by user: " + sender);
-                    matrixClient.updateTextMessage(responseRoomId, originalEventId, "Matrix search aborted.");
+                    matrixClient.updateTextMessage(state.getResponseRoomId(), state.getEventMessageId(), "Matrix search aborted.");
                     return true;
                 }
 
@@ -206,31 +204,74 @@ public class MatrixSearchService {
                 long originServerTs = resultObj.path("origin_server_ts").asLong(0);
                 String body = resultObj.path("content").path("body").asText(null);
 
-                if (cutoffTimestampMs > 0 && originServerTs > 0 && originServerTs < cutoffTimestampMs) {
+                if (state.getCutoffTimestampMs() > 0 && originServerTs > 0
+                        && originServerTs < state.getCutoffTimestampMs()) {
                     reachedCutoff = true;
                     break;
                 }
 
-                if (eventId != null && eventSender != null && body != null && seenEventIds.add(eventId)) {
-                    hits.add(new SearchHit(eventId, eventSender, body, originServerTs));
+                if (eventId != null && eventSender != null && body != null && state.addHit(eventId, eventSender, body, originServerTs)) {
                     addedCount++;
                 }
             }
 
             System.out.println("Added " + addedCount + " new unique results in this iteration");
             nextBatch = roomEvents.path("next_batch").asText(null);
+            state.setNextBatch(nextBatch);
 
             if (addedCount == 0) {
                 System.out.println("No new results in this iteration, exiting search loop");
+                state.setHasMoreResults(nextBatch != null);
                 break;
             }
             if (reachedCutoff) {
-                System.out.println("Reached lookback cutoff for query '" + query + "', exiting search loop");
+                System.out.println("Reached lookback cutoff for query '" + state.getQuery() + "', exiting search loop");
+                state.setHasMoreResults(false);
                 break;
             }
         } while (nextBatch != null && iteration < maxIterations);
 
+        if (nextBatch == null) {
+            state.setHasMoreResults(false);
+        } else if (iteration >= maxIterations) {
+            state.setHasMoreResults(true);
+        }
+
         return false;
+    }
+
+    private boolean ensurePageLoaded(SearchPaginationState state, int pageNum) {
+        if (pageNum < 1) {
+            return false;
+        }
+        boolean needsMore = pageNum > state.getTotalPages()
+                || (pageNum == state.getTotalPages() && state.hasMoreResults());
+        if (!needsMore) {
+            return true;
+        }
+
+        matrixClient.updateTextMessage(state.getResponseRoomId(), state.getEventMessageId(),
+                "Loading more Matrix search results for page " + pageNum + "...");
+        try {
+            while (pageNum > state.getTotalPages() || (pageNum == state.getTotalPages() && state.hasMoreResults())) {
+                if (!state.hasMoreResults() && pageNum > state.getTotalPages()) {
+                    break;
+                }
+                if (fetchSearchResults(state, state.getSender(), new AtomicBoolean(false), 20)) {
+                    return false;
+                }
+                state.sortHits();
+                if (!state.hasMoreResults()) {
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Failed to load additional Matrix search results: " + e.getMessage());
+            matrixClient.sendText(state.getResponseRoomId(), "Error loading more Matrix search results: " + e.getMessage());
+            return false;
+        }
+
+        return pageNum <= state.getTotalPages();
     }
 
     private record SearchHit(String eventId, String sender, String body, long originServerTs) {
@@ -241,24 +282,34 @@ public class MatrixSearchService {
      */
     public static class SearchPaginationState {
         private final List<SearchHit> allHits;
+        private final Set<String> seenEventIds;
         private int currentPage;
         private final int pageSize;
+        private final String sender;
         private final String query;
         private final String searchRoomId;
         private final String responseRoomId;
         private final String eventMessageId;
         private final ZoneId zoneId;
+        private final long cutoffTimestampMs;
+        private String nextBatch;
+        private boolean hasMoreResults;
 
-        public SearchPaginationState(List<SearchHit> allHits, String query, String searchRoomId,
-                String responseRoomId, String eventMessageId, ZoneId zoneId) {
+        public SearchPaginationState(List<SearchHit> allHits, Set<String> seenEventIds, String sender, String query,
+                String searchRoomId, String responseRoomId, String eventMessageId, ZoneId zoneId, long cutoffTimestampMs) {
             this.allHits = allHits;
+            this.seenEventIds = seenEventIds;
             this.currentPage = 0;
             this.pageSize = 25;
+            this.sender = sender;
             this.query = query;
             this.searchRoomId = searchRoomId;
             this.responseRoomId = responseRoomId;
             this.eventMessageId = eventMessageId;
             this.zoneId = zoneId;
+            this.cutoffTimestampMs = cutoffTimestampMs;
+            this.nextBatch = null;
+            this.hasMoreResults = false;
         }
 
         public int getTotalPages() {
@@ -338,6 +389,58 @@ public class MatrixSearchService {
 
         public String getEventMessageId() {
             return eventMessageId;
+        }
+
+        public String getSender() {
+            return sender;
+        }
+
+        public String getQuery() {
+            return query;
+        }
+
+        public String getSearchRoomId() {
+            return searchRoomId;
+        }
+
+        public int getHitCount() {
+            return allHits.size();
+        }
+
+        public boolean isEmpty() {
+            return allHits.isEmpty();
+        }
+
+        public long getCutoffTimestampMs() {
+            return cutoffTimestampMs;
+        }
+
+        public String getNextBatch() {
+            return nextBatch;
+        }
+
+        public void setNextBatch(String nextBatch) {
+            this.nextBatch = nextBatch;
+        }
+
+        public boolean hasMoreResults() {
+            return hasMoreResults;
+        }
+
+        public void setHasMoreResults(boolean hasMoreResults) {
+            this.hasMoreResults = hasMoreResults;
+        }
+
+        public boolean addHit(String eventId, String eventSender, String body, long originServerTs) {
+            if (!seenEventIds.add(eventId)) {
+                return false;
+            }
+            allHits.add(new SearchHit(eventId, eventSender, body, originServerTs));
+            return true;
+        }
+
+        public void sortHits() {
+            allHits.sort(Comparator.comparingLong(SearchHit::originServerTs).reversed());
         }
     }
 
