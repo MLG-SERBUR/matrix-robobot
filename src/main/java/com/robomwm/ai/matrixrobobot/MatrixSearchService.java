@@ -57,7 +57,7 @@ public class MatrixSearchService {
         SearchPaginationState state = getSearchState(sender);
         if (state == null) return false;
         if (state.nextPage()) {
-            matrixClient.updateNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
+            matrixClient.updateMarkdownNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
                     state.renderPage());
 
             return true;
@@ -72,7 +72,7 @@ public class MatrixSearchService {
         SearchPaginationState state = getSearchState(sender);
         if (state == null) return false;
         if (state.prevPage()) {
-            matrixClient.updateNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
+            matrixClient.updateMarkdownNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
                     state.renderPage());
             return true;
         }
@@ -89,7 +89,7 @@ public class MatrixSearchService {
             return false;
         }
         if (state.goToPage(pageNum)) {
-            matrixClient.updateNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
+            matrixClient.updateMarkdownNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
                     state.renderPage());
             return true;
         }
@@ -107,7 +107,7 @@ public class MatrixSearchService {
                     : -1;
             String lookbackSuffix = lookbackHours > 0 ? " (last " + lookbackHours + "h)" : "";
             String initialMessage = "Searching Matrix for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + "...";
-            String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
+            String eventMessageId = matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, initialMessage);
 
             SearchPaginationState paginationState = new SearchPaginationState(new ArrayList<>(), new HashSet<>(), sender,
                     query, searchRoomId, responseRoomId, eventMessageId, zoneId, cutoffTimestampMs);
@@ -132,7 +132,7 @@ public class MatrixSearchService {
             searchCache.put(sender, paginationState);
 
             // Render first page
-            matrixClient.updateNoticeMessage(responseRoomId, eventMessageId, paginationState.renderPage());
+            matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventMessageId, paginationState.renderPage());
 
         } catch (Exception e) {
             System.out.println("Failed to perform Matrix search: " + e.getMessage());
@@ -338,18 +338,17 @@ public class MatrixSearchService {
         public String renderPage() {
             List<SearchHit> pageHits = getCurrentPageHits();
             StringBuilder sb = new StringBuilder();
-            sb.append("Matrix search results for \"").append(query).append("\" in ").append(searchRoomId).append(".\n");
-            sb.append("Page ").append(currentPage + 1).append("/").append(getTotalPages())
-                    .append(" (").append(allHits.size()).append(" total matches)\n\n");
+            sb.append("**Matrix search results for \"").append(query).append("\" in ").append(searchRoomId).append("**\n");
+            sb.append("*Page ").append(currentPage + 1).append("/").append(getTotalPages())
+                    .append(" (").append(allHits.size()).append(" total matches)*\n\n");
 
             for (SearchHit hit : pageHits) {
                 String timestamp = java.time.Instant.ofEpochMilli(hit.originServerTs())
                         .atZone(zoneId)
                         .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                sb.append("[").append(timestamp).append("] <").append(hit.sender()).append("> ")
-                        .append(hit.body()).append(" ");
                 String messageLink = "https://matrix.to/#/" + searchRoomId + "/" + hit.eventId();
-                sb.append(messageLink).append("\n");
+                sb.append("- **").append(timestamp).append("** <").append(hit.sender()).append(">: ")
+                        .append(hit.body()).append(" [link](").append(messageLink).append(")\n");
             }
 
             sb.append("\n");
