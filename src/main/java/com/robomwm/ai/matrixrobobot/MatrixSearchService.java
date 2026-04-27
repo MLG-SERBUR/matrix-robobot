@@ -113,7 +113,7 @@ public class MatrixSearchService {
                     query, searchRoomId, responseRoomId, eventMessageId, zoneId, cutoffTimestampMs);
 
             System.out.println("Starting Matrix search for '" + query + "' in room " + searchRoomId);
-            boolean searchFailed = fetchSearchResults(paginationState, sender, abortFlag, 20);
+            boolean searchFailed = fetchSearchResults(paginationState, sender, abortFlag, 1);
             if (searchFailed || abortFlag.get()) {
                 return;
             }
@@ -257,7 +257,7 @@ public class MatrixSearchService {
                 if (!state.hasMoreResults() && pageNum > state.getTotalPages()) {
                     break;
                 }
-                if (fetchSearchResults(state, state.getSender(), new AtomicBoolean(false), 20)) {
+                if (fetchSearchResults(state, state.getSender(), new AtomicBoolean(false), 1)) {
                     return false;
                 }
                 state.sortHits();
@@ -339,8 +339,19 @@ public class MatrixSearchService {
             List<SearchHit> pageHits = getCurrentPageHits();
             StringBuilder sb = new StringBuilder();
             sb.append("**Matrix search results for \"").append(query).append("\" in ").append(searchRoomId).append("**\n");
-            sb.append("*Page ").append(currentPage + 1).append("/").append(getTotalPages())
-                    .append(" (").append(allHits.size()).append(" total matches)*\n\n");
+            sb.append("*Page ").append(currentPage + 1).append("/");
+            if (hasMoreResults) {
+                sb.append("?");
+            } else {
+                sb.append(getTotalPages());
+            }
+            sb.append(" (");
+            if (hasMoreResults) {
+                sb.append("over ").append(allHits.size()).append(" results");
+            } else {
+                sb.append(allHits.size()).append(" total matches");
+            }
+            sb.append(")*\n\n");
 
             for (SearchHit hit : pageHits) {
                 String timestamp = java.time.Instant.ofEpochMilli(hit.originServerTs())
@@ -352,8 +363,12 @@ public class MatrixSearchService {
             }
 
             sb.append("\n");
-            if (getTotalPages() > 1) {
-                sb.append("Use `!page <n>` to jump to a page (1-").append(getTotalPages()).append(").");
+            if (hasMoreResults || getTotalPages() > 1) {
+                sb.append("Use `!page <n>` to jump to a page");
+                if (!hasMoreResults) {
+                    sb.append(" (1-").append(getTotalPages()).append(")");
+                }
+                sb.append(".");
             }
             return sb.toString().trim();
         }
