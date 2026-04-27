@@ -158,11 +158,11 @@ public class MatrixSearchService {
                 return true;
             }
 
-            Map<String, Object> searchBody = buildSearchRequest(searchRoomId, query, nextBatch);
+            Map<String, Object> searchBody = buildSearchRequest(searchRoomId, query);
             String json = mapper.writeValueAsString(searchBody);
 
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(homeserverUrl + "/_matrix/client/v3/search"))
+                    .uri(buildSearchUri(nextBatch))
                     .header("Authorization", "Bearer " + accessToken)
                     .header("Content-Type", "application/json")
                     .timeout(java.time.Duration.ofSeconds(30))
@@ -182,18 +182,18 @@ public class MatrixSearchService {
 
             JsonNode root = mapper.readTree(response.body());
             JsonNode roomEvents = root.path("search_categories").path("room_events");
-            JsonNode resultsArray = roomEvents.path("results");
+            JsonNode results = roomEvents.path("results");
 
-            System.out.println("Matrix search returned " + resultsArray.size() + " results in this batch");
+            System.out.println("Matrix search returned " + results.size() + " results in this batch");
 
-            if (!resultsArray.isArray() || resultsArray.size() == 0) {
+            if (!results.isArray() || results.size() == 0) {
                 System.out.println("No more results, exiting search loop");
                 break;
             }
 
             int addedCount = 0;
             boolean reachedCutoff = false;
-            for (JsonNode result : resultsArray) {
+            for (JsonNode result : results) {
                 if (abortFlag.get()) {
                     System.out.println("Matrix search aborted by user: " + sender);
                     matrixClient.updateTextMessage(responseRoomId, originalEventId, "Matrix search aborted.");
@@ -344,7 +344,15 @@ public class MatrixSearchService {
     /**
      * Build the Matrix search API request body
      */
-    private Map<String, Object> buildSearchRequest(String roomId, String query, String nextBatch) {
+    private URI buildSearchUri(String nextBatch) {
+        String base = homeserverUrl + "/_matrix/client/v3/search";
+        if (nextBatch == null || nextBatch.isBlank()) {
+            return URI.create(base);
+        }
+        return URI.create(base + "?next_batch=" + URLEncoder.encode(nextBatch, StandardCharsets.UTF_8));
+    }
+
+    private Map<String, Object> buildSearchRequest(String roomId, String query) {
         Map<String, Object> searchBody = new HashMap<>();
 
         Map<String, Object> roomEvents = new HashMap<>();
@@ -354,20 +362,16 @@ public class MatrixSearchService {
         // hits unless the query also appears in the sender MXID.
         roomEvents.put("keys", List.of("content.body"));
         roomEvents.put("order_by", "recent");
-        roomEvents.put("limit", 25);
 
         Map<String, Object> filter = new HashMap<>();
         filter.put("rooms", List.of(roomId));
+        filter.put("limit", 25);
         roomEvents.put("filter", filter);
 
         Map<String, Object> searchCategories = new HashMap<>();
         searchCategories.put("room_events", roomEvents);
 
         searchBody.put("search_categories", searchCategories);
-
-        if (nextBatch != null) {
-            searchBody.put("next_batch", nextBatch);
-        }
 
         return searchBody;
     }
