@@ -30,6 +30,7 @@ public class MatrixSearchService {
     private final String homeserverUrl;
     private final String accessToken;
     private final Map<String, AtomicBoolean> runningOperations;
+    private final Map<String, SearchPaginationState> searchCache;
 
     public MatrixSearchService(MatrixClient matrixClient, HttpClient httpClient, ObjectMapper mapper,
             String homeserverUrl, String accessToken, Map<String, AtomicBoolean> runningOperations) {
@@ -39,6 +40,57 @@ public class MatrixSearchService {
         this.homeserverUrl = homeserverUrl;
         this.accessToken = accessToken;
         this.runningOperations = runningOperations;
+        this.searchCache = new java.util.concurrent.ConcurrentHashMap<>();
+    }
+
+    /**
+     * Get the pagination state for a user. Returns null if not found.
+     */
+    public SearchPaginationState getSearchState(String sender) {
+        return searchCache.get(sender);
+    }
+
+    /**
+     * Navigate to next page for a user's search results
+     */
+    public boolean nextPage(String sender) {
+        SearchPaginationState state = getSearchState(sender);
+        if (state == null) return false;
+        if (state.nextPage()) {
+            matrixClient.updateNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
+                    state.renderPage());
+
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Navigate to previous page for a user's search results
+     */
+    public boolean prevPage(String sender) {
+        SearchPaginationState state = getSearchState(sender);
+        if (state == null) return false;
+        if (state.prevPage()) {
+            matrixClient.updateNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
+                    state.renderPage());
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Go to a specific page for a user's search results
+     */
+    public boolean goToPage(String sender, int pageNum) {
+        SearchPaginationState state = getSearchState(sender);
+        if (state == null) return false;
+        if (state.goToPage(pageNum)) {
+            matrixClient.updateNoticeMessage(state.getResponseRoomId(), state.getEventMessageId(),
+                    state.renderPage());
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -53,49 +105,34 @@ public class MatrixSearchService {
             String lookbackSuffix = lookbackHours > 0 ? " (last " + lookbackHours + "h)" : "";
             String initialMessage = "Searching Matrix for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + "...";
             String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
-            String originalEventId = eventMessageId;
 
             List<SearchHit> hits = new ArrayList<>();
             Set<String> seenEventIds = new HashSet<>();
-            int maxResults = 25;
 
             System.out.println("Starting Matrix search for '" + query + "' in room " + searchRoomId);
-            boolean searchFailed = fetchSearchResults(searchRoomId, query, sender, responseRoomId, originalEventId,
-                    abortFlag, hits, seenEventIds, maxResults, cutoffTimestampMs);
+            boolean searchFailed = fetchSearchResults(searchRoomId, query, sender, responseRoomId, eventMessageId,
+                    abortFlag, hits, seenEventIds, cutoffTimestampMs);
             if (searchFailed || abortFlag.get()) {
                 return;
             }
 
             hits.sort(Comparator.comparingLong(SearchHit::originServerTs).reversed());
-            if (hits.size() > maxResults) {
-                hits = new ArrayList<>(hits.subList(0, maxResults));
-            }
 
             System.out.println("Matrix search completed with " + hits.size() + " total results");
 
             if (hits.isEmpty()) {
-                matrixClient.updateTextMessage(responseRoomId, originalEventId,
+                matrixClient.updateTextMessage(responseRoomId, eventMessageId,
                         "No Matrix search results found for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + ".");
                 return;
             }
 
-            // Final update
-            StringBuilder finalMsg = new StringBuilder();
-            finalMsg.append("Matrix search results for \"").append(query).append("\" in ").append(searchRoomId)
-                    .append(lookbackSuffix).append(".\n");
-            finalMsg.append(hits.size()).append(" matches.\n\n");
+            // Create pagination state and cache it (replaces any existing search for this user)
+            SearchPaginationState paginationState = new SearchPaginationState(hits, query, searchRoomId,
+                    responseRoomId, eventMessageId, zoneId);
+            searchCache.put(sender, paginationState);
 
-            for (SearchHit hit : hits) {
-                String timestamp = java.time.Instant.ofEpochMilli(hit.originServerTs())
-                        .atZone(zoneId)
-                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
-                finalMsg.append("[").append(timestamp).append("] <").append(hit.sender()).append("> ")
-                        .append(hit.body()).append(" ");
-                String messageLink = "https://matrix.to/#/" + searchRoomId + "/" + hit.eventId();
-                finalMsg.append(messageLink).append("\n");
-            }
-
-            matrixClient.updateTextMessage(responseRoomId, originalEventId, finalMsg.toString());
+            // Render first page
+            matrixClient.updateNoticeMessage(responseRoomId, eventMessageId, paginationState.renderPage());
 
         } catch (Exception e) {
             System.out.println("Failed to perform Matrix search: " + e.getMessage());
@@ -105,10 +142,10 @@ public class MatrixSearchService {
 
     private boolean fetchSearchResults(String searchRoomId, String query, String sender, String responseRoomId,
             String originalEventId, AtomicBoolean abortFlag, List<SearchHit> hits, Set<String> seenEventIds,
-            int maxResults, long cutoffTimestampMs) throws Exception {
+            long cutoffTimestampMs) throws Exception {
         String nextBatch = null;
         int iteration = 0;
-        int maxIterations = 5; // Prevent infinite loops
+        int maxIterations = 20; // Allow more iterations to fetch all results
 
         do {
             iteration++;
@@ -163,10 +200,6 @@ public class MatrixSearchService {
                     return true;
                 }
 
-                if (hits.size() >= maxResults) {
-                    break;
-                }
-
                 JsonNode resultObj = result.path("result");
                 String eventId = resultObj.path("event_id").asText(null);
                 String eventSender = resultObj.path("sender").asText(null);
@@ -195,12 +228,117 @@ public class MatrixSearchService {
                 System.out.println("Reached lookback cutoff for query '" + query + "', exiting search loop");
                 break;
             }
-        } while (nextBatch != null && hits.size() < maxResults && iteration < maxIterations);
+        } while (nextBatch != null && iteration < maxIterations);
 
         return false;
     }
 
     private record SearchHit(String eventId, String sender, String body, long originServerTs) {
+    }
+
+    /**
+     * Pagination state for search results
+     */
+    public static class SearchPaginationState {
+        private final List<SearchHit> allHits;
+        private int currentPage;
+        private final int pageSize;
+        private final String query;
+        private final String searchRoomId;
+        private final String responseRoomId;
+        private final String eventMessageId;
+        private final ZoneId zoneId;
+
+        public SearchPaginationState(List<SearchHit> allHits, String query, String searchRoomId,
+                String responseRoomId, String eventMessageId, ZoneId zoneId) {
+            this.allHits = allHits;
+            this.currentPage = 0;
+            this.pageSize = 25;
+            this.query = query;
+            this.searchRoomId = searchRoomId;
+            this.responseRoomId = responseRoomId;
+            this.eventMessageId = eventMessageId;
+            this.zoneId = zoneId;
+        }
+
+        public int getTotalPages() {
+            return (int) Math.ceil((double) allHits.size() / pageSize);
+        }
+
+        public int getCurrentPage() {
+            return currentPage;
+        }
+
+        public boolean hasNextPage() {
+            return currentPage < getTotalPages() - 1;
+        }
+
+        public boolean hasPrevPage() {
+            return currentPage > 0;
+        }
+
+        public List<SearchHit> getCurrentPageHits() {
+            int fromIndex = currentPage * pageSize;
+            int toIndex = Math.min(fromIndex + pageSize, allHits.size());
+            if (fromIndex >= allHits.size()) return List.of();
+            return allHits.subList(fromIndex, toIndex);
+        }
+
+        public String renderPage() {
+            List<SearchHit> pageHits = getCurrentPageHits();
+            StringBuilder sb = new StringBuilder();
+            sb.append("Matrix search results for \"").append(query).append("\" in ").append(searchRoomId).append(".\n");
+            sb.append("Page ").append(currentPage + 1).append("/").append(getTotalPages())
+                    .append(" (").append(allHits.size()).append(" total matches)\n\n");
+
+            for (SearchHit hit : pageHits) {
+                String timestamp = java.time.Instant.ofEpochMilli(hit.originServerTs())
+                        .atZone(zoneId)
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z"));
+                sb.append("[").append(timestamp).append("] <").append(hit.sender()).append("> ")
+                        .append(hit.body()).append(" ");
+                String messageLink = "https://matrix.to/#/" + searchRoomId + "/" + hit.eventId();
+                sb.append(messageLink).append("\n");
+            }
+
+            sb.append("\n");
+            if (getTotalPages() > 1) {
+                sb.append("Use `!page <n>` to jump to a page (1-").append(getTotalPages()).append(").");
+            }
+            return sb.toString().trim();
+        }
+
+        public boolean nextPage() {
+            if (hasNextPage()) {
+                currentPage++;
+                return true;
+            }
+            return false;
+        }
+
+        public boolean prevPage() {
+            if (hasPrevPage()) {
+                currentPage--;
+                return true;
+            }
+            return false;
+        }
+
+        public boolean goToPage(int pageNum) {
+            if (pageNum < 1 || pageNum > getTotalPages()) {
+                return false;
+            }
+            currentPage = pageNum - 1;
+            return true;
+        }
+
+        public String getResponseRoomId() {
+            return responseRoomId;
+        }
+
+        public String getEventMessageId() {
+            return eventMessageId;
+        }
     }
 
     /**

@@ -135,6 +135,9 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!search\\s+(.+)")) {
             handleMatrixSearch(trimmed, roomId, sender, responseRoomId, exportRoomId);
             return true;
+        } else if (trimmed.matches("!page\\s+(\\d+)")) {
+            handlePage(trimmed, sender, responseRoomId);
+            return true;
         } else if (trimmed.matches("!media\\s+(\\d+)([dh])\\s+(.+)")) {
             return handleTextSearchCommand(trimmed, "!media\\s+(\\d+)([dh])\\s+(.+)", "media search", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performMediaSearch);
         } else if ("!abort".equals(trimmed)) {
@@ -561,6 +564,18 @@ public class CommandDispatcher {
         }
     }
 
+    private void handlePage(String trimmed, String sender, String responseRoomId) {
+        Matcher matcher = Pattern.compile("!page\\s+(\\d+)").matcher(trimmed);
+        if (matcher.matches()) {
+            int pageNum = Integer.parseInt(matcher.group(1));
+            System.out.println("Received !page " + pageNum + " command from " + sender);
+            if (!matrixSearchService.goToPage(sender, pageNum)) {
+                matrixClient.sendNotice(responseRoomId,
+                        "Invalid page number or no active search. Use !search <query> to start a new search.");
+            }
+        }
+    }
+
     @FunctionalInterface
     public interface TextSearchAction {
         void execute(String roomId, String sender, String responseRoomId, String exportRoomId, int hours, String prevBatch, String pattern, ZoneId zoneId);
@@ -832,7 +847,8 @@ public class CommandDispatcher {
         switch (page) {
             case 1:
                 helpText = "**Search Commands (Page 1/3)**\n" +
-                        "* `!search [<hours>h|<days>d] <query>` - Matrix protocol native search (optionally limit lookback window)\n" +
+                        "* `!search [<hours>h|<days>d] <query>` - Matrix native search (paginated, all results)\n" +
+                        "* `!page <n>` - Jump to page n of search results\n" +
                         "* `!semantic <hours>h <query>` - AI-free semantic search using local embeddings\n" +
                         "* `!grep <hours>h <pattern>` - Fast pattern-based search (100 result limit)\n" +
                         "* `!grep-slow <hours>h <pattern>` - Complete history search, no result limit\n" +
