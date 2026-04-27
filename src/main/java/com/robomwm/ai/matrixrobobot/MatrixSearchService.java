@@ -360,14 +360,14 @@ public class MatrixSearchService {
         filter.put("rooms", List.of(roomId));
         roomEvents.put("filter", filter);
 
-        if (nextBatch != null) {
-            roomEvents.put("next_batch", nextBatch);
-        }
-
         Map<String, Object> searchCategories = new HashMap<>();
         searchCategories.put("room_events", roomEvents);
 
         searchBody.put("search_categories", searchCategories);
+
+        if (nextBatch != null) {
+            searchBody.put("next_batch", nextBatch);
+        }
 
         return searchBody;
     }
