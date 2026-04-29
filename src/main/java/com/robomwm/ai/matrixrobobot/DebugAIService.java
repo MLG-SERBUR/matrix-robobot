@@ -78,7 +78,7 @@ public class DebugAIService {
             this.minTokens = null;
             this.seed = null;
             this.stop = null;
-            this.skipSystem = false;
+            this.skipSystem = true;
             this.model = null;
         }
         
