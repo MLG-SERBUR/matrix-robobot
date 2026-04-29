@@ -100,7 +100,14 @@ public class ChunkedSummaryService extends AIService {
 
             ContextWindowInfo contextWindowInfo = parseContextWindowInfo(contextExceededMessage);
             double estimatorScale = calculateEstimatorScale(history, question, promptPrefix, contextWindowInfo);
-            int preferredChunkCount = calculatePreferredChunkCount(contextWindowInfo);
+
+            int contextLimit = contextWindowInfo != null ? contextWindowInfo.limitTokens : MAX_CONTEXT_TOKENS;
+            int chunkBudget = estimateChunkContentBudget(question, promptPrefix, contextLimit);
+            int preferredChunkCount = calculatePreferredChunkCount(history, estimatorScale, chunkBudget, contextWindowInfo);
+
+            System.out.println("ChunkedSummary: used=" + (contextWindowInfo != null ? contextWindowInfo.usedTokens : "null")
+                    + " limit=" + contextLimit + " budget=" + chunkBudget + " scale=" + estimatorScale
+                    + " preferredCount=" + preferredChunkCount);
 
             if (statusEventId != null) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
@@ -121,8 +128,6 @@ public class ChunkedSummaryService extends AIService {
                     timeoutSeconds,
                     Prompts.DEBUGAI_PREFIX.equals(promptPrefix));
 
-            int contextLimit = contextWindowInfo != null ? contextWindowInfo.limitTokens : MAX_CONTEXT_TOKENS;
-            int chunkBudget = estimateChunkContentBudget(question, promptPrefix, contextLimit);
             List<ChunkRange> initialChunks = planLogChunks(history.logs, history.timestamps, chunkBudget, estimatorScale,
                     preferredChunkCount);
             if (initialChunks.isEmpty()) {
@@ -562,13 +567,27 @@ public class ChunkedSummaryService extends AIService {
         }
 
         double scale = contextWindowInfo.usedTokens / (double) estimated;
-        return Math.max(0.25, Math.min(1.25, scale));
+        return Math.max(0.25, Math.min(3.0, scale));
     }
 
-    private int calculatePreferredChunkCount(ContextWindowInfo contextWindowInfo) {
+    private int calculatePreferredChunkCount(RoomHistoryManager.ChatLogsResult history, double estimatorScale, int tokenBudget,
+            ContextWindowInfo contextWindowInfo) {
         if (contextWindowInfo == null || contextWindowInfo.usedTokens <= 0 || contextWindowInfo.limitTokens <= 0) {
             return -1;
         }
-        return Math.max(1, (int) Math.ceil(contextWindowInfo.usedTokens / (double) contextWindowInfo.limitTokens));
+
+        long totalLogTokens = 0;
+        for (String log : history.logs) {
+            totalLogTokens += (int) Math.ceil((RoomHistoryManager.estimateTokens(log) + 1) * estimatorScale);
+        }
+
+        // Divide total log content by available budget per chunk.
+        // If we only slightly exceed context (e.g. 13k/12k), this should be 2.
+        int count = (int) Math.ceil(totalLogTokens / (double) tokenBudget);
+        
+        // Also respect the raw ratio from the API error message.
+        int apiRatioCount = (int) Math.ceil(contextWindowInfo.usedTokens / (double) contextWindowInfo.limitTokens);
+        
+        return Math.max(Math.max(1, count), apiRatioCount);
     }
 }
