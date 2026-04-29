@@ -62,7 +62,6 @@ Description=Matrix Robobot Service
 After=network.target
 
 [Service]
-User=$USER_NAME
 WorkingDirectory=$WORK_DIR
 # Build a new jar every time the service starts
 # Try to pull latest changes first (ignoring failure if offline)
@@ -75,23 +74,26 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target"
+WantedBy=default.target"
 
 # 6. Check if service is running and stop it for update (if exists)
-if systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo -e "${BLUE}Stopping existing service for update...${NC}"
-    sudo systemctl stop "$SERVICE_NAME"
+if systemctl --user is-active --quiet "$SERVICE_NAME"; then
+    echo -e "${BLUE}Stopping existing user service for update...${NC}"
+    systemctl --user stop "$SERVICE_NAME"
 fi
 
-# 7. Write to temporary file and move to systemd
-echo "$SERVICE_CONTENT" > "$SERVICE_NAME.service"
+# 7. Write to user systemd directory
+USER_SYSTEMD_DIR="$HOME/.config/systemd/user"
+mkdir -p "$USER_SYSTEMD_DIR"
 
-echo -e "${BLUE}Applying systemd configuration... (sudo required)${NC}"
-sudo mv "$SERVICE_NAME.service" "/etc/systemd/system/$SERVICE_NAME.service"
-sudo systemctl daemon-reload
-sudo systemctl enable "$SERVICE_NAME"
-sudo systemctl start "$SERVICE_NAME"
+echo "$SERVICE_CONTENT" > "$USER_SYSTEMD_DIR/$SERVICE_NAME.service"
+
+echo -e "${BLUE}Applying systemd configuration...${NC}"
+systemctl --user daemon-reload
+systemctl --user enable "$SERVICE_NAME"
+systemctl --user start "$SERVICE_NAME"
 
 echo -e "${GREEN}=== Installation/Update Complete! ===${NC}"
-echo -e "You can view the logs with: ${BLUE}journalctl -u $SERVICE_NAME -f${NC}"
-echo -e "The service will now start automatically on reboot."
+echo -e "You can view the logs with: ${BLUE}journalctl --user -u $SERVICE_NAME -f${NC}"
+echo -e "The service will now start automatically when you log in."
+echo -e "${BLUE}Note: To keep the service running after logout, run: sudo loginctl enable-linger $USER_NAME${NC}"
