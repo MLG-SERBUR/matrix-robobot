@@ -862,15 +862,15 @@ public class RoomHistoryManager {
             char c = text.charAt(i);
             if (Character.isWhitespace(c)) {
                 if (wordLen > 0) {
-                    // Conservative estimate: ~3 characters per token
-                    count += 1 + Math.max(0, (wordLen - 3) / 3);
+                    // Estimate: ~4 characters per token
+                    count += 1 + Math.max(0, (wordLen - 4) / 4);
                     wordLen = 0;
                 }
             } else if (Character.isLetterOrDigit(c)) {
                 wordLen++;
             } else {
                 if (wordLen > 0) {
-                    count += 1 + Math.max(0, (wordLen - 3) / 3);
+                    count += 1 + Math.max(0, (wordLen - 4) / 4);
                     wordLen = 0;
                 }
                 // Punctuation, symbols, and special characters = 1 token each
@@ -879,10 +879,10 @@ public class RoomHistoryManager {
         }
         // Handle trailing word
         if (wordLen > 0) {
-            count += 1 + Math.max(0, (wordLen - 3) / 3);
+            count += 1 + Math.max(0, (wordLen - 4) / 4);
         }
-        // 15% safety margin + 1 for line structure tokens
-        return (int) Math.ceil(count * 1.15) + 1; 
+        // 5% safety margin + 1 for line structure tokens
+        return (int) Math.ceil(count * 1.05) + 1; 
     }
 
     /**

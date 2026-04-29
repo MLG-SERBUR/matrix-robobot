@@ -103,7 +103,7 @@ public class ChunkedSummaryService extends AIService {
 
             int contextLimit = contextWindowInfo != null ? contextWindowInfo.limitTokens : MAX_CONTEXT_TOKENS;
             int chunkBudget = estimateChunkContentBudget(question, promptPrefix, contextLimit);
-            int preferredChunkCount = calculatePreferredChunkCount(history, estimatorScale, chunkBudget, contextWindowInfo);
+            int preferredChunkCount = calculatePreferredChunkCount(history, estimatorScale, chunkBudget);
 
             System.out.println("ChunkedSummary: used=" + (contextWindowInfo != null ? contextWindowInfo.usedTokens : "null")
                     + " limit=" + contextLimit + " budget=" + chunkBudget + " scale=" + estimatorScale
@@ -299,156 +299,75 @@ public class ChunkedSummaryService extends AIService {
         }
 
         List<Integer> lineTokens = new ArrayList<>(logs.size());
+        long totalEstimated = 0;
         for (String log : logs) {
-            int estimated = RoomHistoryManager.estimateTokens(log) + 1;
-            lineTokens.add(Math.max(1, (int) Math.ceil(estimated * estimatorScale)));
+            int estimated = (int) Math.ceil((RoomHistoryManager.estimateTokens(log) + 1) * estimatorScale);
+            lineTokens.add(Math.max(1, estimated));
+            totalEstimated += estimated;
         }
 
-        if (preferredChunkCount > 1) {
-            return planLogChunksByTargetCount(logs, timestamps, tokenBudget, lineTokens, preferredChunkCount);
+        int count = preferredChunkCount;
+        if (count <= 0) {
+            count = (int) Math.ceil(totalEstimated / (double) tokenBudget);
         }
+        count = Math.max(1, count);
+
+        int targetTokensPerChunk = (int) Math.ceil(totalEstimated / (double) count);
+        int effectiveBudget = Math.min(tokenBudget, (int) (targetTokensPerChunk * 1.1)); // allow 10% overflow for smart split
 
         int start = 0;
         while (start < logs.size()) {
-            int hardEnd = start;
-            int currentTokens = 0;
-            while (hardEnd < logs.size()) {
-                int nextTokens = lineTokens.get(hardEnd);
-                if (hardEnd > start && currentTokens + nextTokens > tokenBudget) {
-                    break;
-                }
-                currentTokens += nextTokens;
-                hardEnd++;
-                if (hardEnd == logs.size()) {
-                    break;
-                }
-            }
-
-            if (hardEnd <= start) {
-                hardEnd = Math.min(start + 1, logs.size());
-            }
-
-            int splitEnd = chooseSmartSplitEnd(timestamps, start, hardEnd);
-            if (splitEnd <= start || splitEnd > hardEnd) {
-                splitEnd = hardEnd;
-            }
-
-            chunks.add(new ChunkRange(start, splitEnd));
-            start = splitEnd;
-        }
-
-        return chunks;
-    }
-
-    private List<ChunkRange> planLogChunksByTargetCount(List<String> logs, List<Long> timestamps, int tokenBudget,
-            List<Integer> lineTokens, int preferredChunkCount) {
-        List<ChunkRange> chunks = new ArrayList<>();
-        int[] suffixTotals = new int[lineTokens.size() + 1];
-        for (int i = lineTokens.size() - 1; i >= 0; i--) {
-            suffixTotals[i] = suffixTotals[i + 1] + lineTokens.get(i);
-        }
-
-        int start = 0;
-        int remainingChunks = preferredChunkCount;
-        while (start < logs.size()) {
-            if (remainingChunks <= 1) {
+            if (chunks.size() + 1 >= count) {
                 chunks.add(new ChunkRange(start, logs.size()));
                 break;
             }
 
-            int remainingTokens = suffixTotals[start];
-            int targetTokens = Math.max(1, (int) Math.ceil(remainingTokens / (double) remainingChunks));
-            int softTarget = Math.min(tokenBudget, targetTokens);
-
             int currentTokens = 0;
-            int softEnd = start;
             int hardEnd = start;
-
             while (hardEnd < logs.size()) {
                 int nextTokens = lineTokens.get(hardEnd);
-                if (hardEnd > start && currentTokens + nextTokens > tokenBudget) {
+                if (hardEnd > start && currentTokens + nextTokens > effectiveBudget) {
                     break;
                 }
                 currentTokens += nextTokens;
                 hardEnd++;
-                if (currentTokens >= softTarget && softEnd == start) {
-                    softEnd = hardEnd;
-                }
             }
 
             if (hardEnd <= start) {
                 hardEnd = Math.min(start + 1, logs.size());
             }
-            if (softEnd <= start) {
-                softEnd = hardEnd;
-            }
 
             int splitEnd = chooseSmartSplitEnd(timestamps, start, hardEnd);
-            if (splitEnd < softEnd) {
-                splitEnd = chooseSmartSplitEnd(timestamps, softEnd - 1, hardEnd);
-            }
-            if (splitEnd <= start || splitEnd > hardEnd) {
-                splitEnd = hardEnd;
-            }
-
             chunks.add(new ChunkRange(start, splitEnd));
             start = splitEnd;
-            remainingChunks--;
         }
 
         return chunks;
     }
 
+
+
     private int chooseSmartSplitEnd(List<Long> timestamps, int start, int hardEnd) {
-        if (timestamps == null || timestamps.size() < hardEnd || hardEnd - start < 3) {
+        if (timestamps == null || timestamps.size() < hardEnd || hardEnd - start < 4) {
             return hardEnd;
         }
 
-        List<Long> gaps = new ArrayList<>();
-        for (int i = start; i < hardEnd - 1; i++) {
-            gaps.add(Math.max(0L, timestamps.get(i + 1) - timestamps.get(i)));
-        }
-        if (gaps.isEmpty()) {
-            return hardEnd;
-        }
+        // Look for the largest gap in the second half of the chunk
+        int searchStart = start + (hardEnd - start) / 2;
+        int bestBoundary = hardEnd;
+        long maxGap = -1;
 
-        long medianGap = median(gaps);
-        long maxGap = 0L;
-        for (long gap : gaps) {
-            if (gap > maxGap) {
+        for (int i = searchStart; i < hardEnd - 1; i++) {
+            long gap = timestamps.get(i + 1) - timestamps.get(i);
+            if (gap >= maxGap) {
                 maxGap = gap;
-            }
-        }
-
-        int preferredBoundaryFloor = start + Math.max(1, ((hardEnd - start) * 2) / 5);
-        int bestBoundary = -1;
-        long bestGap = -1L;
-        for (int i = Math.max(start, preferredBoundaryFloor); i < hardEnd - 1; i++) {
-            long gap = Math.max(0L, timestamps.get(i + 1) - timestamps.get(i));
-            if (gap > bestGap || (gap == bestGap && i + 1 > bestBoundary)) {
-                bestGap = gap;
                 bestBoundary = i + 1;
             }
         }
 
-        long meaningfulGap = Math.max(medianGap * 2L, maxGap / 3L);
-        if (bestBoundary > start && bestGap >= meaningfulGap) {
+        // Only use the gap if it's "significant" (e.g. > 1 minute or at least 5x the median of the search window)
+        if (maxGap > 60000) {
             return bestBoundary;
-        }
-
-        int latestStrongBoundary = -1;
-        long latestStrongGap = -1L;
-        for (int i = start; i < hardEnd - 1; i++) {
-            long gap = Math.max(0L, timestamps.get(i + 1) - timestamps.get(i));
-            if (gap >= Math.max(1L, medianGap * 3L) && i + 1 > latestStrongBoundary) {
-                latestStrongBoundary = i + 1;
-                latestStrongGap = gap;
-            }
-        }
-
-        if (latestStrongBoundary > start && latestStrongGap > 0L
-                && latestStrongBoundary - start >= Math.max(1, (hardEnd - start) / 3)) {
-            return latestStrongBoundary;
         }
 
         return hardEnd;
@@ -570,24 +489,12 @@ public class ChunkedSummaryService extends AIService {
         return Math.max(0.25, Math.min(3.0, scale));
     }
 
-    private int calculatePreferredChunkCount(RoomHistoryManager.ChatLogsResult history, double estimatorScale, int tokenBudget,
-            ContextWindowInfo contextWindowInfo) {
-        if (contextWindowInfo == null || contextWindowInfo.usedTokens <= 0 || contextWindowInfo.limitTokens <= 0) {
-            return -1;
-        }
-
+    private int calculatePreferredChunkCount(RoomHistoryManager.ChatLogsResult history, double estimatorScale, int tokenBudget) {
         long totalLogTokens = 0;
         for (String log : history.logs) {
             totalLogTokens += (int) Math.ceil((RoomHistoryManager.estimateTokens(log) + 1) * estimatorScale);
         }
 
-        // Divide total log content by available budget per chunk.
-        // If we only slightly exceed context (e.g. 13k/12k), this should be 2.
-        int count = (int) Math.ceil(totalLogTokens / (double) tokenBudget);
-        
-        // Also respect the raw ratio from the API error message.
-        int apiRatioCount = (int) Math.ceil(contextWindowInfo.usedTokens / (double) contextWindowInfo.limitTokens);
-        
-        return Math.max(Math.max(1, count), apiRatioCount);
+        return Math.max(1, (int) Math.ceil(totalLogTokens / (double) tokenBudget));
     }
 }
