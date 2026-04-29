@@ -50,22 +50,24 @@ public class ChunkedSummaryService extends AIService {
         final Backend preferredBackend;
         final String arliModel;
         final String cerebrasModel;
+        final String groqModel;
         final int timeoutSeconds;
         final boolean skipSystem;
 
-        InternalQueryConfig(Backend preferredBackend, String arliModel, String cerebrasModel, int timeoutSeconds,
+        InternalQueryConfig(Backend preferredBackend, String arliModel, String cerebrasModel, String groqModel, int timeoutSeconds,
                 boolean skipSystem) {
             this.preferredBackend = preferredBackend;
             this.arliModel = arliModel;
             this.cerebrasModel = cerebrasModel;
+            this.groqModel = groqModel;
             this.timeoutSeconds = timeoutSeconds;
             this.skipSystem = skipSystem;
         }
     }
 
     public ChunkedSummaryService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
-            String arliApiKey, String cerebrasApiKey) {
-        super(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey);
+            String arliApiKey, String cerebrasApiKey, String groqApiKey) {
+        super(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey, groqApiKey);
     }
 
     @Override
@@ -107,10 +109,14 @@ public class ChunkedSummaryService extends AIService {
                     ? forcedModel
                     : getRandomModel(ARLI_MODELS);
             String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
+            String groqModel = (preferredBackend == Backend.GROQ && forcedModel != null)
+                    ? forcedModel
+                    : GROQ_MODELS.get(0);
             InternalQueryConfig config = new InternalQueryConfig(
                     preferredBackend,
                     arliModel,
                     cerebrasModel,
+                    groqModel,
                     timeoutSeconds,
                     Prompts.DEBUGAI_PREFIX.equals(promptPrefix));
 
@@ -180,20 +186,34 @@ public class ChunkedSummaryService extends AIService {
             throw new Exception("Aborted");
         }
 
-        boolean tryArli = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.ARLIAI;
+        boolean tryGroq = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.GROQ;
         boolean tryCerebras = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.CEREBRAS;
+        boolean tryArli = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.ARLIAI;
         boolean attempted = false;
         boolean allContextExceeded = true;
         Exception lastNonContextError = null;
 
-        if (tryArli) {
+        if (tryGroq && groqApiKey != null && !groqApiKey.isEmpty()) {
             attempted = true;
             try {
-                return callArliAIStreamingToEvent(prompt, config.arliModel, config.skipSystem, responseRoomId,
+                // Try compound
+                return callGroqStreamingToEvent(prompt, config.groqModel, config.skipSystem, responseRoomId,
                         streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
             } catch (Exception e) {
                 if (!isContextExceededMessage(e.getMessage())) {
-                    throw e; // Fail early on any error that isn't context exceeded
+                    if (config.preferredBackend != Backend.AUTO) throw e;
+                }
+                
+                // Try compound-mini if AUTO
+                if (config.preferredBackend == Backend.AUTO) {
+                    try {
+                        return callGroqStreamingToEvent(prompt, GROQ_MODELS.get(1), config.skipSystem, responseRoomId,
+                                streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
+                    } catch (Exception e2) {
+                        if (!isContextExceededMessage(e2.getMessage())) {
+                            // fall through
+                        }
+                    }
                 }
             }
         }

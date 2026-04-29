@@ -26,9 +26,9 @@ public class VisionAIService extends ChunkedSummaryService {
     private static final String DESCRIPTION_CACHE_FILE = "image_description_cache.json";
 
     public VisionAIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
-                           String arliApiKey, ImageFetcher imageFetcher) {
+                           String arliApiKey, String groqApiKey, ImageFetcher imageFetcher) {
         // Pass null for cerebrasApiKey to ensure Vision AI never falls back to Cerebras
-        super(client, mapper, homeserver, accessToken, arliApiKey, null);
+        super(client, mapper, homeserver, accessToken, arliApiKey, null, groqApiKey);
         this.imageFetcher = imageFetcher;
     }
 

@@ -4,5 +4,6 @@
   "commandRoomId": "!abc123def456:matrix.org",
   "exportRoomId": "!xyz789uvw012:matrix.org",
   "arliApiKey": "arli_xxxxxxxxxxxxxxxxxxxxxxxx",
-  "cerebrasApiKey": "csk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  "cerebrasApiKey": "csk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "groqApiKey": "gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 }
