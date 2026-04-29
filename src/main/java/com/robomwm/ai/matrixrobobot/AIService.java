@@ -212,10 +212,9 @@ public class AIService {
                             msgEdited = true;
                         }
                     } else {
-                        allAttemptedBackendsContextExceeded = false;
                         if (abortFlag != null && abortFlag.get()) return;
                         matrixClient.sendNotice(responseRoomId, "ArliAI (" + arliModel + ") failed: " + arliErrorMsg);
-                        if (is403) return; // Don't fallback on other 403 errors
+                        return; // Fail early on any error that isn't context exceeded
                     }
 
                     if (preferredBackend != Backend.AUTO) return;

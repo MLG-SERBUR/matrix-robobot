@@ -235,11 +235,7 @@ public class ChunkedSummaryService extends AIService {
                         streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
             } catch (Exception e) {
                 if (!isContextExceededMessage(e.getMessage())) {
-                    allContextExceeded = false;
-                    lastNonContextError = e;
-                    if (config.preferredBackend == Backend.ARLIAI) {
-                        throw e;
-                    }
+                    throw e; // Fail early on any error that isn't context exceeded
                 }
             }
         }
