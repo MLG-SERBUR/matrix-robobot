@@ -214,14 +214,12 @@ public class AIService {
                         if (preferredBackend == Backend.AUTO) {
                             matrixClient.updateNoticeMessage(responseRoomId, eventId, "Groq (" + groqModel + ") context exceeded. Trying " + GROQ_MODELS.get(1) + "...");
                             msgEdited = true;
+                        } else {
+                            return; // Success handled by returning, but we need to stop here if not AUTO
                         }
-                    } else if (preferredBackend == Backend.AUTO) {
-                        // For other errors in AUTO mode, fall back to next Groq model
-                        matrixClient.updateNoticeMessage(responseRoomId, eventId, "Groq (" + groqModel + ") failed. Trying " + GROQ_MODELS.get(1) + "...");
-                        msgEdited = true;
                     } else {
                         matrixClient.sendNotice(responseRoomId, "Groq (" + groqModel + ") failed: " + errorMsg);
-                        return;
+                        return; // Fail early on any error that isn't context exceeded
                     }
                 }
 
@@ -237,12 +235,12 @@ public class AIService {
                     if (isContextExceededMessage(errorMsg)) {
                         String contextInfo = extractContextInfo(errorMsg);
                         contextExceeded = new AIContextExceededException("Groq (" + groqMiniModel + ") context exceeded" + contextInfo + ".", contextInfo);
-                    }
-                    // Fall through to Cerebras if AUTO
-                    if (preferredBackend != Backend.AUTO) {
+                    } else {
                         matrixClient.sendNotice(responseRoomId, "Groq (" + groqMiniModel + ") failed: " + errorMsg);
-                        return;
+                        return; // Fail early on any error that isn't context exceeded
                     }
+
+                    if (preferredBackend != Backend.AUTO) return;
                 }
             }
 
@@ -263,13 +261,16 @@ public class AIService {
                     return;
                 } catch (AIContextExceededException e) {
                     contextExceeded = e;
+                    if (preferredBackend == Backend.AUTO) {
+                        matrixClient.updateNoticeMessage(responseRoomId, eventId, "Cerebras AI (" + cerebrasModel + ") context exceeded. Trying Arli AI (" + arliModel + ")...");
+                        msgEdited = true;
+                    }
                 } catch (Exception e) {
                     allAttemptedBackendsContextExceeded = false;
-                    System.out.println("Cerebras AI (" + cerebrasModel + ") failed: " + e.getMessage());
-                    if (preferredBackend != Backend.AUTO) {
-                        matrixClient.sendMarkdown(responseRoomId, "Cerebras AI (" + cerebrasModel + ") failed: " + e.getMessage());
-                        return;
-                    }
+                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                    System.out.println("Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
+                    matrixClient.sendNotice(responseRoomId, "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
+                    return; // Fail early on any error that isn't context exceeded
                 }
             }
 
@@ -469,6 +470,7 @@ public class AIService {
                             if (json.isEmpty()) continue;
                             
                             JsonNode node = mapper.readTree(json);
+                            if (node.has("error")) { throw new Exception("AI Stream Error: " + node.path("error").path("message").asText(node.get("error").toString())); }
                             JsonNode choices = node.path("choices");
                             if (choices.isArray() && choices.size() > 0) {
                                 JsonNode delta = choices.get(0).path("delta");
@@ -594,6 +596,7 @@ public class AIService {
                             if (json.isEmpty()) continue;
 
                             JsonNode node = mapper.readTree(json);
+                            if (node.has("error")) { throw new Exception("AI Stream Error: " + node.path("error").path("message").asText(node.get("error").toString())); }
                             JsonNode choices = node.path("choices");
                             if (choices.isArray() && choices.size() > 0) {
                                 JsonNode delta = choices.get(0).path("delta");

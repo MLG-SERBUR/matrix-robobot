@@ -190,8 +190,6 @@ public class ChunkedSummaryService extends AIService {
         boolean tryCerebras = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.CEREBRAS;
         boolean tryArli = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.ARLIAI;
         boolean attempted = false;
-        boolean allContextExceeded = true;
-        Exception lastNonContextError = null;
 
         if (tryGroq && groqApiKey != null && !groqApiKey.isEmpty()) {
             attempted = true;
@@ -201,7 +199,7 @@ public class ChunkedSummaryService extends AIService {
                         streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
             } catch (Exception e) {
                 if (!isContextExceededMessage(e.getMessage())) {
-                    if (config.preferredBackend != Backend.AUTO) throw e;
+                    throw e; // Fail early on any error that isn't context exceeded
                 }
                 
                 // Try compound-mini if AUTO
@@ -211,9 +209,11 @@ public class ChunkedSummaryService extends AIService {
                                 streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
                     } catch (Exception e2) {
                         if (!isContextExceededMessage(e2.getMessage())) {
-                            // fall through
+                            throw e2; // Fail early on any error that isn't context exceeded
                         }
                     }
+                } else {
+                    throw e;
                 }
             }
         }
@@ -233,20 +233,34 @@ public class ChunkedSummaryService extends AIService {
                 return callCerebras(prompt, config.cerebrasModel, config.skipSystem, config.timeoutSeconds);
             } catch (Exception e) {
                 if (!isContextExceededMessage(e.getMessage())) {
-                    allContextExceeded = false;
-                    lastNonContextError = e;
-                    if (config.preferredBackend == Backend.CEREBRAS) {
-                        throw e;
-                    }
+                    throw e; // Fail early on any error that isn't context exceeded
                 }
             }
         }
 
-        if (attempted && allContextExceeded) {
-            throw new InternalContextExceededException("All attempted backends exceeded context.");
+        if (abortFlag != null && abortFlag.get()) {
+            throw new Exception("Aborted");
         }
-        if (lastNonContextError != null) {
-            throw lastNonContextError;
+
+        if (tryArli && arliApiKey != null && !arliApiKey.isEmpty()) {
+            attempted = true;
+            try {
+                if (streamEventIdHolder != null && streamEventIdHolder[0] != null) {
+                    MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+                    String arliNotice = "Using Arli AI...\n\n" + footer;
+                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, streamEventIdHolder[0], arliNotice);
+                }
+                return callArliAIStreamingToEvent(prompt, config.arliModel, config.skipSystem, responseRoomId,
+                        streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
+            } catch (Exception e) {
+                if (!isContextExceededMessage(e.getMessage())) {
+                    throw e; // Fail early on any error that isn't context exceeded
+                }
+            }
+        }
+
+        if (attempted) {
+            throw new InternalContextExceededException("All attempted backends exceeded context.");
         }
         throw new Exception("No AI backend available for chunked summary.");
     }
