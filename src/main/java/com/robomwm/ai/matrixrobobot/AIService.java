@@ -168,7 +168,7 @@ public class AIService {
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
                 matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Cerebras failed: " + errorMsg);
-                if (!((tryGroq || tryOpenRouter || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
+                if (!((tryGroq || tryOpenRouter || tryArli) && preferredBackend == Backend.AUTO)) {
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
                     return;
                 }
@@ -188,7 +188,7 @@ public class AIService {
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + "Groq (" + groqModel + ") failed: " + errorMsg);
                 matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Groq failed: " + errorMsg);
-                if (!((tryOpenRouter || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
+                if (!((tryOpenRouter || tryArli) && preferredBackend == Backend.AUTO)) {
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "Groq (" + groqModel + ") failed: " + errorMsg);
                     return;
                 }
@@ -208,7 +208,7 @@ public class AIService {
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
                 matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "OpenRouter failed: " + errorMsg);
-                if (!(tryArli && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
+                if (!(tryArli && preferredBackend == Backend.AUTO)) {
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
                     return;
                 }
@@ -938,23 +938,5 @@ public class AIService {
         }
         return aiAnswer;
     }
-
-    protected boolean isFallbackableError(String errorMessage) {
-        if (errorMessage == null || errorMessage.isEmpty()) {
-            return false;
-        }
-
-        String lower = errorMessage.toLowerCase();
-        return lower.contains("exceeded the maximum context length")
-                || lower.contains("context exceeded")
-                || lower.contains("token_quota_exceeded")
-                || lower.contains("too_many_tokens_error")
-                || lower.contains("tokens per minute limit exceeded")
-                || lower.contains("rate limit reached")
-                || lower.contains("rate_limit_exceeded")
-                || lower.contains("request entity too large")
-                || lower.contains("servers restarting");
-    }
-
 
 }
