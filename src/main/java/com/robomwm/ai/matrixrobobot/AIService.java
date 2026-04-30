@@ -181,7 +181,7 @@ public class AIService {
         if (tryGroq) {
             String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Groq (" + groqModel + ")...");
             try {
-                callGroqStreamingToEvent(prompt, groqModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true);
+                callGroqStreamingToEvent(prompt, groqModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true, exportRoomId, history.firstEventId);
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -201,7 +201,7 @@ public class AIService {
         if (tryOpenRouter) {
             String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying OpenRouter (" + openrouterModel + ")...");
             try {
-                callOpenRouterStreamingToEvent(prompt, openrouterModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true);
+                callOpenRouterStreamingToEvent(prompt, openrouterModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true, exportRoomId, history.firstEventId);
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -221,7 +221,7 @@ public class AIService {
         if (tryArli) {
             String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Arli AI (" + arliModel + ")...");
             try {
-                callArliAIStreamingToEvent(prompt, arliModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true);
+                callArliAIStreamingToEvent(prompt, arliModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true, exportRoomId, history.firstEventId);
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -237,7 +237,7 @@ public class AIService {
     
     protected String callOpenRouterStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
             String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-            boolean useNotice) throws Exception {
+            boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
         String openrouterApiUrl = "https://openrouter.ai/api/v1";
         if (openrouterApiKey == null || openrouterApiKey.isEmpty()) {
             throw new Exception("OPENROUTER_API_KEY is not configured.");
@@ -262,7 +262,7 @@ public class AIService {
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
-        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "OpenRouter", abortFlag, footer, useNotice);
+        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "OpenRouter", abortFlag, footer, useNotice, exportRoomId, firstEventId);
     }
 
 
@@ -302,7 +302,7 @@ public class AIService {
 
     protected String callGroqStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
             String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-            boolean useNotice) throws Exception {
+            boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
         String groqApiUrl = "https://api.groq.com/openai";
         if (groqApiKey == null || groqApiKey.isEmpty()) {
             throw new Exception("GROQ_API_KEY is not configured.");
@@ -325,7 +325,7 @@ public class AIService {
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
-        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "Groq", abortFlag, footer, useNotice);
+        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "Groq", abortFlag, footer, useNotice, exportRoomId, firstEventId);
     }
 
     protected String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
@@ -357,7 +357,7 @@ public class AIService {
 
     protected String callArliAIStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
             String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-            boolean useNotice) throws Exception {
+            boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");
@@ -381,7 +381,7 @@ public class AIService {
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
-        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "ArliAI", abortFlag, footer, useNotice);
+        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "ArliAI", abortFlag, footer, useNotice, exportRoomId, firstEventId);
     }
 
 
@@ -391,6 +391,7 @@ public class AIService {
 
         StringBuilder reasoning = new StringBuilder();
         StringBuilder responseContent = new StringBuilder();
+        String actualModel = null;
         long lastUpdate = System.currentTimeMillis();
         final long startTime = System.currentTimeMillis();
 
@@ -430,6 +431,9 @@ public class AIService {
                             throw new Exception("Status: " + code + " Body: " + errorNode.toString());
                         }
                         JsonNode choices = node.path("choices");
+                        if (node.has("model") && (actualModel == null || actualModel.isEmpty())) {
+                            actualModel = node.get("model").asText();
+                        }
                         if (choices.isArray() && choices.size() > 0) {
                             JsonNode delta = choices.get(0).path("delta");
                             if (delta.has("content")) {
@@ -508,6 +512,10 @@ public class AIService {
             finalOutput = finalOutput + "\n\n" + footer;
         }
 
+        if (actualModel != null && !actualModel.isEmpty()) {
+            finalOutput = finalOutput + "\n\n_Model: " + actualModel + "_";
+        }
+
         String answer = appendMessageLink(finalOutput, exportRoomId, firstEventId);
         if (eventIdHolder[0] == null) {
             matrixClient.sendMarkdownWithEventId(responseRoomId, answer);
@@ -518,11 +526,13 @@ public class AIService {
     }
 
     protected String streamArliAIResponseToEvent(HttpRequest request, String responseRoomId, String[] eventIdHolder,
-            String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer, boolean useNotice) throws Exception {
+            String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer, boolean useNotice,
+            String exportRoomId, String firstEventId) throws Exception {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
         StringBuilder reasoning = new StringBuilder();
         StringBuilder responseContent = new StringBuilder();
+        String actualModel = null;
         long lastUpdate = System.currentTimeMillis();
         final long startTime = System.currentTimeMillis();
 
@@ -562,6 +572,9 @@ public class AIService {
                             throw new Exception("Status: " + code + " Body: " + errorNode.toString());
                         }
                         JsonNode choices = node.path("choices");
+                        if (node.has("model") && (actualModel == null || actualModel.isEmpty())) {
+                            actualModel = node.get("model").asText();
+                        }
                         if (choices.isArray() && choices.size() > 0) {
                             JsonNode delta = choices.get(0).path("delta");
                             if (delta.has("content")) {
@@ -574,7 +587,6 @@ public class AIService {
 
                             long now = System.currentTimeMillis();
                             if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
-                                lastUpdate = now;
                                 String rendered = buildStreamingOutput(reasoning, responseContent, footer, clockFaces, updateCount++, startTime);
                                 if (eventIdHolder[0] == null) {
                                     eventIdHolder[0] = useNotice
@@ -622,6 +634,12 @@ public class AIService {
         if (footer != null && !footer.isEmpty()) {
             finalOutput = finalOutput + "\n\n" + footer;
         }
+
+        if (actualModel != null && !actualModel.isEmpty()) {
+            finalOutput = finalOutput + "\n\n_Model: " + actualModel + "_";
+        }
+
+        finalOutput = appendMessageLink(finalOutput, exportRoomId, firstEventId);
 
         if (eventIdHolder[0] == null) {
             eventIdHolder[0] = useNotice
