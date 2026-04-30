@@ -32,7 +32,7 @@ public class AIService {
             "Qwen3.5-27B-Derestricted"
     );
     public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
-    public static final List<String> GROQ_MODELS = Arrays.asList("groq/compound", "groq/compound-mini");
+    public static final List<String> GROQ_MODELS = Arrays.asList("groq/compound-mini");
 
     private static class AIContextExceededException extends Exception {
         private final String contextInfo;
@@ -165,7 +165,7 @@ public class AIService {
             if (preferredBackend == Backend.GROQ) initialBackendName = "Groq (" + groqModel + ")";
             else if (preferredBackend == Backend.CEREBRAS) initialBackendName = "Cerebras (" + cerebrasModel + ")";
             else if (preferredBackend == Backend.ARLIAI) initialBackendName = "Arli AI (" + arliModel + ")";
-            else initialBackendName = "Groq (" + groqModel + ")"; // Default to Groq
+            else initialBackendName = "Cerebras (" + cerebrasModel + ")"; // Default to Cerebras
 
             String queryDescription = history.logs.size() + " messages";
             String queryStatusMsg = "\u23F3 Querying " + initialBackendName + " with " + queryDescription + questionPart;
@@ -198,55 +198,7 @@ public class AIService {
             boolean attemptedBackend = false;
             boolean allAttemptedBackendsContextExceeded = true;
 
-            // 1. Try Groq (compound)
-            if (tryGroq && groqApiKey != null && !groqApiKey.isEmpty()) {
-                attemptedBackend = true;
-                try {
-                    callGroq(prompt, groqModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag);
-                    return; // Success
-                } catch (Exception e) {
-                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                    System.out.println("Groq (" + groqModel + ") Error: " + errorMsg);
-                    
-                    if (isContextExceededMessage(errorMsg)) {
-                        String contextInfo = extractContextInfo(errorMsg);
-                        contextExceeded = new AIContextExceededException("Groq (" + groqModel + ") context exceeded" + contextInfo + ".", contextInfo);
-                        if (preferredBackend == Backend.AUTO) {
-                            matrixClient.updateNoticeMessage(responseRoomId, eventId, "Groq (" + groqModel + ") context exceeded. Trying " + GROQ_MODELS.get(1) + "...");
-                            msgEdited = true;
-                        } else {
-                            return; // Success handled by returning, but we need to stop here if not AUTO
-                        }
-                    } else {
-                        matrixClient.sendNotice(responseRoomId, "Groq (" + groqModel + ") failed: " + errorMsg);
-                        return; // Fail early on any error that isn't context exceeded
-                    }
-                }
-
-                // 2. Try Groq (compound-mini)
-                String groqMiniModel = GROQ_MODELS.get(1);
-                try {
-                    callGroq(prompt, groqMiniModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag);
-                    return; // Success
-                } catch (Exception e) {
-                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                    System.out.println("Groq (" + groqMiniModel + ") Error: " + errorMsg);
-                    
-                    if (isContextExceededMessage(errorMsg)) {
-                        String contextInfo = extractContextInfo(errorMsg);
-                        contextExceeded = new AIContextExceededException("Groq (" + groqMiniModel + ") context exceeded" + contextInfo + ".", contextInfo);
-                    } else {
-                        matrixClient.sendNotice(responseRoomId, "Groq (" + groqMiniModel + ") failed: " + errorMsg);
-                        return; // Fail early on any error that isn't context exceeded
-                    }
-
-                    if (preferredBackend != Backend.AUTO) return;
-                }
-            }
-
-            if (abortFlag != null && abortFlag.get()) return;
-
-            // 3. Try Cerebras
+            // 1. Try Cerebras
             if (tryCerebras && cerebrasApiKey != null && !cerebrasApiKey.isEmpty()) {
                 attemptedBackend = true;
                 if (preferredBackend == Backend.AUTO) {
@@ -262,7 +214,8 @@ public class AIService {
                 } catch (AIContextExceededException e) {
                     contextExceeded = e;
                     if (preferredBackend == Backend.AUTO) {
-                        matrixClient.updateNoticeMessage(responseRoomId, eventId, "Cerebras AI (" + cerebrasModel + ") context exceeded. Trying Arli AI (" + arliModel + ")...");
+                        String info = e.getContextInfo() == null ? "" : e.getContextInfo();
+                        matrixClient.updateNoticeMessage(responseRoomId, eventId, "Cerebras AI (" + cerebrasModel + ") context/rate exceeded" + info + ". Trying Groq (" + groqModel + ")...");
                         msgEdited = true;
                     }
                 } catch (Exception e) {
@@ -276,10 +229,38 @@ public class AIService {
 
             if (abortFlag != null && abortFlag.get()) return;
 
-            // 4. Try ArliAI
+            // 2. Try Groq (compound-mini)
+            if (tryGroq && groqApiKey != null && !groqApiKey.isEmpty()) {
+                attemptedBackend = true;
+                try {
+                    callGroq(prompt, groqModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag);
+                    return; // Success
+                } catch (Exception e) {
+                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                    System.out.println("Groq (" + groqModel + ") Error: " + errorMsg);
+                    
+                    if (isContextExceededMessage(errorMsg)) {
+                        String contextInfo = extractContextInfo(errorMsg);
+                        contextExceeded = new AIContextExceededException("Groq (" + groqModel + ") context/rate exceeded" + contextInfo + ".", contextInfo);
+                        if (preferredBackend == Backend.AUTO) {
+                            matrixClient.updateNoticeMessage(responseRoomId, eventId, "Groq (" + groqModel + ") context/rate exceeded" + contextInfo + ". Trying Arli AI (" + arliModel + ")...");
+                            msgEdited = true;
+                        } else {
+                            return; // Success handled by returning, but we need to stop here if not AUTO
+                        }
+                    } else {
+                        matrixClient.sendNotice(responseRoomId, "Groq (" + groqModel + ") failed: " + errorMsg);
+                        return; // Fail early on any error that isn't context exceeded
+                    }
+                }
+            }
+
+            if (abortFlag != null && abortFlag.get()) return;
+
+            // 3. Try ArliAI
             if (tryArli && arliApiKey != null && !arliApiKey.isEmpty()) {
                 attemptedBackend = true;
-                if (preferredBackend == Backend.AUTO) {
+                if (preferredBackend == Backend.AUTO && !msgEdited) {
                     matrixClient.updateNoticeMessage(responseRoomId, eventId, "Querying Arli AI (" + arliModel + ")...");
                 }
 
@@ -512,6 +493,7 @@ public class AIService {
                                 }
                             }
                         } catch (Exception e) {
+                            if (e.getMessage() != null && e.getMessage().contains("AI Stream Error")) throw e;
                             System.err.println(aiName + " Stream Parse Error: " + e.getMessage() + " | Line: " + line);
                         }
                     } else if (data.contains("[DONE]")) {
@@ -624,6 +606,7 @@ public class AIService {
                                 }
                             }
                         } catch (Exception e) {
+                            if (e.getMessage() != null && e.getMessage().contains("AI Stream Error")) throw e;
                             System.err.println(aiName + " Stream Parse Error: " + e.getMessage() + " | Line: " + line);
                         }
                     } else if (data.contains("[DONE]")) {
@@ -998,7 +981,9 @@ public class AIService {
                 || lower.contains("context exceeded")
                 || lower.contains("token_quota_exceeded")
                 || lower.contains("too_many_tokens_error")
-                || lower.contains("tokens per minute limit exceeded");
+                || lower.contains("tokens per minute limit exceeded")
+                || lower.contains("rate limit reached")
+                || lower.contains("rate_limit_exceeded");
     }
 
     protected String extractContextInfo(String errorMessage) {
@@ -1011,6 +996,13 @@ public class AIService {
             java.util.regex.Matcher m = p.matcher(errorMessage);
             if (m.find()) {
                 return " (" + m.group(1) + "/" + m.group(2) + ")"; // Used/Limit
+            }
+
+            // Pattern: "tokens per minute (TPM): Limit 30000, Used 22873, Requested 25338"
+            java.util.regex.Pattern pGroq = java.util.regex.Pattern.compile("Limit (\\d+), Used (\\d+)", flags);
+            java.util.regex.Matcher mGroq = pGroq.matcher(errorMessage);
+            if (mGroq.find()) {
+                return " (" + mGroq.group(2) + "/" + mGroq.group(1) + ")"; // Used/Limit
             }
         } catch (Exception e) {
             // ignore

@@ -191,37 +191,6 @@ public class ChunkedSummaryService extends AIService {
         boolean tryArli = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.ARLIAI;
         boolean attempted = false;
 
-        if (tryGroq && groqApiKey != null && !groqApiKey.isEmpty()) {
-            attempted = true;
-            try {
-                // Try compound
-                return callGroqStreamingToEvent(prompt, config.groqModel, config.skipSystem, responseRoomId,
-                        streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
-            } catch (Exception e) {
-                if (!isContextExceededMessage(e.getMessage())) {
-                    throw e; // Fail early on any error that isn't context exceeded
-                }
-                
-                // Try compound-mini if AUTO
-                if (config.preferredBackend == Backend.AUTO) {
-                    try {
-                        return callGroqStreamingToEvent(prompt, GROQ_MODELS.get(1), config.skipSystem, responseRoomId,
-                                streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
-                    } catch (Exception e2) {
-                        if (!isContextExceededMessage(e2.getMessage())) {
-                            throw e2; // Fail early on any error that isn't context exceeded
-                        }
-                    }
-                } else {
-                    throw e;
-                }
-            }
-        }
-
-        if (abortFlag != null && abortFlag.get()) {
-            throw new Exception("Aborted");
-        }
-
         if (tryCerebras && cerebrasApiKey != null && !cerebrasApiKey.isEmpty()) {
             attempted = true;
             try {
@@ -231,6 +200,27 @@ public class ChunkedSummaryService extends AIService {
                     matrixClient.updateMarkdownNoticeMessage(responseRoomId, streamEventIdHolder[0], cerebrasNotice);
                 }
                 return callCerebras(prompt, config.cerebrasModel, config.skipSystem, config.timeoutSeconds);
+            } catch (Exception e) {
+                if (!isContextExceededMessage(e.getMessage())) {
+                    throw e; // Fail early on any error that isn't context exceeded
+                }
+            }
+        }
+
+        if (abortFlag != null && abortFlag.get()) {
+            throw new Exception("Aborted");
+        }
+
+        if (tryGroq && groqApiKey != null && !groqApiKey.isEmpty()) {
+            attempted = true;
+            try {
+                if (streamEventIdHolder != null && streamEventIdHolder[0] != null) {
+                    MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+                    String groqNotice = "Using Groq...\n\n" + footer;
+                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, streamEventIdHolder[0], groqNotice);
+                }
+                return callGroqStreamingToEvent(prompt, config.groqModel, config.skipSystem, responseRoomId,
+                        streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
             } catch (Exception e) {
                 if (!isContextExceededMessage(e.getMessage())) {
                     throw e; // Fail early on any error that isn't context exceeded
