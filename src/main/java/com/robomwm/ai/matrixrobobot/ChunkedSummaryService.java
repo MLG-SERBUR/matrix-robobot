@@ -9,9 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Summary-capable AI service with context-overflow fallback.
- * First tries normal single-shot summary. If all attempted backends exceed context,
- * splits logs into large chunks near timestamp lulls, summarizes each chunk, then
- * merges chunk summaries into a final answer.
+ * Splits logs into large chunks near timestamp lulls, summarizes each chunk by calling the base AIService.
  */
 public class ChunkedSummaryService extends AIService {
     private static final int MAX_CONTEXT_TOKENS = 12000;
@@ -28,8 +26,6 @@ public class ChunkedSummaryService extends AIService {
         }
     }
 
-
-
     private static class ContextWindowInfo {
         final int usedTokens;
         final int limitTokens;
@@ -37,31 +33,6 @@ public class ChunkedSummaryService extends AIService {
         ContextWindowInfo(int usedTokens, int limitTokens) {
             this.usedTokens = usedTokens;
             this.limitTokens = limitTokens;
-        }
-    }
-
-    private static class InternalContextExceededException extends Exception {
-        InternalContextExceededException(String message) {
-            super(message);
-        }
-    }
-
-    private static class InternalQueryConfig {
-        final Backend preferredBackend;
-        final String arliModel;
-        final String cerebrasModel;
-        final String groqModel;
-        final int timeoutSeconds;
-        final boolean skipSystem;
-
-        InternalQueryConfig(Backend preferredBackend, String arliModel, String cerebrasModel, String groqModel, int timeoutSeconds,
-                boolean skipSystem) {
-            this.preferredBackend = preferredBackend;
-            this.arliModel = arliModel;
-            this.cerebrasModel = cerebrasModel;
-            this.groqModel = groqModel;
-            this.timeoutSeconds = timeoutSeconds;
-            this.skipSystem = skipSystem;
         }
     }
 
@@ -104,22 +75,6 @@ public class ChunkedSummaryService extends AIService {
                 matrixClient.sendNotice(responseRoomId, "Context exceeded. Switching to smart chunked summary...");
             }
 
-            String[] streamEventIdHolder = new String[]{statusEventId};
-            String arliModel = (preferredBackend == Backend.ARLIAI && forcedModel != null)
-                    ? forcedModel
-                    : getRandomModel(ARLI_MODELS);
-            String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
-            String groqModel = (preferredBackend == Backend.GROQ && forcedModel != null)
-                    ? forcedModel
-                    : GROQ_MODELS.get(0);
-            InternalQueryConfig config = new InternalQueryConfig(
-                    preferredBackend,
-                    arliModel,
-                    cerebrasModel,
-                    groqModel,
-                    timeoutSeconds,
-                    Prompts.DEBUGAI_PREFIX.equals(promptPrefix));
-
             List<ChunkRange> initialChunks = planLogChunks(history.logs, history.timestamps, chunkBudget, estimatorScale,
                     preferredChunkCount);
             if (initialChunks.isEmpty()) {
@@ -127,7 +82,6 @@ public class ChunkedSummaryService extends AIService {
                         preferredBackend, forcedModel, timeoutSeconds, statusEventId, contextExceededMessage);
                 return;
             }
-
 
             int totalChunks = initialChunks.size();
             for (int i = 0; i < totalChunks; i++) {
@@ -141,10 +95,15 @@ public class ChunkedSummaryService extends AIService {
                 List<String> chunkLogs = new ArrayList<>(history.logs.subList(chunk.startIndex, chunk.endIndex));
                 List<Long> chunkTimestamps = subListOrEmpty(history.timestamps, chunk.startIndex, chunk.endIndex);
                 List<String> chunkEventIds = subListOrEmpty(history.eventIds, chunk.startIndex, chunk.endIndex);
-                String chunkFirstEventId = (chunkEventIds != null && !chunkEventIds.isEmpty()) ? chunkEventIds.get(0) : history.firstEventId;
+                
+                RoomHistoryManager.ChatLogsResult chunkHistory = new RoomHistoryManager.ChatLogsResult(chunkLogs,
+                        (chunkEventIds != null && !chunkEventIds.isEmpty()) ? chunkEventIds.get(0) : history.firstEventId);
+                chunkHistory.timestamps = chunkTimestamps;
+                chunkHistory.eventIds = chunkEventIds;
 
-                summarizeLogChunk(chunkLogs, chunkTimestamps, chunkEventIds, question, promptPrefix, config,
-                        abortFlag, responseRoomId, exportRoomId, chunkFirstEventId, chunkFooter, estimatorScale, contextLimit);
+                // Call the base performAIQuery for each chunk as if it were a normal sequential command
+                performAIQuery(responseRoomId, exportRoomId, chunkHistory, question, promptPrefix, abortFlag,
+                        preferredBackend, forcedModel, timeoutSeconds, null, chunkFooter);
             }
 
             if (statusEventId != null) {
@@ -163,96 +122,6 @@ public class ChunkedSummaryService extends AIService {
         return Prompts.SUMMARY_PREFIX.equals(promptPrefix)
                 || Prompts.OVERVIEW_PREFIX.equals(promptPrefix)
                 || Prompts.TLDR_PREFIX.equals(promptPrefix);
-    }
-
-    private void summarizeLogChunk(List<String> logs, List<Long> timestamps, List<String> eventIds, String question,
-            String promptPrefix, InternalQueryConfig config, AtomicBoolean abortFlag, String responseRoomId,
-            String exportRoomId, String firstEventId, String footer, double estimatorScale, int contextLimit) throws Exception {
-        if (abortFlag != null && abortFlag.get()) {
-            throw new Exception("Aborted");
-        }
-
-        String directPrompt = buildPrompt(question, logs, promptPrefix);
-        String[] eventIdHolder = new String[]{null};
-        String answer = executeInternalPrompt(directPrompt, config, abortFlag, responseRoomId, eventIdHolder, footer);
-        String finalAnswer = appendMessageLink(answer, exportRoomId, firstEventId);
-        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-        matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], finalAnswer);
-    }
-
-    private String executeInternalPrompt(String prompt, InternalQueryConfig config, AtomicBoolean abortFlag,
-            String responseRoomId, String[] streamEventIdHolder, String footer) throws Exception {
-        if (abortFlag != null && abortFlag.get()) {
-            throw new Exception("Aborted");
-        }
-
-        boolean tryGroq = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.GROQ;
-        boolean tryCerebras = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.CEREBRAS;
-        boolean tryArli = config.preferredBackend == Backend.AUTO || config.preferredBackend == Backend.ARLIAI;
-        boolean attempted = false;
-
-        if (tryCerebras && cerebrasApiKey != null && !cerebrasApiKey.isEmpty()) {
-            attempted = true;
-            try {
-                if (streamEventIdHolder != null && streamEventIdHolder[0] != null) {
-                    MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-                    String cerebrasNotice = "Using Cerebras...\n\n" + footer;
-                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, streamEventIdHolder[0], cerebrasNotice);
-                }
-                return callCerebras(prompt, config.cerebrasModel, config.skipSystem, config.timeoutSeconds);
-            } catch (Exception e) {
-                if (!isContextExceededMessage(e.getMessage())) {
-                    throw e; // Fail early on any error that isn't context exceeded
-                }
-            }
-        }
-
-        if (abortFlag != null && abortFlag.get()) {
-            throw new Exception("Aborted");
-        }
-
-        if (tryGroq && groqApiKey != null && !groqApiKey.isEmpty()) {
-            attempted = true;
-            try {
-                if (streamEventIdHolder != null && streamEventIdHolder[0] != null) {
-                    MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-                    String groqNotice = "Using Groq...\n\n" + footer;
-                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, streamEventIdHolder[0], groqNotice);
-                }
-                return callGroqStreamingToEvent(prompt, config.groqModel, config.skipSystem, responseRoomId,
-                        streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
-            } catch (Exception e) {
-                if (!isContextExceededMessage(e.getMessage())) {
-                    throw e; // Fail early on any error that isn't context exceeded
-                }
-            }
-        }
-
-        if (abortFlag != null && abortFlag.get()) {
-            throw new Exception("Aborted");
-        }
-
-        if (tryArli && arliApiKey != null && !arliApiKey.isEmpty()) {
-            attempted = true;
-            try {
-                if (streamEventIdHolder != null && streamEventIdHolder[0] != null) {
-                    MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-                    String arliNotice = "Using Arli AI...\n\n" + footer;
-                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, streamEventIdHolder[0], arliNotice);
-                }
-                return callArliAIStreamingToEvent(prompt, config.arliModel, config.skipSystem, responseRoomId,
-                        streamEventIdHolder, footer, config.timeoutSeconds, abortFlag, true);
-            } catch (Exception e) {
-                if (!isContextExceededMessage(e.getMessage())) {
-                    throw e; // Fail early on any error that isn't context exceeded
-                }
-            }
-        }
-
-        if (attempted) {
-            throw new InternalContextExceededException("All attempted backends exceeded context.");
-        }
-        throw new Exception("No AI backend available for chunked summary.");
     }
 
     private int estimateChunkContentBudget(String question, String promptPrefix, int contextLimit) {
@@ -323,14 +192,11 @@ public class ChunkedSummaryService extends AIService {
         return chunks;
     }
 
-
-
     private int chooseSmartSplitEnd(List<Long> timestamps, int start, int hardEnd) {
         if (timestamps == null || timestamps.size() < hardEnd || hardEnd - start < 4) {
             return hardEnd;
         }
 
-        // Look for the largest gap in the second half of the chunk
         int searchStart = start + (hardEnd - start) / 2;
         int bestBoundary = hardEnd;
         long maxGap = -1;
@@ -343,7 +209,6 @@ public class ChunkedSummaryService extends AIService {
             }
         }
 
-        // Only use the gap if it's "significant" (e.g. > 1 minute or at least 5x the median of the search window)
         if (maxGap > 60000) {
             return bestBoundary;
         }
@@ -351,45 +216,11 @@ public class ChunkedSummaryService extends AIService {
         return hardEnd;
     }
 
-    private long median(List<Long> values) {
-        if (values == null || values.isEmpty()) {
-            return 0L;
-        }
-
-        List<Long> sorted = new ArrayList<>(values);
-        Collections.sort(sorted);
-        return sorted.get(sorted.size() / 2);
-    }
-
-
-
-
-
-    private long getTimestampOrFallback(List<Long> timestamps, int index) {
-        if (timestamps == null || timestamps.isEmpty() || index < 0 || index >= timestamps.size()) {
-            return 0L;
-        }
-        return timestamps.get(index);
-    }
-
     private <T> List<T> subListOrEmpty(List<T> values, int start, int end) {
         if (values == null || values.size() < end) {
             return new ArrayList<>();
         }
         return new ArrayList<>(values.subList(start, end));
-    }
-
-
-
-    private String extractTimestampLabel(String logLine) {
-        if (logLine == null || !logLine.startsWith("[")) {
-            return "";
-        }
-        int end = logLine.indexOf(']');
-        if (end <= 1) {
-            return "";
-        }
-        return logLine.substring(1, end);
     }
 
     private ContextWindowInfo parseContextWindowInfo(String message) {

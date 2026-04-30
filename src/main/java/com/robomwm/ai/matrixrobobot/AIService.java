@@ -128,7 +128,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, AI_TIMEOUT_SECONDS, statusEventId);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, AI_TIMEOUT_SECONDS, statusEventId, null);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -151,7 +151,7 @@ public class AIService {
 
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-                                Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId) {
+                                Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer) {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
@@ -169,6 +169,9 @@ public class AIService {
 
             String queryDescription = history.logs.size() + " messages";
             String queryStatusMsg = "\u23F3 Querying " + initialBackendName + " with " + queryDescription + questionPart;
+            if (footer != null && !footer.isEmpty()) {
+                queryStatusMsg += " (" + footer + ")";
+            }
 
             // Reuse existing status message if available, otherwise send a new one
             String eventId;
@@ -233,7 +236,7 @@ public class AIService {
             if (tryGroq && groqApiKey != null && !groqApiKey.isEmpty()) {
                 attemptedBackend = true;
                 try {
-                    callGroq(prompt, groqModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag);
+                    callGroq(prompt, groqModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag, footer);
                     return; // Success
                 } catch (Exception e) {
                     String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -268,7 +271,7 @@ public class AIService {
                 }
 
                 try {
-                    callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag);
+                    callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag, footer);
                     return; // Success
                 } catch (Exception e) {
                     String arliErrorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -306,7 +309,7 @@ public class AIService {
         matrixClient.sendMarkdown(responseRoomId, contextExceededMessage);
     }
 
-    protected String callGroq(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
+    protected String callGroq(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
         String groqApiUrl = "https://api.groq.com/openai";
         if (groqApiKey == null || groqApiKey.isEmpty()) {
             throw new Exception("GROQ_API_KEY is not configured.");
@@ -329,7 +332,7 @@ public class AIService {
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
-        return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "Groq", abortFlag);
+        return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "Groq", abortFlag, footer);
     }
 
     protected String callGroqStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
@@ -360,7 +363,7 @@ public class AIService {
         return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "Groq", abortFlag, footer, useNotice);
     }
 
-    protected String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
+    protected String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");
@@ -384,7 +387,7 @@ public class AIService {
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
-        return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "ArliAI", abortFlag);
+        return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "ArliAI", abortFlag, footer);
     }
 
     protected String callArliAIStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
@@ -417,7 +420,7 @@ public class AIService {
     }
 
 
-    protected String streamArliAIResponse(HttpRequest request, String responseRoomId, String exportRoomId, String firstEventId, String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
+    protected String streamArliAIResponse(HttpRequest request, String responseRoomId, String exportRoomId, String firstEventId, String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         String[] eventIdHolder = new String[]{null};
 
@@ -533,6 +536,10 @@ public class AIService {
 
         if (finalOutput.length() > 16000) {
             finalOutput = finalOutput.substring(0, 15900) + "... [TRUNCATED]";
+        }
+
+        if (footer != null && !footer.isEmpty()) {
+            finalOutput = finalOutput + "\n\n" + footer;
         }
 
         String answer = appendMessageLink(finalOutput, exportRoomId, firstEventId);
@@ -703,7 +710,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId);
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -754,7 +761,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId);
+            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null);
 
         } catch (Exception e) {
             e.printStackTrace();

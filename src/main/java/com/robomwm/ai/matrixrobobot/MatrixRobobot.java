@@ -68,8 +68,10 @@ public class MatrixRobobot {
                 config.accessToken);
         TextSearchService textSearchService = new TextSearchService(matrixClient, historyManager, client, mapper, url,
                 config, runningOperations);
-        AIService aiService = new ChunkedSummaryService(client, mapper, url, config.accessToken, config.arliApiKey,
+        AIService aiService = new AIService(client, mapper, url, config.accessToken, config.arliApiKey,
                 config.cerebrasApiKey, config.groqApiKey);
+        ChunkedSummaryService chunkedSummaryService = new ChunkedSummaryService(client, mapper, url, config.accessToken,
+                config.arliApiKey, config.cerebrasApiKey, config.groqApiKey);
         ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
         VisionAIService visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
                 config.arliApiKey, config.groqApiKey, imageFetcher);
@@ -78,7 +80,7 @@ public class MatrixRobobot {
         TimezoneService timezoneService = new TimezoneService(mapper);
         CommandDispatcher dispatcher = new CommandDispatcher(client, mapper, url, config.accessToken,
                 config.commandRoomId, config.exportRoomId, historyManager, runningOperations, textSearchService,
-                aiService, visionAIService, semanticSearchService, timezoneService, config.arliApiKey);
+                aiService, chunkedSummaryService, visionAIService, semanticSearchService, timezoneService, config.arliApiKey);
 
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, aiService,
