@@ -8,13 +8,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class AIService {
@@ -53,6 +51,41 @@ public class AIService {
 
     public enum Backend {
         AUTO, ARLIAI, CEREBRAS, GROQ, OPENROUTER
+    }
+
+    private static class ProviderConfig {
+        final Backend backend;
+        final String displayName;
+        final String noticeName;
+        final String apiKeyName;
+        final String apiKey;
+        final String url;
+        final boolean stream;
+        final Map<String, String> extraHeaders;
+        final Map<String, Object> extraPayload;
+
+        ProviderConfig(Backend backend, String displayName, String noticeName, String apiKeyName, String apiKey,
+                String url, boolean stream, Map<String, String> extraHeaders, Map<String, Object> extraPayload) {
+            this.backend = backend;
+            this.displayName = displayName;
+            this.noticeName = noticeName;
+            this.apiKeyName = apiKeyName;
+            this.apiKey = apiKey;
+            this.url = url;
+            this.stream = stream;
+            this.extraHeaders = extraHeaders;
+            this.extraPayload = extraPayload;
+        }
+    }
+
+    private static class ProviderAttempt {
+        final ProviderConfig provider;
+        final String model;
+
+        ProviderAttempt(ProviderConfig provider, String model) {
+            this.provider = provider;
+            this.model = model;
+        }
     }
 
     public static class Prompts {
@@ -141,128 +174,114 @@ public class AIService {
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer) {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-        
-        String arliModel = (preferredBackend == Backend.ARLIAI && forcedModel != null) ? forcedModel : getRandomModel(ARLI_MODELS);
-        String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
-        String groqModel = (preferredBackend == Backend.GROQ && forcedModel != null) ? forcedModel : GROQ_MODELS.get(0);
-        String openrouterModel = (preferredBackend == Backend.OPENROUTER && forcedModel != null) ? forcedModel : OPENROUTER_MODELS.get(0);
 
         boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         String prompt = buildPrompt(question, history.logs, promptPrefix);
+        List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
-        // Fallback Logic
-        boolean tryOpenRouter = (preferredBackend == Backend.AUTO || preferredBackend == Backend.OPENROUTER) && openrouterApiKey != null && !openrouterApiKey.isEmpty();
-        boolean tryGroq = (preferredBackend == Backend.AUTO || preferredBackend == Backend.GROQ) && groqApiKey != null && !groqApiKey.isEmpty();
-        boolean tryArli = (preferredBackend == Backend.AUTO || preferredBackend == Backend.ARLIAI) && arliApiKey != null && !arliApiKey.isEmpty();
-        boolean tryCerebras = (preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS) && cerebrasApiKey != null && !cerebrasApiKey.isEmpty();
+        for (int i = 0; i < attempts.size(); i++) {
+            if (abortFlag != null && abortFlag.get()) return;
 
-        // 1. Try Cerebras
-        if (tryCerebras) {
-            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Cerebras (" + cerebrasModel + ")...");
+            ProviderAttempt attempt = attempts.get(i);
+            ProviderConfig provider = attempt.provider;
+            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId,
+                    "Querying " + provider.noticeName + " (" + attempt.model + ")...");
             try {
-                String answer = callCerebras(prompt, cerebrasModel, skipSystem, timeoutSeconds);
-                matrixClient.updateMarkdownMessage(responseRoomId, eventId, appendMessageLink(answer, exportRoomId, history.firstEventId, "Cerebras", cerebrasModel));
+                if (provider.stream) {
+                    callStreamingToEvent(provider, prompt, attempt.model, skipSystem, responseRoomId,
+                            new String[]{eventId}, footer, timeoutSeconds, abortFlag, true, exportRoomId,
+                            history.firstEventId);
+                } else {
+                    String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, timeoutSeconds);
+                    matrixClient.updateMarkdownMessage(responseRoomId, eventId,
+                            appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
+                                    attempt.model));
+                }
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                 String errorPrefix = (footer != null ? footer + ": " : "");
-                System.out.println(errorPrefix + "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
-                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Cerebras failed: " + errorMsg);
-                if (!((tryGroq || tryOpenRouter || tryArli) && preferredBackend == Backend.AUTO)) {
-                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
+                System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, eventId,
+                        errorPrefix + provider.noticeName + " failed: " + errorMsg);
+                if (preferredBackend != Backend.AUTO || i == attempts.size() - 1) {
+                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
+                            preferredBackend, forcedModel, timeoutSeconds, eventId,
+                            errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     return;
                 }
             }
         }
 
-        if (abortFlag != null && abortFlag.get()) return;
+    }
 
-        // 2. Try Groq
-        if (tryGroq) {
-            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Groq (" + groqModel + ")...");
-            try {
-                callGroqStreamingToEvent(prompt, groqModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true, exportRoomId, history.firstEventId);
-                return;
-            } catch (Exception e) {
-                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                String errorPrefix = (footer != null ? footer + ": " : "");
-                System.out.println(errorPrefix + "Groq (" + groqModel + ") failed: " + errorMsg);
-                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Groq failed: " + errorMsg);
-                if (!((tryOpenRouter || tryArli) && preferredBackend == Backend.AUTO)) {
-                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "Groq (" + groqModel + ") failed: " + errorMsg);
-                    return;
-                }
+    private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
+        List<ProviderAttempt> attempts = new ArrayList<>();
+        Backend[] order = {Backend.CEREBRAS, Backend.GROQ, Backend.OPENROUTER, Backend.ARLIAI};
+        for (Backend backend : order) {
+            if (preferredBackend != Backend.AUTO && preferredBackend != backend) {
+                continue;
             }
+
+            ProviderConfig provider = getProviderConfig(backend);
+            if (provider == null || provider.apiKey == null || provider.apiKey.isEmpty()) {
+                continue;
+            }
+
+            attempts.add(new ProviderAttempt(provider, selectModel(backend, preferredBackend, forcedModel)));
+        }
+        return attempts;
+    }
+
+    private ProviderConfig getProviderConfig(Backend backend) {
+        switch (backend) {
+            case CEREBRAS:
+                return new ProviderConfig(Backend.CEREBRAS, "Cerebras", "Cerebras", "CEREBRAS_API_KEY",
+                        cerebrasApiKey, "https://api.cerebras.ai/v1/chat/completions", false, Map.of(), Map.of());
+            case GROQ:
+                return new ProviderConfig(Backend.GROQ, "Groq", "Groq", "GROQ_API_KEY", groqApiKey,
+                        "https://api.groq.com/openai/v1/chat/completions", true, Map.of(), Map.of());
+            case OPENROUTER:
+                return new ProviderConfig(Backend.OPENROUTER, "OpenRouter", "OpenRouter", "OPENROUTER_API_KEY",
+                        openrouterApiKey, "https://openrouter.ai/api/v1/chat/completions", true,
+                        Map.of(
+                                "HTTP-Referer", "https://github.com/RoboMWM/matrix-robobot",
+                                "X-Title", "Matrix Robobot"),
+                        Map.of());
+            case ARLIAI:
+                return new ProviderConfig(Backend.ARLIAI, "ArliAI", "Arli AI", "ARLI_API_KEY", arliApiKey,
+                        "https://api.arliai.com/v1/chat/completions", true, Map.of(),
+                        Map.of("output_kind", "delta"));
+            default:
+                return null;
+        }
+    }
+
+    private String selectModel(Backend backend, Backend preferredBackend, String forcedModel) {
+        if (preferredBackend == backend && forcedModel != null) {
+            return forcedModel;
         }
 
-        if (abortFlag != null && abortFlag.get()) return;
-
-        // 3. Try OpenRouter
-        if (tryOpenRouter) {
-            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying OpenRouter (" + openrouterModel + ")...");
-            try {
-                callOpenRouterStreamingToEvent(prompt, openrouterModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true, exportRoomId, history.firstEventId);
-                return;
-            } catch (Exception e) {
-                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                String errorPrefix = (footer != null ? footer + ": " : "");
-                System.out.println(errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
-                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "OpenRouter failed: " + errorMsg);
-                if (!(tryArli && preferredBackend == Backend.AUTO)) {
-                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
-                    return;
-                }
-            }
+        switch (backend) {
+            case CEREBRAS:
+                return getRandomModel(CEREBRAS_MODELS);
+            case GROQ:
+                return GROQ_MODELS.get(0);
+            case OPENROUTER:
+                return OPENROUTER_MODELS.get(0);
+            case ARLIAI:
+                return getRandomModel(ARLI_MODELS);
+            default:
+                return "unknown-model";
         }
-
-        if (abortFlag != null && abortFlag.get()) return;
-
-        // 4. Try ArliAI
-        if (tryArli) {
-            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Arli AI (" + arliModel + ")...");
-            try {
-                callArliAIStreamingToEvent(prompt, arliModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true, exportRoomId, history.firstEventId);
-                return;
-            } catch (Exception e) {
-                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                String errorPrefix = (footer != null ? footer + ": " : "");
-                System.out.println(errorPrefix + "ArliAI (" + arliModel + ") failed: " + errorMsg);
-                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Arli AI failed: " + errorMsg);
-                handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "ArliAI (" + arliModel + ") failed: " + errorMsg);
-            }
-        }
-
     }
 
     
     protected String callOpenRouterStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
             String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
-        String openrouterApiUrl = "https://openrouter.ai/api/v1";
-        if (openrouterApiKey == null || openrouterApiKey.isEmpty()) {
-            throw new Exception("OPENROUTER_API_KEY is not configured.");
-        }
-
-        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
-
-        Map<String, Object> payload = Map.of(
-                "model", model,
-                "messages", messages,
-                "stream", true);
-        String jsonPayload = mapper.writeValueAsString(payload);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(openrouterApiUrl + "/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + openrouterApiKey)
-                .header("Accept", "text/event-stream")
-                .header("HTTP-Referer", "https://github.com/RoboMWM/matrix-robobot") // Optional for OpenRouter
-                .header("X-Title", "Matrix Robobot") // Optional for OpenRouter
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
-
-        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "OpenRouter", abortFlag, footer, useNotice, exportRoomId, firstEventId);
+        return callStreamingToEvent(getProviderConfig(Backend.OPENROUTER), prompt, model, skipSystem, responseRoomId,
+                eventIdHolder, footer, timeoutSeconds, abortFlag, useNotice, exportRoomId, firstEventId);
     }
 
 
@@ -275,250 +294,51 @@ public class AIService {
 
 
     protected String callGroq(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
-        String groqApiUrl = "https://api.groq.com/openai";
-        if (groqApiKey == null || groqApiKey.isEmpty()) {
-            throw new Exception("GROQ_API_KEY is not configured.");
-        }
-
-        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
-
-        Map<String, Object> groqPayload = Map.of(
-                "model", model,
-                "messages", messages,
-                "stream", true);
-        String jsonPayload = mapper.writeValueAsString(groqPayload);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(groqApiUrl + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + groqApiKey)
-                .header("Accept", "text/event-stream")
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
-
-        return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "Groq", abortFlag, footer);
+        return callStreaming(getProviderConfig(Backend.GROQ), prompt, model, skipSystem, responseRoomId, exportRoomId,
+                firstEventId, timeoutSeconds, abortFlag, footer);
     }
 
     protected String callGroqStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
             String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
-        String groqApiUrl = "https://api.groq.com/openai";
-        if (groqApiKey == null || groqApiKey.isEmpty()) {
-            throw new Exception("GROQ_API_KEY is not configured.");
-        }
-
-        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
-
-        Map<String, Object> groqPayload = Map.of(
-                "model", model,
-                "messages", messages,
-                "stream", true);
-        String jsonPayload = mapper.writeValueAsString(groqPayload);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(groqApiUrl + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + groqApiKey)
-                .header("Accept", "text/event-stream")
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
-
-        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "Groq", abortFlag, footer, useNotice, exportRoomId, firstEventId);
+        return callStreamingToEvent(getProviderConfig(Backend.GROQ), prompt, model, skipSystem, responseRoomId,
+                eventIdHolder, footer, timeoutSeconds, abortFlag, useNotice, exportRoomId, firstEventId);
     }
 
     protected String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
-        String arliApiUrl = "https://api.arliai.com";
-        if (arliApiKey == null || arliApiKey.isEmpty()) {
-            throw new Exception("ARLI_API_KEY is not configured.");
-        }
-
-        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
-
-        Map<String, Object> arliPayload = Map.of(
-                "model", model,
-                "messages", messages,
-                "stream", true,
-                "output_kind", "delta");
-        String jsonPayload = mapper.writeValueAsString(arliPayload);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(arliApiUrl + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + arliApiKey)
-                .header("Accept", "text/event-stream")
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
-
-        return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, "ArliAI", abortFlag, footer);
+        return callStreaming(getProviderConfig(Backend.ARLIAI), prompt, model, skipSystem, responseRoomId, exportRoomId,
+                firstEventId, timeoutSeconds, abortFlag, footer);
     }
 
     protected String callArliAIStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
             String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
-        String arliApiUrl = "https://api.arliai.com";
-        if (arliApiKey == null || arliApiKey.isEmpty()) {
-            throw new Exception("ARLI_API_KEY is not configured.");
-        }
+        return callStreamingToEvent(getProviderConfig(Backend.ARLIAI), prompt, model, skipSystem, responseRoomId,
+                eventIdHolder, footer, timeoutSeconds, abortFlag, useNotice, exportRoomId, firstEventId);
+    }
 
-        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
+    private String callStreaming(ProviderConfig provider, String prompt, String model, boolean skipSystem,
+            String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
+        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, true, timeoutSeconds);
+        return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, provider.displayName, abortFlag,
+                footer);
+    }
 
-        Map<String, Object> arliPayload = Map.of(
-                "model", model,
-                "messages", messages,
-                "stream", true,
-                "output_kind", "delta");
-        String jsonPayload = mapper.writeValueAsString(arliPayload);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(arliApiUrl + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + arliApiKey)
-                .header("Accept", "text/event-stream")
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
-
-        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "ArliAI", abortFlag, footer, useNotice, exportRoomId, firstEventId);
+    private String callStreamingToEvent(ProviderConfig provider, String prompt, String model, boolean skipSystem,
+            String responseRoomId, String[] eventIdHolder, String footer, int timeoutSeconds,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, boolean useNotice, String exportRoomId,
+            String firstEventId) throws Exception {
+        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, true, timeoutSeconds);
+        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, provider.displayName, abortFlag,
+                footer, useNotice, exportRoomId, firstEventId);
     }
 
 
     protected String streamArliAIResponse(HttpRequest request, String responseRoomId, String exportRoomId, String firstEventId, String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
-        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         String[] eventIdHolder = new String[]{null};
-
-        StringBuilder reasoning = new StringBuilder();
-        StringBuilder responseContent = new StringBuilder();
-        String actualModel = null;
-        long lastUpdate = System.currentTimeMillis();
-        final long startTime = System.currentTimeMillis();
-
-        int updateCount = 0;
-        String[] clockFaces = {"🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦"};
-
-        try {
-            System.out.println("Starting " + aiName + " streaming request...");
-            HttpResponse<java.util.stream.Stream<String>> response = client.send(request, HttpResponse.BodyHandlers.ofLines());
-            
-            if (response.statusCode() != 200) {
-                String errorBody = response.body().collect(java.util.stream.Collectors.joining("\n"));
-                throw new Exception("Status: " + response.statusCode() + " Body: " + errorBody);
-            }
-            
-            try (java.util.stream.Stream<String> lines = response.body()) {
-                java.util.Iterator<String> it = lines.iterator();
-                while (it.hasNext()) {
-                    if (abortFlag != null && abortFlag.get()) {
-                        System.out.println(aiName + " streaming aborted by flag.");
-                        break;
-                    }
-                    String line = it.next();
-                    String data = line.trim();
-                    if (data.isEmpty()) continue;
-                    
-                    if (data.startsWith("data:") && !data.contains("[DONE]")) {
-                        String json = data.substring(5).trim();
-                        if (json.isEmpty()) continue;
-                        
-                        JsonNode node = mapper.readTree(json);
-                        if (node.has("error")) {
-                            JsonNode errorNode = node.get("error");
-                            String code = "200";
-                            if (errorNode.has("status_code")) code = errorNode.get("status_code").asText();
-                            else if (errorNode.has("statusCode")) code = errorNode.get("statusCode").asText();
-                            throw new Exception("Status: " + code + " Body: " + errorNode.toString());
-                        }
-                        JsonNode choices = node.path("choices");
-                        if (node.has("model") && (actualModel == null || actualModel.isEmpty())) {
-                            actualModel = node.get("model").asText();
-                        }
-                        if (choices.isArray() && choices.size() > 0) {
-                            JsonNode delta = choices.get(0).path("delta");
-                            if (delta.has("content")) {
-                                responseContent.append(delta.get("content").asText());
-                            } else if (delta.has("reasoning")) {
-                                reasoning.append(delta.get("reasoning").asText());
-                            } else if (delta.has("reasoning_content")) {
-                                reasoning.append(delta.get("reasoning_content").asText());
-                            }
-                            
-                            long now = System.currentTimeMillis();
-                            if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
-                                lastUpdate = now;
-                                StringBuilder streamingOutput = new StringBuilder();
-                                if (reasoning.length() > 0) {
-                                    String r = trimReasoning(reasoning.toString());
-                                    streamingOutput.append("> ").append(r.replace("\n", "\n> ")).append("\n\n");
-                                }
-                                if (responseContent.length() > 0) {
-                                    streamingOutput.append(responseContent.toString());
-                                }
-                                
-                                String output = streamingOutput.toString();
-                                if (output.length() > 16000) {
-                                    output = output.substring(0, 15900) + "... [TRUNCATED]";
-                                }
-                                
-                                // Append elapsed thinking time to clock emoji (e.g. 🕒 1m12s)
-                                long elapsedMs = now - startTime;
-                                long elapsedSec = elapsedMs / 1000;
-                                String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
-                                String indicator = clockFaces[updateCount++ % clockFaces.length] + " " + elapsedStr;
-                                if (eventIdHolder[0] == null) {
-                                    eventIdHolder[0] = matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, output + " " + indicator);
-                                } else {
-                                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], output + " " + indicator);
-                                }
-                            }
-                        }
-                    } else if (data.contains("[DONE]")) {
-                        System.out.println(aiName + " streaming finished normally ([DONE] received).");
-                        break;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("Error during " + aiName + " streaming call: " + e.getMessage());
-            e.printStackTrace();
-            throw new Exception(e.getMessage(), e);
-        }
-
-        if (responseContent.length() == 0 && reasoning.length() == 0) {
-            throw new Exception("No response received from " + aiName + ".");
-        }
-
-        System.out.println(aiName + " Final State - Content size: " + responseContent.length() + ", Reasoning size: " + reasoning.length());
-        
-        String finalOutput;
-        if (responseContent.toString().trim().isEmpty()) {
-            if (reasoning.length() > 0) {
-                System.out.println(aiName + ": Content is empty, falling back to trimmed reasoning.");
-                String trimmed = trimReasoning(reasoning.toString());
-                finalOutput = "> " + trimmed.replace("\n", "\n> ") + "\n\n**" + aiName + ": No final response was generated.**";
-            } else {
-                finalOutput = "**" + aiName + " Error: No final response was generated.**";
-            }
-        } else {
-            finalOutput = responseContent.toString();
-        }
-
-        if (finalOutput.length() > 16000) {
-            finalOutput = finalOutput.substring(0, 15900) + "... [TRUNCATED]";
-        }
-
-        if (footer != null && !footer.isEmpty()) {
-            finalOutput = finalOutput + "\n\n" + footer;
-        }
-
-        String answer = appendMessageLink(finalOutput, exportRoomId, firstEventId, aiName, actualModel);
-        if (eventIdHolder[0] == null) {
-            matrixClient.sendMarkdownWithEventId(responseRoomId, answer);
-        } else {
-            matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], answer);
-        }
-        return finalOutput;
+        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, aiName, abortFlag, footer, true,
+                exportRoomId, firstEventId);
     }
 
     protected String streamArliAIResponseToEvent(HttpRequest request, String responseRoomId, String[] eventIdHolder,
@@ -747,49 +567,67 @@ public class AIService {
     }
 
     private String callCerebras(String prompt, String model, boolean skipSystem, int timeoutSeconds) throws Exception {
-        String cerebrasApiUrl = "https://api.cerebras.ai";
-        if (cerebrasApiKey == null || cerebrasApiKey.isEmpty()) {
-            throw new Exception("CEREBRAS_API_KEY is not configured.");
-        }
+        return callNonStreaming(getProviderConfig(Backend.CEREBRAS), prompt, model, skipSystem, timeoutSeconds);
+    }
 
-        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
+    private String callNonStreaming(ProviderConfig provider, String prompt, String model, boolean skipSystem,
+            int timeoutSeconds) throws Exception {
+        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, false, timeoutSeconds);
 
-        Map<String, Object> cerebrasPayload = Map.of(
-                "model", model,
-                "messages", messages,
-                "stream", false);
-        String jsonPayload = mapper.writeValueAsString(cerebrasPayload);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(cerebrasApiUrl + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + cerebrasApiKey)
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                .build();
-
-        System.out.println("Starting Cerebras (" + model + ") request...");
+        System.out.println("Starting " + provider.displayName + " (" + model + ") request...");
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() == 200) {
             try {
-                JsonNode cerebrasResponse = mapper.readTree(response.body());
-                JsonNode choice = cerebrasResponse.path("choices").get(0);
+                JsonNode root = mapper.readTree(response.body());
+                JsonNode choice = root.path("choices").get(0);
                 if (choice == null) {
                     throw new Exception("Missing 'choices' array");
                 }
                 String text = choice.path("message").path("content").asText(null);
                 if (text == null || text.trim().isEmpty()) {
-                    throw new Exception("No response from Cerebras AI (" + model + ").");
+                    throw new Exception("No response from " + provider.displayName + " (" + model + ").");
                 }
                 return text;
             } catch (Exception e) {
-                throw new Exception("Unexpected 200 response from Cerebras AI (" + model + "). Body: " + response.body(), e);
+                throw new Exception("Unexpected 200 response from " + provider.displayName + " (" + model
+                        + "). Body: " + response.body(), e);
             }
         } else {
-            throw new Exception("Cerebras AI (" + model + ") failed. Status: "
+            throw new Exception(provider.displayName + " (" + model + ") failed. Status: "
                     + response.statusCode() + ", Body: " + response.body());
         }
+    }
+
+    private HttpRequest buildChatCompletionRequest(ProviderConfig provider, String prompt, String model,
+            boolean skipSystem, boolean stream, int timeoutSeconds) throws Exception {
+        if (provider == null || provider.apiKey == null || provider.apiKey.isEmpty()) {
+            throw new Exception(provider == null ? "AI provider is not configured."
+                    : provider.apiKeyName + " is not configured.");
+        }
+
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("model", model);
+        payload.put("messages", buildMessages(prompt, skipSystem));
+        payload.put("stream", stream);
+        payload.putAll(provider.extraPayload);
+        String jsonPayload = mapper.writeValueAsString(payload);
+
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(provider.url))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + provider.apiKey)
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload));
+
+        if (stream) {
+            builder.header("Accept", "text/event-stream");
+        }
+        for (Map.Entry<String, String> header : provider.extraHeaders.entrySet()) {
+            builder.header(header.getKey(), header.getValue());
+        }
+
+        return builder.build();
     }
 
 
