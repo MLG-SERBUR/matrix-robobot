@@ -42,12 +42,12 @@ public class ChunkedSummaryService extends AIService {
     }
 
     @Override
-    protected void handleContextExceeded(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
+    protected void handleFinalError(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
             String question, String promptPrefix, AtomicBoolean abortFlag, Backend preferredBackend,
-            String forcedModel, int timeoutSeconds, String statusEventId, String contextExceededMessage) {
-        if (!supportsChunkFallback(promptPrefix) || history == null || history.logs == null || history.logs.isEmpty()) {
-            super.handleContextExceeded(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
-                    preferredBackend, forcedModel, timeoutSeconds, statusEventId, contextExceededMessage);
+            String forcedModel, int timeoutSeconds, String statusEventId, String errorMsg) {
+        if (!supportsChunkFallback(promptPrefix) || !isFallbackableError(errorMsg) || history == null || history.logs == null || history.logs.isEmpty()) {
+            super.handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
+                    preferredBackend, forcedModel, timeoutSeconds, statusEventId, errorMsg);
             return;
         }
 
@@ -57,7 +57,7 @@ public class ChunkedSummaryService extends AIService {
                 return;
             }
 
-            ContextWindowInfo contextWindowInfo = parseContextWindowInfo(contextExceededMessage);
+            ContextWindowInfo contextWindowInfo = parseContextWindowInfo(errorMsg);
             double estimatorScale = calculateEstimatorScale(history, question, promptPrefix, contextWindowInfo);
 
             int contextLimit = contextWindowInfo != null ? contextWindowInfo.limitTokens : MAX_CONTEXT_TOKENS;
@@ -70,16 +70,16 @@ public class ChunkedSummaryService extends AIService {
 
             if (statusEventId != null) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        "Context exceeded. Switching to smart chunked summary...");
+                        "Fallbackable error encountered. Switching to smart chunked summary...");
             } else {
-                matrixClient.sendNotice(responseRoomId, "Context exceeded. Switching to smart chunked summary...");
+                matrixClient.sendNotice(responseRoomId, "Fallbackable error encountered. Switching to smart chunked summary...");
             }
 
             List<ChunkRange> initialChunks = planLogChunks(history.logs, history.timestamps, chunkBudget, estimatorScale,
                     preferredChunkCount);
             if (initialChunks.isEmpty()) {
-                super.handleContextExceeded(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
-                        preferredBackend, forcedModel, timeoutSeconds, statusEventId, contextExceededMessage);
+                super.handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
+                        preferredBackend, forcedModel, timeoutSeconds, statusEventId, errorMsg);
                 return;
             }
 

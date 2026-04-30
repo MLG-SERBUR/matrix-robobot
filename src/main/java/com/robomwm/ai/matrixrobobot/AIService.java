@@ -34,22 +34,6 @@ public class AIService {
     public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
     public static final List<String> GROQ_MODELS = Arrays.asList("groq/compound-mini");
 
-    private static class AIContextExceededException extends Exception {
-        private final String contextInfo;
-
-        AIContextExceededException(String message) {
-            this(message, "");
-        }
-
-        AIContextExceededException(String message, String contextInfo) {
-            super(message);
-            this.contextInfo = contextInfo == null ? "" : contextInfo;
-        }
-
-        String getContextInfo() {
-            return contextInfo;
-        }
-    }
 
     public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
             String cerebrasApiKey, String groqApiKey) {
@@ -157,7 +141,7 @@ public class AIService {
         try {
             String arliModel = (preferredBackend == Backend.ARLIAI && forcedModel != null) ? forcedModel : getRandomModel(ARLI_MODELS);
             String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
-            String groqModel = (preferredBackend == Backend.GROQ && forcedModel != null) ? forcedModel : GROQ_MODELS.get(0); // groq/compound
+            String groqModel = (preferredBackend == Backend.GROQ && forcedModel != null) ? forcedModel : GROQ_MODELS.get(0);
 
             String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
             
@@ -165,7 +149,7 @@ public class AIService {
             if (preferredBackend == Backend.GROQ) initialBackendName = "Groq (" + groqModel + ")";
             else if (preferredBackend == Backend.CEREBRAS) initialBackendName = "Cerebras (" + cerebrasModel + ")";
             else if (preferredBackend == Backend.ARLIAI) initialBackendName = "Arli AI (" + arliModel + ")";
-            else initialBackendName = "Cerebras (" + cerebrasModel + ")"; // Default to Cerebras
+            else initialBackendName = "Cerebras (" + cerebrasModel + ")";
 
             String queryDescription = history.logs.size() + " messages";
             String queryStatusMsg = "\u23F3 Querying " + initialBackendName + " with " + queryDescription + questionPart;
@@ -173,7 +157,6 @@ public class AIService {
                 queryStatusMsg += " (" + footer + ")";
             }
 
-            // Reuse existing status message if available, otherwise send a new one
             String eventId;
             if (statusEventId != null) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, queryStatusMsg);
@@ -192,21 +175,14 @@ public class AIService {
             String prompt = buildPrompt(question, history.logs, promptPrefix);
 
             // Fallback Logic
-            boolean tryGroq = preferredBackend == Backend.AUTO || preferredBackend == Backend.GROQ;
-            boolean tryCerebras = preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS;
-            boolean tryArli = preferredBackend == Backend.AUTO || preferredBackend == Backend.ARLIAI;
-
-            boolean msgEdited = false;
-            AIContextExceededException contextExceeded = null;
-            boolean attemptedBackend = false;
-            boolean allAttemptedBackendsContextExceeded = true;
+            boolean tryGroq = (preferredBackend == Backend.AUTO || preferredBackend == Backend.GROQ) && groqApiKey != null && !groqApiKey.isEmpty();
+            boolean tryArli = (preferredBackend == Backend.AUTO || preferredBackend == Backend.ARLIAI) && arliApiKey != null && !arliApiKey.isEmpty();
+            boolean tryCerebras = (preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS) && cerebrasApiKey != null && !cerebrasApiKey.isEmpty();
 
             // 1. Try Cerebras
-            if (tryCerebras && cerebrasApiKey != null && !cerebrasApiKey.isEmpty()) {
-                attemptedBackend = true;
+            if (tryCerebras) {
                 if (preferredBackend == Backend.AUTO) {
                     matrixClient.updateNoticeMessage(responseRoomId, eventId, "Querying Cerebras (" + cerebrasModel + ")...");
-                    msgEdited = true;
                 }
 
                 try {
@@ -214,49 +190,35 @@ public class AIService {
                     answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
                     matrixClient.sendMarkdown(responseRoomId, answer);
                     return;
-                } catch (AIContextExceededException e) {
-                    contextExceeded = e;
-                    if (preferredBackend == Backend.AUTO) {
-                        String info = e.getContextInfo() == null ? "" : e.getContextInfo();
-                        matrixClient.updateNoticeMessage(responseRoomId, eventId, "Cerebras AI (" + cerebrasModel + ") context/rate exceeded" + info + ". Trying Groq (" + groqModel + ")...");
-                        msgEdited = true;
-                    }
                 } catch (Exception e) {
-                    allAttemptedBackendsContextExceeded = false;
                     String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                     System.out.println("Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
-                    matrixClient.sendNotice(responseRoomId, "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
-                    return; // Fail early on any error that isn't context exceeded
+                    if ((tryGroq || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg)) {
+                        String info = extractErrorInfo(errorMsg);
+                        matrixClient.updateNoticeMessage(responseRoomId, eventId, "Cerebras failed" + info + ". Trying Groq...");
+                    } else {
+                        handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
+                        return;
+                    }
                 }
             }
 
             if (abortFlag != null && abortFlag.get()) return;
 
-            // 2. Try Groq (compound-mini)
-            if (tryGroq && groqApiKey != null && !groqApiKey.isEmpty()) {
-                attemptedBackend = true;
+            // 2. Try Groq
+            if (tryGroq) {
                 try {
                     callGroq(prompt, groqModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag, footer);
-                    return; // Success
+                    return;
                 } catch (Exception e) {
                     String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                    System.out.println("Groq (" + groqModel + ") Error: " + errorMsg);
-                    
-                    if (isContextExceededMessage(errorMsg)) {
-                        String contextInfo = extractContextInfo(errorMsg);
-                        String displayMsg = "Groq (" + groqModel + ") context/rate exceeded" + contextInfo;
-                        if (errorMsg.toLowerCase().contains("request entity too large"))
-                            displayMsg += ": Request Entity Too Large";
-                        contextExceeded = new AIContextExceededException(displayMsg + ".", contextInfo);
-                        if (preferredBackend == Backend.AUTO) {
-                            matrixClient.updateNoticeMessage(responseRoomId, eventId, displayMsg + ". Trying Arli AI (" + arliModel + ")...");
-                            msgEdited = true;
-                        } else {
-                            return; // Success handled by returning, but we need to stop here if not AUTO
-                        }
+                    System.out.println("Groq (" + groqModel + ") failed: " + errorMsg);
+                    if (tryArli && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg)) {
+                        String info = extractErrorInfo(errorMsg);
+                        matrixClient.updateNoticeMessage(responseRoomId, eventId, "Groq failed" + info + ". Trying Arli AI...");
                     } else {
-                        matrixClient.sendNotice(responseRoomId, "Groq (" + groqModel + ") failed: " + errorMsg);
-                        return; // Fail early on any error that isn't context exceeded
+                        handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, "Groq (" + groqModel + ") failed: " + errorMsg);
+                        return;
                     }
                 }
             }
@@ -264,50 +226,30 @@ public class AIService {
             if (abortFlag != null && abortFlag.get()) return;
 
             // 3. Try ArliAI
-            if (tryArli && arliApiKey != null && !arliApiKey.isEmpty()) {
-                attemptedBackend = true;
-                if (preferredBackend == Backend.AUTO && !msgEdited) {
-                    matrixClient.updateNoticeMessage(responseRoomId, eventId, "Querying Arli AI (" + arliModel + ")...");
-                }
-
+            if (tryArli) {
                 try {
                     callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag, footer);
-                    return; // Success
+                    return;
                 } catch (Exception e) {
-                    String arliErrorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                    System.out.println("ArliAI Error: " + arliErrorMsg);
-
-                    if (isContextExceededMessage(arliErrorMsg)) {
-                        String contextInfo = extractContextInfo(arliErrorMsg);
-                        String displayMsg = "Arli AI (" + arliModel + ") context exceeded" + contextInfo;
-                        if (arliErrorMsg.toLowerCase().contains("request entity too large"))
-                            displayMsg += ": Request Entity Too Large";
-                        contextExceeded = new AIContextExceededException(displayMsg + ".", contextInfo);
-                    } else {
-                        allAttemptedBackendsContextExceeded = false;
-                        matrixClient.sendNotice(responseRoomId, "ArliAI (" + arliModel + ") failed: " + arliErrorMsg);
-                        return;
-                    }
+                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                    System.out.println("ArliAI (" + arliModel + ") failed: " + errorMsg);
+                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, "ArliAI (" + arliModel + ") failed: " + errorMsg);
+                    return;
                 }
-            }
-
-            if (attemptedBackend && allAttemptedBackendsContextExceeded && contextExceeded != null) {
-                handleContextExceeded(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
-                        preferredBackend, forcedModel, timeoutSeconds, statusEventId, contextExceeded.getMessage());
             }
         } catch (Exception e) {
             e.printStackTrace();
             matrixClient.sendMarkdown(responseRoomId, "Error performing AI query: " + e.getMessage());
         }
     }
-
-    protected void handleContextExceeded(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
-            String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-            Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId,
-            String contextExceededMessage) {
+    
+    protected void handleFinalError(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
+                                    String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+                                    Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String errorMsg) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-        matrixClient.sendMarkdown(responseRoomId, contextExceededMessage);
+        matrixClient.sendNotice(responseRoomId, errorMsg);
     }
+
 
     protected String callGroq(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
         String groqApiUrl = "https://api.groq.com/openai";
@@ -810,39 +752,11 @@ public class AIService {
                 throw new Exception("Unexpected 200 response from Cerebras AI (" + model + "). Body: " + response.body(), e);
             }
         } else {
-            if (isCerebrasContextExceeded(response)) {
-                throw new AIContextExceededException(
-                        "Cerebras AI (" + model + ") context exceeded.");
-            }
-            throw new Exception("Failed to get response from Cerebras AI (" + model + "). Status: "
+            throw new Exception("Cerebras AI (" + model + ") failed. Status: "
                     + response.statusCode() + ", Body: " + response.body());
         }
     }
 
-    private boolean isCerebrasContextExceeded(HttpResponse<String> response) {
-        if (response == null || response.body() == null) {
-            return false;
-        }
-
-        String body = response.body();
-        if (body.contains("\"code\":\"token_quota_exceeded\"")
-                || body.contains("\"type\":\"too_many_tokens_error\"")
-                || body.contains("Tokens per minute limit exceeded")) {
-            return true;
-        }
-
-        try {
-            JsonNode root = mapper.readTree(body);
-            String code = root.path("code").asText("");
-            String type = root.path("type").asText("");
-            String message = root.path("message").asText("");
-            return "token_quota_exceeded".equals(code)
-                    || "too_many_tokens_error".equals(type)
-                    || message.contains("Tokens per minute limit exceeded");
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
 
     protected String getRandomModel(List<String> models) {
         if (models == null || models.isEmpty()) {
@@ -982,7 +896,7 @@ public class AIService {
         return aiAnswer;
     }
 
-    protected boolean isContextExceededMessage(String errorMessage) {
+    protected boolean isFallbackableError(String errorMessage) {
         if (errorMessage == null || errorMessage.isEmpty()) {
             return false;
         }
@@ -995,10 +909,11 @@ public class AIService {
                 || lower.contains("tokens per minute limit exceeded")
                 || lower.contains("rate limit reached")
                 || lower.contains("rate_limit_exceeded")
-                || lower.contains("request entity too large");
+                || lower.contains("request entity too large")
+                || lower.contains("servers restarting");
     }
 
-    protected String extractContextInfo(String errorMessage) {
+    protected String extractErrorInfo(String errorMessage) {
         try {
             int flags = java.util.regex.Pattern.DOTALL | java.util.regex.Pattern.CASE_INSENSITIVE;
             
