@@ -754,7 +754,7 @@ public class AIService {
         }
     }
 
-    protected String callCerebras(String prompt, String model, boolean skipSystem, int timeoutSeconds) throws Exception {
+    private String callCerebras(String prompt, String model, boolean skipSystem, int timeoutSeconds) throws Exception {
         String cerebrasApiUrl = "https://api.cerebras.ai";
         if (cerebrasApiKey == null || cerebrasApiKey.isEmpty()) {
             throw new Exception("CEREBRAS_API_KEY is not configured.");

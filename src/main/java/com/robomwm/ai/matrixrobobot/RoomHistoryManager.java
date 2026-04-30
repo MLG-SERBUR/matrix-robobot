@@ -57,29 +57,27 @@ public class RoomHistoryManager {
         public List<String> logs;
         public String firstEventId;
         public String errorMessage;
-        public List<Long> timestamps;
         public List<String> eventIds;
         public List<String> imageUrls;
         public List<String> imageCaptions;
 
         public ChatLogsResult(List<String> logs, String firstEventId) {
-            this(logs, firstEventId, null, null, null, null, null);
+            this(logs, firstEventId, null, null, null, null);
         }
 
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage) {
-            this(logs, firstEventId, errorMessage, null, null, null, null);
+            this(logs, firstEventId, errorMessage, null, null, null);
         }
 
-        public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage, List<Long> timestamps, List<String> eventIds) {
-            this(logs, firstEventId, errorMessage, null, null, timestamps, eventIds);
+        public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage, List<String> eventIds) {
+            this(logs, firstEventId, errorMessage, null, null, eventIds);
         }
 
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage,
-                            List<String> imageUrls, List<String> imageCaptions, List<Long> timestamps, List<String> eventIds) {
+                            List<String> imageUrls, List<String> imageCaptions, List<String> eventIds) {
             this.logs = logs;
             this.firstEventId = firstEventId;
             this.errorMessage = errorMessage;
-            this.timestamps = timestamps;
             this.eventIds = eventIds;
             this.imageUrls = imageUrls;
             this.imageCaptions = imageCaptions;
@@ -175,14 +173,6 @@ public class RoomHistoryManager {
             previousDate = zonedTimestamp.toLocalDate();
         }
         return tokens;
-    }
-
-    private List<Long> extractTimestamps(List<RawLogLine> rawLines) {
-        List<Long> timestamps = new ArrayList<>(rawLines.size());
-        for (RawLogLine line : rawLines) {
-            timestamps.add(line.timestamp);
-        }
-        return timestamps;
     }
 
     private List<String> extractEventIds(List<RawLogLine> rawLines) {
@@ -344,7 +334,6 @@ public class RoomHistoryManager {
                     formatLogLines(rawLines, zoneId, aiFriendlyTimestamps),
                     null,
                     tokenRes != null ? tokenRes.errorMessage : "Failed to get token for event " + startEventId,
-                    extractTimestamps(rawLines),
                     extractEventIds(rawLines));
         }
 
@@ -464,7 +453,6 @@ public class RoomHistoryManager {
                 null,
                 imageUrls,
                 imageCaptions,
-                extractTimestamps(rawLines),
                 extractEventIds(rawLines));
     }
 
@@ -622,7 +610,6 @@ public class RoomHistoryManager {
                 null,
                 imageUrls,
                 imageCaptions,
-                extractTimestamps(rawLines),
                 extractEventIds(rawLines));
     }
 
@@ -787,7 +774,7 @@ public class RoomHistoryManager {
         try {
             String token = getPaginationToken(roomId, null);
             if (token == null)
-                return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, null, extractTimestamps(rawLines), extractEventIds(rawLines));
+                return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, null, extractEventIds(rawLines));
 
             boolean foundLastRead = false;
 
@@ -842,10 +829,10 @@ public class RoomHistoryManager {
             }
 
             Collections.reverse(rawLines);
-            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, extractTimestamps(rawLines), extractEventIds(rawLines));
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, extractEventIds(rawLines));
         } catch (Exception e) {
             System.err.println("Error fetching unread messages: " + e.getMessage());
-            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, null, extractTimestamps(rawLines), extractEventIds(rawLines));
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, null, extractEventIds(rawLines));
         }
     }
 
@@ -991,7 +978,7 @@ public class RoomHistoryManager {
         }
         if (includeTimestamp) {
             Collections.reverse(rawLines);
-            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, extractTimestamps(rawLines), extractEventIds(rawLines));
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, extractEventIds(rawLines));
         }
 
         Collections.reverse(logs);

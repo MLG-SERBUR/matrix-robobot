@@ -23,7 +23,6 @@ public class CommandDispatcher {
     private final String exportRoomId;
     private final TextSearchService textSearchService;
     private final AIService aiService;
-    private final ChunkedSummaryService chunkedSummaryService;
     private final VisionAIService visionAIService;
     private final DebugAIService debugAIService;
     private final SemanticSearchService semanticSearchService;
@@ -51,7 +50,7 @@ public class CommandDispatcher {
     public CommandDispatcher(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
             String commandRoomId, String exportRoomId, RoomHistoryManager historyManager,
             Map<String, AtomicBoolean> runningOperations, TextSearchService textSearchService,
-            AIService aiService, ChunkedSummaryService chunkedSummaryService, VisionAIService visionAIService,
+            AIService aiService, VisionAIService visionAIService,
             SemanticSearchService semanticSearchService,
             TimezoneService timezoneService, String arliApiKey) {
         this.matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
@@ -61,7 +60,6 @@ public class CommandDispatcher {
         this.exportRoomId = exportRoomId;
         this.textSearchService = textSearchService;
         this.aiService = aiService;
-        this.chunkedSummaryService = chunkedSummaryService;
         this.visionAIService = visionAIService;
         this.debugAIService = new DebugAIService(client, mapper, homeserver, accessToken, arliApiKey);
         this.semanticSearchService = semanticSearchService;
@@ -110,18 +108,6 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!isummary(?:\\s+.*)?")) {
             handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummary",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
-            return true;
-        } else if (trimmed.matches("!csummary(?:\\s+.*)?")) {
-            handleHistoryAICommand(chunkedSummaryService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!csummary",
-                    AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
-            return true;
-        } else if (trimmed.matches("!ctldr(?:\\s+.*)?")) {
-            handleHistoryAICommand(chunkedSummaryService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!ctldr",
-                    AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
-            return true;
-        } else if (trimmed.matches("!coverview(?:\\s+.*)?")) {
-            handleHistoryAICommand(chunkedSummaryService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!coverview",
-                    AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
         } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
             handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO);
@@ -875,13 +861,10 @@ public class CommandDispatcher {
                 helpText = "**AI Commands (Page 2/3)**\n" +
                         "* `!ask [question]` - Query AI backend with up to 12k tokens of history (no timestamps)\n" +
                         "* `!summary <link or count or duration> [question]` - Condensed summary (No chunking)\n" +
-                        "* `!csummary <link or count or duration> [question]` - Smart chunked summary for large history\n" +
                         "* `!isummary <link or count or duration> [question]` - Condensed summary with images (Vision ArliAI)\n" +
                         "* `!overview <link or count or duration> [question]` - Detailed overview (No chunking)\n" +
-                        "* `!coverview <link or count or duration> [question]` - Chunked overview\n" +
                         "* `!ioverview <link or count or duration> [question]` - Detailed overview with images (Vision ArliAI)\n" +
                         "* `!tldr <link or count or duration> [question]` - Quick 15s summary\n" +
-                        "* `!ctldr <link or count or duration> [question]` - Chunked TLDR\n" +
                         "* `!debugai <link or count or duration> [question]` - Query AI backend with a custom prompt via question or chat logs\n" +
                         "* `!arliai <model> <prompt>` - Query ArliAI with specific model (fuzzy matched)\n" +
                         "* `!debugarliai <model> [params...] <prompt>` - Query ArliAI with custom API parameters\n" +
