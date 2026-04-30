@@ -156,27 +156,7 @@ public class AIService {
         boolean tryArli = (preferredBackend == Backend.AUTO || preferredBackend == Backend.ARLIAI) && arliApiKey != null && !arliApiKey.isEmpty();
         boolean tryCerebras = (preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS) && cerebrasApiKey != null && !cerebrasApiKey.isEmpty();
 
-        // 1. Try OpenRouter
-        if (tryOpenRouter) {
-            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying OpenRouter (" + openrouterModel + ")...");
-            try {
-                callOpenRouterStreamingToEvent(prompt, openrouterModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true);
-                return;
-            } catch (Exception e) {
-                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                String errorPrefix = (footer != null ? footer + ": " : "");
-                System.out.println(errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
-                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "OpenRouter failed: " + errorMsg);
-                if (!((tryCerebras || tryGroq || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
-                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
-                    return;
-                }
-            }
-        }
-
-        if (abortFlag != null && abortFlag.get()) return;
-
-        // 2. Try Cerebras
+        // 1. Try Cerebras
         if (tryCerebras) {
             String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Cerebras (" + cerebrasModel + ")...");
             try {
@@ -188,7 +168,7 @@ public class AIService {
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
                 matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Cerebras failed: " + errorMsg);
-                if (!((tryGroq || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
+                if (!((tryGroq || tryOpenRouter || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
                     return;
                 }
@@ -208,7 +188,7 @@ public class AIService {
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + "Groq (" + groqModel + ") failed: " + errorMsg);
                 matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Groq failed: " + errorMsg);
-                if (!(tryArli && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
+                if (!((tryOpenRouter || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "Groq (" + groqModel + ") failed: " + errorMsg);
                     return;
                 }
@@ -217,7 +197,27 @@ public class AIService {
 
         if (abortFlag != null && abortFlag.get()) return;
 
-        // 3. Try ArliAI
+        // 3. Try OpenRouter
+        if (tryOpenRouter) {
+            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying OpenRouter (" + openrouterModel + ")...");
+            try {
+                callOpenRouterStreamingToEvent(prompt, openrouterModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true);
+                return;
+            } catch (Exception e) {
+                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                String errorPrefix = (footer != null ? footer + ": " : "");
+                System.out.println(errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "OpenRouter failed: " + errorMsg);
+                if (!(tryArli && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
+                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
+                    return;
+                }
+            }
+        }
+
+        if (abortFlag != null && abortFlag.get()) return;
+
+        // 4. Try ArliAI
         if (tryArli) {
             String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Arli AI (" + arliModel + ")...");
             try {
