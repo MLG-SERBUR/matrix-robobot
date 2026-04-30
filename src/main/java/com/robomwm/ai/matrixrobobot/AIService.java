@@ -160,10 +160,11 @@ public class AIService {
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                System.out.println("Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
-                matrixClient.updateNoticeMessage(responseRoomId, eventId, "Cerebras failed: " + errorMsg);
+                String errorPrefix = (footer != null ? footer + ": " : "");
+                System.out.println(errorPrefix + "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Cerebras failed: " + errorMsg);
                 if (!((tryGroq || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
-                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
+                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
                     return;
                 }
             }
@@ -179,10 +180,11 @@ public class AIService {
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                System.out.println("Groq (" + groqModel + ") failed: " + errorMsg);
-                matrixClient.updateNoticeMessage(responseRoomId, eventId, "Groq failed: " + errorMsg);
+                String errorPrefix = (footer != null ? footer + ": " : "");
+                System.out.println(errorPrefix + "Groq (" + groqModel + ") failed: " + errorMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Groq failed: " + errorMsg);
                 if (!(tryArli && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
-                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, "Groq (" + groqModel + ") failed: " + errorMsg);
+                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "Groq (" + groqModel + ") failed: " + errorMsg);
                     return;
                 }
             }
@@ -198,9 +200,10 @@ public class AIService {
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                System.out.println("ArliAI (" + arliModel + ") failed: " + errorMsg);
-                matrixClient.updateNoticeMessage(responseRoomId, eventId, "Arli AI failed: " + errorMsg);
-                handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, "ArliAI (" + arliModel + ") failed: " + errorMsg);
+                String errorPrefix = (footer != null ? footer + ": " : "");
+                System.out.println(errorPrefix + "ArliAI (" + arliModel + ") failed: " + errorMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "Arli AI failed: " + errorMsg);
+                handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "ArliAI (" + arliModel + ") failed: " + errorMsg);
             }
         }
 
@@ -210,9 +213,8 @@ public class AIService {
     protected void handleFinalError(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                     String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                     Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String errorMsg) {
-        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-        matrixClient.sendNotice(responseRoomId, errorMsg);
     }
+
 
 
     protected String callGroq(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
@@ -364,7 +366,7 @@ public class AIService {
                             if (json.isEmpty()) continue;
                             
                             JsonNode node = mapper.readTree(json);
-                            if (node.has("error")) { throw new Exception("AI Stream Error: " + node.path("error").path("message").asText(node.get("error").toString())); }
+                            if (node.has("error")) { throw new Exception(node.path("error").path("message").asText(node.get("error").toString())); }
                             JsonNode choices = node.path("choices");
                             if (choices.isArray() && choices.size() > 0) {
                                 JsonNode delta = choices.get(0).path("delta");
@@ -418,7 +420,7 @@ public class AIService {
         } catch (Exception e) {
             System.err.println("Error during " + aiName + " streaming call: " + e.getMessage());
             e.printStackTrace();
-            throw new Exception("Error during " + aiName + " streaming: " + e.getMessage(), e);
+            throw new Exception(e.getMessage(), e);
         }
 
         if (responseContent.length() == 0 && reasoning.length() == 0) {
@@ -495,7 +497,7 @@ public class AIService {
                             if (json.isEmpty()) continue;
 
                             JsonNode node = mapper.readTree(json);
-                            if (node.has("error")) { throw new Exception("AI Stream Error: " + node.path("error").path("message").asText(node.get("error").toString())); }
+                            if (node.has("error")) { throw new Exception(node.path("error").path("message").asText(node.get("error").toString())); }
                             JsonNode choices = node.path("choices");
                             if (choices.isArray() && choices.size() > 0) {
                                 JsonNode delta = choices.get(0).path("delta");
@@ -535,7 +537,7 @@ public class AIService {
         } catch (Exception e) {
             System.err.println("Error during " + aiName + " streaming call: " + e.getMessage());
             e.printStackTrace();
-            throw new Exception("Error during " + aiName + " streaming: " + e.getMessage(), e);
+            throw new Exception(e.getMessage(), e);
         }
 
         if (responseContent.length() == 0 && reasoning.length() == 0) {

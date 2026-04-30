@@ -45,11 +45,13 @@ public class ChunkedSummaryService extends AIService {
     protected void handleFinalError(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
             String question, String promptPrefix, AtomicBoolean abortFlag, Backend preferredBackend,
             String forcedModel, int timeoutSeconds, String statusEventId, String errorMsg) {
-        if (!supportsChunkFallback(promptPrefix) || !isFallbackableError(errorMsg) || history == null || history.logs == null || history.logs.isEmpty()) {
+        if (!supportsChunkFallback(promptPrefix) || !isFallbackableError(errorMsg) || history == null || history.logs == null || history.logs.isEmpty()
+                || (errorMsg != null && errorMsg.startsWith("Chunk "))) {
             super.handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
                     preferredBackend, forcedModel, timeoutSeconds, statusEventId, errorMsg);
             return;
         }
+
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
