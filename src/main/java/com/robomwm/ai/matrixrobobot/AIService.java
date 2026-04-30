@@ -161,7 +161,7 @@ public class AIService {
             String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Cerebras (" + cerebrasModel + ")...");
             try {
                 String answer = callCerebras(prompt, cerebrasModel, skipSystem, timeoutSeconds);
-                matrixClient.updateMarkdownMessage(responseRoomId, eventId, appendMessageLink(answer, exportRoomId, history.firstEventId));
+                matrixClient.updateMarkdownMessage(responseRoomId, eventId, appendMessageLink(answer, exportRoomId, history.firstEventId, "Cerebras", cerebrasModel));
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -512,11 +512,7 @@ public class AIService {
             finalOutput = finalOutput + "\n\n" + footer;
         }
 
-        if (actualModel != null && !actualModel.isEmpty()) {
-            finalOutput = finalOutput + "\n\n_Model: " + actualModel + "_";
-        }
-
-        String answer = appendMessageLink(finalOutput, exportRoomId, firstEventId);
+        String answer = appendMessageLink(finalOutput, exportRoomId, firstEventId, aiName, actualModel);
         if (eventIdHolder[0] == null) {
             matrixClient.sendMarkdownWithEventId(responseRoomId, answer);
         } else {
@@ -635,11 +631,7 @@ public class AIService {
             finalOutput = finalOutput + "\n\n" + footer;
         }
 
-        if (actualModel != null && !actualModel.isEmpty()) {
-            finalOutput = finalOutput + "\n\n_Model: " + actualModel + "_";
-        }
-
-        finalOutput = appendMessageLink(finalOutput, exportRoomId, firstEventId);
+        finalOutput = appendMessageLink(finalOutput, exportRoomId, firstEventId, aiName, actualModel);
 
         if (eventIdHolder[0] == null) {
             eventIdHolder[0] = useNotice
@@ -931,12 +923,16 @@ public class AIService {
         return rendered.toString();
     }
 
-    protected String appendMessageLink(String aiAnswer, String exportRoomId, String firstEventId) {
+    protected String appendMessageLink(String aiAnswer, String exportRoomId, String firstEventId, String provider, String model) {
+        String footer = "";
+        if (provider != null && !provider.isEmpty() && model != null && !model.isEmpty()) {
+            footer += "\n\n_" + provider + " / " + model + "_";
+        }
         if (firstEventId != null) {
             String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + firstEventId;
-            return aiAnswer + "\n\n" + messageLink;
+            footer += "\n\n" + messageLink;
         }
-        return aiAnswer;
+        return aiAnswer + footer;
     }
 
 }
