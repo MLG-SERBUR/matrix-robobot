@@ -37,6 +37,7 @@ public class MatrixRobobot {
         public String arliApiKey;
         public String cerebrasApiKey;
         public String groqApiKey;
+        public String openrouterApiKey;
     }
 
     private static final Map<String, AtomicBoolean> runningOperations = new ConcurrentHashMap<>();
@@ -69,12 +70,12 @@ public class MatrixRobobot {
         TextSearchService textSearchService = new TextSearchService(matrixClient, historyManager, client, mapper, url,
                 config, runningOperations);
         AIService aiService = new AIService(client, mapper, url, config.accessToken, config.arliApiKey,
-                config.cerebrasApiKey, config.groqApiKey);
+                config.cerebrasApiKey, config.groqApiKey, config.openrouterApiKey);
         ChunkedSummaryService chunkedSummaryService = new ChunkedSummaryService(client, mapper, url, config.accessToken,
-                config.arliApiKey, config.cerebrasApiKey, config.groqApiKey);
+                config.arliApiKey, config.cerebrasApiKey, config.groqApiKey, config.openrouterApiKey);
         ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
         VisionAIService visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
-                config.arliApiKey, config.groqApiKey, imageFetcher);
+                config.arliApiKey, config.groqApiKey, config.openrouterApiKey, imageFetcher);
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
         TimezoneService timezoneService = new TimezoneService(mapper);

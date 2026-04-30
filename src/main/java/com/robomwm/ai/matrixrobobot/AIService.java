@@ -25,6 +25,7 @@ public class AIService {
     protected final String arliApiKey;
     protected final String cerebrasApiKey;
     protected final String groqApiKey;
+    protected final String openrouterApiKey;
     protected final RoomHistoryManager historyManager;
     protected final Random random;
     public static final int AI_TIMEOUT_SECONDS = 1200;
@@ -33,10 +34,11 @@ public class AIService {
     );
     public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
     public static final List<String> GROQ_MODELS = Arrays.asList("groq/compound-mini");
+    public static final List<String> OPENROUTER_MODELS = Arrays.asList("openrouter/free");
 
 
     public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
-            String cerebrasApiKey, String groqApiKey) {
+            String cerebrasApiKey, String groqApiKey, String openrouterApiKey) {
         this.client = client;
         this.mapper = mapper;
         this.homeserver = homeserver;
@@ -44,12 +46,13 @@ public class AIService {
         this.arliApiKey = arliApiKey;
         this.cerebrasApiKey = cerebrasApiKey;
         this.groqApiKey = groqApiKey;
+        this.openrouterApiKey = openrouterApiKey;
         this.historyManager = new RoomHistoryManager(client, mapper, homeserver, accessToken);
         this.random = new Random();
     }
 
     public enum Backend {
-        AUTO, ARLIAI, CEREBRAS, GROQ
+        AUTO, ARLIAI, CEREBRAS, GROQ, OPENROUTER
     }
 
     public static class Prompts {
@@ -142,16 +145,38 @@ public class AIService {
         String arliModel = (preferredBackend == Backend.ARLIAI && forcedModel != null) ? forcedModel : getRandomModel(ARLI_MODELS);
         String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
         String groqModel = (preferredBackend == Backend.GROQ && forcedModel != null) ? forcedModel : GROQ_MODELS.get(0);
+        String openrouterModel = (preferredBackend == Backend.OPENROUTER && forcedModel != null) ? forcedModel : OPENROUTER_MODELS.get(0);
 
         boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         String prompt = buildPrompt(question, history.logs, promptPrefix);
 
         // Fallback Logic
+        boolean tryOpenRouter = (preferredBackend == Backend.AUTO || preferredBackend == Backend.OPENROUTER) && openrouterApiKey != null && !openrouterApiKey.isEmpty();
         boolean tryGroq = (preferredBackend == Backend.AUTO || preferredBackend == Backend.GROQ) && groqApiKey != null && !groqApiKey.isEmpty();
         boolean tryArli = (preferredBackend == Backend.AUTO || preferredBackend == Backend.ARLIAI) && arliApiKey != null && !arliApiKey.isEmpty();
         boolean tryCerebras = (preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS) && cerebrasApiKey != null && !cerebrasApiKey.isEmpty();
 
-        // 1. Try Cerebras
+        // 1. Try OpenRouter
+        if (tryOpenRouter) {
+            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying OpenRouter (" + openrouterModel + ")...");
+            try {
+                callOpenRouterStreamingToEvent(prompt, openrouterModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true);
+                return;
+            } catch (Exception e) {
+                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                String errorPrefix = (footer != null ? footer + ": " : "");
+                System.out.println(errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, eventId, errorPrefix + "OpenRouter failed: " + errorMsg);
+                if (!((tryCerebras || tryGroq || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
+                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, errorPrefix + "OpenRouter (" + openrouterModel + ") failed: " + errorMsg);
+                    return;
+                }
+            }
+        }
+
+        if (abortFlag != null && abortFlag.get()) return;
+
+        // 2. Try Cerebras
         if (tryCerebras) {
             String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Cerebras (" + cerebrasModel + ")...");
             try {
@@ -210,6 +235,38 @@ public class AIService {
     }
 
     
+    protected String callOpenRouterStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
+            String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            boolean useNotice) throws Exception {
+        String openrouterApiUrl = "https://openrouter.ai/api/v1";
+        if (openrouterApiKey == null || openrouterApiKey.isEmpty()) {
+            throw new Exception("OPENROUTER_API_KEY is not configured.");
+        }
+
+        List<Map<String, String>> messages = buildMessages(prompt, skipSystem);
+
+        Map<String, Object> payload = Map.of(
+                "model", model,
+                "messages", messages,
+                "stream", true);
+        String jsonPayload = mapper.writeValueAsString(payload);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(openrouterApiUrl + "/chat/completions"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + openrouterApiKey)
+                .header("Accept", "text/event-stream")
+                .header("HTTP-Referer", "https://github.com/RoboMWM/matrix-robobot") // Optional for OpenRouter
+                .header("X-Title", "Matrix Robobot") // Optional for OpenRouter
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                .build();
+
+        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, "OpenRouter", abortFlag, footer, useNotice);
+    }
+
+
+
     protected void handleFinalError(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                     String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                     Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String errorMsg) {

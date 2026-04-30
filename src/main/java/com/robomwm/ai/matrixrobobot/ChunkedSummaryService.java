@@ -37,8 +37,8 @@ public class ChunkedSummaryService extends AIService {
     }
 
     public ChunkedSummaryService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
-            String arliApiKey, String cerebrasApiKey, String groqApiKey) {
-        super(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey, groqApiKey);
+            String arliApiKey, String cerebrasApiKey, String groqApiKey, String openrouterApiKey) {
+        super(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey, groqApiKey, openrouterApiKey);
     }
 
     @Override
