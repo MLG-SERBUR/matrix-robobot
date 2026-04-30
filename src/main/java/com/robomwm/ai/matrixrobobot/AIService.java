@@ -361,55 +361,56 @@ public class AIService {
                     if (data.isEmpty()) continue;
                     
                     if (data.startsWith("data:") && !data.contains("[DONE]")) {
-                        try {
-                            String json = data.substring(5).trim();
-                            if (json.isEmpty()) continue;
+                        String json = data.substring(5).trim();
+                        if (json.isEmpty()) continue;
+                        
+                        JsonNode node = mapper.readTree(json);
+                        if (node.has("error")) {
+                            JsonNode errorNode = node.get("error");
+                            String code = "200";
+                            if (errorNode.has("status_code")) code = errorNode.get("status_code").asText();
+                            else if (errorNode.has("statusCode")) code = errorNode.get("statusCode").asText();
+                            throw new Exception("Status: " + code + " Body: " + errorNode.toString());
+                        }
+                        JsonNode choices = node.path("choices");
+                        if (choices.isArray() && choices.size() > 0) {
+                            JsonNode delta = choices.get(0).path("delta");
+                            if (delta.has("content")) {
+                                responseContent.append(delta.get("content").asText());
+                            } else if (delta.has("reasoning")) {
+                                reasoning.append(delta.get("reasoning").asText());
+                            } else if (delta.has("reasoning_content")) {
+                                reasoning.append(delta.get("reasoning_content").asText());
+                            }
                             
-                            JsonNode node = mapper.readTree(json);
-                            if (node.has("error")) { throw new Exception(node.path("error").path("message").asText(node.get("error").toString())); }
-                            JsonNode choices = node.path("choices");
-                            if (choices.isArray() && choices.size() > 0) {
-                                JsonNode delta = choices.get(0).path("delta");
-                                if (delta.has("content")) {
-                                    responseContent.append(delta.get("content").asText());
-                                } else if (delta.has("reasoning")) {
-                                    reasoning.append(delta.get("reasoning").asText());
-                                } else if (delta.has("reasoning_content")) {
-                                    reasoning.append(delta.get("reasoning_content").asText());
+                            long now = System.currentTimeMillis();
+                            if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
+                                lastUpdate = now;
+                                StringBuilder streamingOutput = new StringBuilder();
+                                if (reasoning.length() > 0) {
+                                    String r = trimReasoning(reasoning.toString());
+                                    streamingOutput.append("> ").append(r.replace("\n", "\n> ")).append("\n\n");
+                                }
+                                if (responseContent.length() > 0) {
+                                    streamingOutput.append(responseContent.toString());
                                 }
                                 
-                                long now = System.currentTimeMillis();
-                                if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
-                                    lastUpdate = now;
-                                    StringBuilder streamingOutput = new StringBuilder();
-                                    if (reasoning.length() > 0) {
-                                        String r = trimReasoning(reasoning.toString());
-                                        streamingOutput.append("> ").append(r.replace("\n", "\n> ")).append("\n\n");
-                                    }
-                                    if (responseContent.length() > 0) {
-                                        streamingOutput.append(responseContent.toString());
-                                    }
-                                    
-                                    String output = streamingOutput.toString();
-                                    if (output.length() > 16000) {
-                                        output = output.substring(0, 15900) + "... [TRUNCATED]";
-                                    }
-                                    
-                                    // Append elapsed thinking time to clock emoji (e.g. 🕒 1m12s)
-                                    long elapsedMs = now - startTime;
-                                    long elapsedSec = elapsedMs / 1000;
-                                    String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
-                                    String indicator = clockFaces[updateCount++ % clockFaces.length] + " " + elapsedStr;
-                                    if (eventIdHolder[0] == null) {
-                                        eventIdHolder[0] = matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, output + " " + indicator);
-                                    } else {
-                                        matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], output + " " + indicator);
-                                    }
+                                String output = streamingOutput.toString();
+                                if (output.length() > 16000) {
+                                    output = output.substring(0, 15900) + "... [TRUNCATED]";
+                                }
+                                
+                                // Append elapsed thinking time to clock emoji (e.g. 🕒 1m12s)
+                                long elapsedMs = now - startTime;
+                                long elapsedSec = elapsedMs / 1000;
+                                String elapsedStr = elapsedSec < 60 ? (elapsedSec + "s") : ((elapsedSec / 60) + "m" + (elapsedSec % 60) + "s");
+                                String indicator = clockFaces[updateCount++ % clockFaces.length] + " " + elapsedStr;
+                                if (eventIdHolder[0] == null) {
+                                    eventIdHolder[0] = matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, output + " " + indicator);
+                                } else {
+                                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], output + " " + indicator);
                                 }
                             }
-                        } catch (Exception e) {
-                            if (e.getMessage() != null && e.getMessage().contains("AI Stream Error")) throw e;
-                            System.err.println(aiName + " Stream Parse Error: " + e.getMessage() + " | Line: " + line);
                         }
                     } else if (data.contains("[DONE]")) {
                         System.out.println(aiName + " streaming finished normally ([DONE] received).");
@@ -492,41 +493,42 @@ public class AIService {
                     if (data.isEmpty()) continue;
 
                     if (data.startsWith("data:") && !data.contains("[DONE]")) {
-                        try {
-                            String json = data.substring(5).trim();
-                            if (json.isEmpty()) continue;
+                        String json = data.substring(5).trim();
+                        if (json.isEmpty()) continue;
 
-                            JsonNode node = mapper.readTree(json);
-                            if (node.has("error")) { throw new Exception(node.path("error").path("message").asText(node.get("error").toString())); }
-                            JsonNode choices = node.path("choices");
-                            if (choices.isArray() && choices.size() > 0) {
-                                JsonNode delta = choices.get(0).path("delta");
-                                if (delta.has("content")) {
-                                    responseContent.append(delta.get("content").asText());
-                                } else if (delta.has("reasoning")) {
-                                    reasoning.append(delta.get("reasoning").asText());
-                                } else if (delta.has("reasoning_content")) {
-                                    reasoning.append(delta.get("reasoning_content").asText());
-                                }
+                        JsonNode node = mapper.readTree(json);
+                        if (node.has("error")) {
+                            JsonNode errorNode = node.get("error");
+                            String code = "200";
+                            if (errorNode.has("status_code")) code = errorNode.get("status_code").asText();
+                            else if (errorNode.has("statusCode")) code = errorNode.get("statusCode").asText();
+                            throw new Exception("Status: " + code + " Body: " + errorNode.toString());
+                        }
+                        JsonNode choices = node.path("choices");
+                        if (choices.isArray() && choices.size() > 0) {
+                            JsonNode delta = choices.get(0).path("delta");
+                            if (delta.has("content")) {
+                                responseContent.append(delta.get("content").asText());
+                            } else if (delta.has("reasoning")) {
+                                reasoning.append(delta.get("reasoning").asText());
+                            } else if (delta.has("reasoning_content")) {
+                                reasoning.append(delta.get("reasoning_content").asText());
+                            }
 
-                                long now = System.currentTimeMillis();
-                                if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
-                                    lastUpdate = now;
-                                    String rendered = buildStreamingOutput(reasoning, responseContent, footer, clockFaces, updateCount++, startTime);
-                                    if (eventIdHolder[0] == null) {
-                                        eventIdHolder[0] = useNotice
-                                                ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, rendered)
-                                                : matrixClient.sendMarkdownWithEventId(responseRoomId, rendered);
-                                    } else if (useNotice) {
-                                        matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], rendered);
-                                    } else {
-                                        matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], rendered);
-                                    }
+                            long now = System.currentTimeMillis();
+                            if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
+                                lastUpdate = now;
+                                String rendered = buildStreamingOutput(reasoning, responseContent, footer, clockFaces, updateCount++, startTime);
+                                if (eventIdHolder[0] == null) {
+                                    eventIdHolder[0] = useNotice
+                                            ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, rendered)
+                                            : matrixClient.sendMarkdownWithEventId(responseRoomId, rendered);
+                                } else if (useNotice) {
+                                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], rendered);
+                                } else {
+                                    matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], rendered);
                                 }
                             }
-                        } catch (Exception e) {
-                            if (e.getMessage() != null && e.getMessage().contains("AI Stream Error")) throw e;
-                            System.err.println(aiName + " Stream Parse Error: " + e.getMessage() + " | Line: " + line);
                         }
                     } else if (data.contains("[DONE]")) {
                         System.out.println(aiName + " streaming finished normally ([DONE] received).");
