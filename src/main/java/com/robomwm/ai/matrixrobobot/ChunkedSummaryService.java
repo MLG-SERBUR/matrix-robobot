@@ -68,12 +68,7 @@ public class ChunkedSummaryService extends AIService {
                     + " limit=" + contextLimit + " budget=" + chunkBudget + " scale=" + estimatorScale
                     + " preferredCount=" + preferredChunkCount);
 
-            if (statusEventId != null) {
-                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        "Fallbackable error encountered. Switching to smart chunked summary...");
-            } else {
-                matrixClient.sendNotice(responseRoomId, "Fallbackable error encountered. Switching to smart chunked summary...");
-            }
+            matrixClient.sendNotice(responseRoomId, "Switching to smart chunked summary (" + preferredChunkCount + " chunks predicted)...");
 
             List<ChunkRange> initialChunks = planLogChunks(history.logs, history.timestamps, chunkBudget, estimatorScale,
                     preferredChunkCount);
@@ -105,18 +100,13 @@ public class ChunkedSummaryService extends AIService {
                 performAIQuery(responseRoomId, exportRoomId, chunkHistory, question, promptPrefix, abortFlag,
                         preferredBackend, forcedModel, timeoutSeconds, null, chunkFooter);
             }
-
-            if (statusEventId != null) {
-                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        "Smart chunked summary complete (" + totalChunks + " chunk"
-                                + (totalChunks == 1 ? "" : "s") + ").");
-            }
         } catch (Exception e) {
             e.printStackTrace();
             matrixClient.sendMarkdown(responseRoomId,
                     "Chunked summary failed: " + (e.getMessage() == null ? e.toString() : e.getMessage()));
         }
     }
+
 
     private boolean supportsChunkFallback(String promptPrefix) {
         return Prompts.SUMMARY_PREFIX.equals(promptPrefix)

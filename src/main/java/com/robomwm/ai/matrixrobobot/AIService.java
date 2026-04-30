@@ -138,110 +138,74 @@ public class AIService {
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer) {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
-        try {
-            String arliModel = (preferredBackend == Backend.ARLIAI && forcedModel != null) ? forcedModel : getRandomModel(ARLI_MODELS);
-            String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
-            String groqModel = (preferredBackend == Backend.GROQ && forcedModel != null) ? forcedModel : GROQ_MODELS.get(0);
+        
+        String arliModel = (preferredBackend == Backend.ARLIAI && forcedModel != null) ? forcedModel : getRandomModel(ARLI_MODELS);
+        String cerebrasModel = getRandomModel(CEREBRAS_MODELS);
+        String groqModel = (preferredBackend == Backend.GROQ && forcedModel != null) ? forcedModel : GROQ_MODELS.get(0);
 
-            String questionPart = (question != null && !question.isEmpty()) ? " and prompt: " + question : "";
-            
-            String initialBackendName;
-            if (preferredBackend == Backend.GROQ) initialBackendName = "Groq (" + groqModel + ")";
-            else if (preferredBackend == Backend.CEREBRAS) initialBackendName = "Cerebras (" + cerebrasModel + ")";
-            else if (preferredBackend == Backend.ARLIAI) initialBackendName = "Arli AI (" + arliModel + ")";
-            else initialBackendName = "Cerebras (" + cerebrasModel + ")";
+        boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
+        String prompt = buildPrompt(question, history.logs, promptPrefix);
 
-            String queryDescription = history.logs.size() + " messages";
-            String queryStatusMsg = "\u23F3 Querying " + initialBackendName + " with " + queryDescription + questionPart;
-            if (footer != null && !footer.isEmpty()) {
-                queryStatusMsg += " (" + footer + ")";
-            }
+        // Fallback Logic
+        boolean tryGroq = (preferredBackend == Backend.AUTO || preferredBackend == Backend.GROQ) && groqApiKey != null && !groqApiKey.isEmpty();
+        boolean tryArli = (preferredBackend == Backend.AUTO || preferredBackend == Backend.ARLIAI) && arliApiKey != null && !arliApiKey.isEmpty();
+        boolean tryCerebras = (preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS) && cerebrasApiKey != null && !cerebrasApiKey.isEmpty();
 
-            String eventId;
-            if (statusEventId != null) {
-                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, queryStatusMsg);
-                eventId = statusEventId;
-            } else {
-                eventId = matrixClient.sendNoticeWithEventId(responseRoomId, queryStatusMsg);
-            }
-            if (eventId == null) return;
-
-            if (abortFlag != null && abortFlag.get()) {
-                matrixClient.updateNoticeMessage(responseRoomId, eventId, queryStatusMsg + " [ABORTED]");
+        // 1. Try Cerebras
+        if (tryCerebras) {
+            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Cerebras (" + cerebrasModel + ")...");
+            try {
+                String answer = callCerebras(prompt, cerebrasModel, skipSystem, timeoutSeconds);
+                matrixClient.updateMarkdownMessage(responseRoomId, eventId, appendMessageLink(answer, exportRoomId, history.firstEventId));
                 return;
-            }
-
-            boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
-            String prompt = buildPrompt(question, history.logs, promptPrefix);
-
-            // Fallback Logic
-            boolean tryGroq = (preferredBackend == Backend.AUTO || preferredBackend == Backend.GROQ) && groqApiKey != null && !groqApiKey.isEmpty();
-            boolean tryArli = (preferredBackend == Backend.AUTO || preferredBackend == Backend.ARLIAI) && arliApiKey != null && !arliApiKey.isEmpty();
-            boolean tryCerebras = (preferredBackend == Backend.AUTO || preferredBackend == Backend.CEREBRAS) && cerebrasApiKey != null && !cerebrasApiKey.isEmpty();
-
-            // 1. Try Cerebras
-            if (tryCerebras) {
-                if (preferredBackend == Backend.AUTO) {
-                    matrixClient.updateNoticeMessage(responseRoomId, eventId, "Querying Cerebras (" + cerebrasModel + ")...");
-                }
-
-                try {
-                    String answer = callCerebras(prompt, cerebrasModel, skipSystem, timeoutSeconds);
-                    answer = appendMessageLink(answer, exportRoomId, history.firstEventId);
-                    matrixClient.sendMarkdown(responseRoomId, answer);
-                    return;
-                } catch (Exception e) {
-                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                    System.out.println("Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
-                    if ((tryGroq || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg)) {
-                        String info = extractErrorInfo(errorMsg);
-                        matrixClient.updateNoticeMessage(responseRoomId, eventId, "Cerebras failed" + info + ". Trying Groq...");
-                    } else {
-                        handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
-                        return;
-                    }
-                }
-            }
-
-            if (abortFlag != null && abortFlag.get()) return;
-
-            // 2. Try Groq
-            if (tryGroq) {
-                try {
-                    callGroq(prompt, groqModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag, footer);
-                    return;
-                } catch (Exception e) {
-                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                    System.out.println("Groq (" + groqModel + ") failed: " + errorMsg);
-                    if (tryArli && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg)) {
-                        String info = extractErrorInfo(errorMsg);
-                        matrixClient.updateNoticeMessage(responseRoomId, eventId, "Groq failed" + info + ". Trying Arli AI...");
-                    } else {
-                        handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, "Groq (" + groqModel + ") failed: " + errorMsg);
-                        return;
-                    }
-                }
-            }
-
-            if (abortFlag != null && abortFlag.get()) return;
-
-            // 3. Try ArliAI
-            if (tryArli) {
-                try {
-                    callArliAI(prompt, arliModel, skipSystem, responseRoomId, exportRoomId, history.firstEventId, timeoutSeconds, abortFlag, footer);
-                    return;
-                } catch (Exception e) {
-                    String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
-                    System.out.println("ArliAI (" + arliModel + ") failed: " + errorMsg);
-                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, "ArliAI (" + arliModel + ") failed: " + errorMsg);
+            } catch (Exception e) {
+                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                System.out.println("Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, eventId, "Cerebras failed: " + errorMsg);
+                if (!((tryGroq || tryArli) && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
+                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, "Cerebras AI (" + cerebrasModel + ") failed: " + errorMsg);
                     return;
                 }
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-            matrixClient.sendMarkdown(responseRoomId, "Error performing AI query: " + e.getMessage());
         }
+
+        if (abortFlag != null && abortFlag.get()) return;
+
+        // 2. Try Groq
+        if (tryGroq) {
+            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Groq (" + groqModel + ")...");
+            try {
+                callGroqStreamingToEvent(prompt, groqModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true);
+                return;
+            } catch (Exception e) {
+                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                System.out.println("Groq (" + groqModel + ") failed: " + errorMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, eventId, "Groq failed: " + errorMsg);
+                if (!(tryArli && preferredBackend == Backend.AUTO && isFallbackableError(errorMsg))) {
+                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, "Groq (" + groqModel + ") failed: " + errorMsg);
+                    return;
+                }
+            }
+        }
+
+        if (abortFlag != null && abortFlag.get()) return;
+
+        // 3. Try ArliAI
+        if (tryArli) {
+            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId, "Querying Arli AI (" + arliModel + ")...");
+            try {
+                callArliAIStreamingToEvent(prompt, arliModel, skipSystem, responseRoomId, new String[]{eventId}, footer, timeoutSeconds, abortFlag, true);
+                return;
+            } catch (Exception e) {
+                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                System.out.println("ArliAI (" + arliModel + ") failed: " + errorMsg);
+                matrixClient.updateNoticeMessage(responseRoomId, eventId, "Arli AI failed: " + errorMsg);
+                handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, eventId, "ArliAI (" + arliModel + ") failed: " + errorMsg);
+            }
+        }
+
     }
+
     
     protected void handleFinalError(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                     String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
@@ -913,27 +877,5 @@ public class AIService {
                 || lower.contains("servers restarting");
     }
 
-    protected String extractErrorInfo(String errorMessage) {
-        try {
-            int flags = java.util.regex.Pattern.DOTALL | java.util.regex.Pattern.CASE_INSENSITIVE;
-            
-            // Pattern: "exceeded the maximum context length ... (used/limit)"
-            // Matches: "exceeded the maximum context length for FREE (33117/16384)"
-            java.util.regex.Pattern p = java.util.regex.Pattern.compile("exceeded.*?context.*?\\((\\d+)/(\\d+)\\)", flags);
-            java.util.regex.Matcher m = p.matcher(errorMessage);
-            if (m.find()) {
-                return " (" + m.group(1) + "/" + m.group(2) + ")"; // Used/Limit
-            }
 
-            // Pattern: "tokens per minute (TPM): Limit 30000, Used 22873, Requested 25338"
-            java.util.regex.Pattern pGroq = java.util.regex.Pattern.compile("Limit (\\d+), Used (\\d+)", flags);
-            java.util.regex.Matcher mGroq = pGroq.matcher(errorMessage);
-            if (mGroq.find()) {
-                return " (" + mGroq.group(2) + "/" + mGroq.group(1) + ")"; // Used/Limit
-            }
-        } catch (Exception e) {
-            // ignore
-        }
-        return "";
-    }
 }
