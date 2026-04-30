@@ -241,9 +241,12 @@ public class AIService {
                     
                     if (isContextExceededMessage(errorMsg)) {
                         String contextInfo = extractContextInfo(errorMsg);
-                        contextExceeded = new AIContextExceededException("Groq (" + groqModel + ") context/rate exceeded" + contextInfo + ".", contextInfo);
+                        String displayMsg = "Groq (" + groqModel + ") context/rate exceeded" + contextInfo;
+                        if (errorMsg.toLowerCase().contains("request entity too large"))
+                            displayMsg += ": Request Entity Too Large";
+                        contextExceeded = new AIContextExceededException(displayMsg + ".", contextInfo);
                         if (preferredBackend == Backend.AUTO) {
-                            matrixClient.updateNoticeMessage(responseRoomId, eventId, "Groq (" + groqModel + ") context/rate exceeded" + contextInfo + ". Trying Arli AI (" + arliModel + ")...");
+                            matrixClient.updateNoticeMessage(responseRoomId, eventId, displayMsg + ". Trying Arli AI (" + arliModel + ")...");
                             msgEdited = true;
                         } else {
                             return; // Success handled by returning, but we need to stop here if not AUTO
@@ -273,9 +276,10 @@ public class AIService {
 
                     if (isContextExceededMessage(arliErrorMsg)) {
                         String contextInfo = extractContextInfo(arliErrorMsg);
-                        contextExceeded = new AIContextExceededException(
-                                "Arli AI (" + arliModel + ") context exceeded" + contextInfo + ".",
-                                contextInfo);
+                        String displayMsg = "Arli AI (" + arliModel + ") context exceeded" + contextInfo;
+                        if (arliErrorMsg.toLowerCase().contains("request entity too large"))
+                            displayMsg += ": Request Entity Too Large";
+                        contextExceeded = new AIContextExceededException(displayMsg + ".", contextInfo);
                     } else {
                         allAttemptedBackendsContextExceeded = false;
                         matrixClient.sendNotice(responseRoomId, "ArliAI (" + arliModel + ") failed: " + arliErrorMsg);
@@ -983,7 +987,8 @@ public class AIService {
                 || lower.contains("too_many_tokens_error")
                 || lower.contains("tokens per minute limit exceeded")
                 || lower.contains("rate limit reached")
-                || lower.contains("rate_limit_exceeded");
+                || lower.contains("rate_limit_exceeded")
+                || lower.contains("request entity too large");
     }
 
     protected String extractContextInfo(String errorMessage) {
