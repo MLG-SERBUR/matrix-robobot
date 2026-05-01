@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Matrix Robobot Installation Script (systemd)
-# This script builds the project and sets it up as a systemd service.
+# Matrix Robobot Installation Script (user systemd service)
+# This script builds the project and sets it up as a user systemd service.
 
 set -e
 

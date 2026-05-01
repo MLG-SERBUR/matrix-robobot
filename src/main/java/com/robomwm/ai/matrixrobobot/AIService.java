@@ -458,8 +458,6 @@ public class AIService {
             eventIdHolder[0] = useNotice
                     ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, finalOutput)
                     : matrixClient.sendMarkdownWithEventId(responseRoomId, finalOutput);
-        } else if (useNotice) {
-            matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], finalOutput);
         } else {
             matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], finalOutput);
         }
