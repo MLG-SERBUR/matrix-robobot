@@ -583,6 +583,7 @@ public class AIService {
 
                             long now = System.currentTimeMillis();
                             if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
+                                lastUpdate = now;
                                 String rendered = buildStreamingOutput(reasoning, responseContent, footer, clockFaces, updateCount++, startTime);
                                 if (eventIdHolder[0] == null) {
                                     eventIdHolder[0] = useNotice
