@@ -12,6 +12,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -125,11 +126,11 @@ public class VisionAIService extends AIService {
         messages.add(Map.of("role", "system", "content", "You are a vision assistant. Do not reason. Do not think. Do not draft. Output only the final terse one sentence (incomplete sentence ok) caption immediately."));
         messages.add(Map.of("role", "user", "content", content));
 
-        Map<String, Object> payload = Map.of(
-                "model", "Qwen3.5-27B-Derestricted",
-                "messages", messages,
-                "stream", false
-        );
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("model", "Qwen3.5-27B-Derestricted");
+        payload.put("messages", messages);
+        payload.put("stream", false);
+        AIService.applyArliAiNonThinkingDefaults(payload);
         String jsonPayload = mapper.writeValueAsString(payload);
 
         System.out.println("Sending image to ArliAI vision API: " + mxcUrl + " (caption: " + caption + ")");
