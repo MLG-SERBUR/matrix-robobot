@@ -9,6 +9,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -51,6 +52,16 @@ public class AIService {
 
     public enum Backend {
         AUTO, ARLIAI, CEREBRAS, GROQ, OPENROUTER
+    }
+
+    public static void applyArliAiNonThinkingDefaults(Map<String, Object> payload) {
+        payload.putIfAbsent("temperature", 0.7);
+        payload.putIfAbsent("top_p", 0.8);
+        payload.putIfAbsent("top_k", 20);
+        payload.putIfAbsent("min_p", 0.0);
+        payload.putIfAbsent("presence_penalty", 1.5);
+        payload.putIfAbsent("repetition_penalty", 1.0);
+        payload.put("chat_template_kwargs", Map.of("enable_thinking", false));
     }
 
     private static class ProviderConfig {
@@ -605,11 +616,14 @@ public class AIService {
                     : provider.apiKeyName + " is not configured.");
         }
 
-        Map<String, Object> payload = new java.util.HashMap<>();
+        Map<String, Object> payload = new HashMap<>();
         payload.put("model", model);
         payload.put("messages", buildMessages(prompt, skipSystem));
         payload.put("stream", stream);
         payload.putAll(provider.extraPayload);
+        if (provider.backend == Backend.ARLIAI) {
+            applyArliAiNonThinkingDefaults(payload);
+        }
         String jsonPayload = mapper.writeValueAsString(payload);
 
         HttpRequest.Builder builder = HttpRequest.newBuilder()

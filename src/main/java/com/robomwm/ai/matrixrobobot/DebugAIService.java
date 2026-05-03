@@ -91,6 +91,7 @@ public class DebugAIService {
             payload.put("messages", messages);
             payload.put("stream", true);
             payload.put("output_kind", "delta");
+            AIService.applyArliAiNonThinkingDefaults(payload);
 
             // Add optional parameters if set
             if (temperature != null) payload.put("temperature", temperature);

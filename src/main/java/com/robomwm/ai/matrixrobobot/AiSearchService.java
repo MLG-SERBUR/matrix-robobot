@@ -15,6 +15,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -438,12 +439,12 @@ public class AiSearchService {
             messages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
             messages.add(Map.of("role", "user", "content", userPrompt));
 
-            Map<String, Object> payload = Map.of(
-                "model", "Qwen3.5-27B-Derestricted",
-                "messages", messages,
-                "stream", false,
-                "dry_multiplier", 0.4
-            );
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("model", "Qwen3.5-27B-Derestricted");
+            payload.put("messages", messages);
+            payload.put("stream", false);
+            payload.put("dry_multiplier", 0.4);
+            AIService.applyArliAiNonThinkingDefaults(payload);
 
             String jsonPayload = mapper.writeValueAsString(payload);
 
