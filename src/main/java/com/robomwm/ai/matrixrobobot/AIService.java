@@ -525,7 +525,7 @@ public class AIService {
         }
     }
 
-    public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question,
+    public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question, String promptPrefix,
                          java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, Backend preferredBackend) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
@@ -534,7 +534,7 @@ public class AIService {
             int targetPromptTokens = 12000;
             
             // Calculate base tokens consumed by prompts and the user's question
-            String emptyPrompt = buildPrompt(question, new ArrayList<>(), "");
+            String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20; // Special tokens: BOS/EOS, role markers (im_start/im_end), separators
             int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) + 
                              RoomHistoryManager.estimateTokens(emptyPrompt) +
@@ -568,7 +568,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, "", abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null);
 
         } catch (Exception e) {
             e.printStackTrace();
