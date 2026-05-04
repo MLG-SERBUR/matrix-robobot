@@ -22,6 +22,11 @@
       <version>0.23.0</version>
       <scope>compile</scope>
     </dependency>
+    <dependency>
+      <groupId>ai.djl.huggingface</groupId>
+      <artifactId>tokenizers</artifactId>
+      <version>0.36.0</version>
+    </dependency>
   </dependencies>
   <build>
     <plugins>

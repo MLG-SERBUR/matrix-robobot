@@ -1,8 +1,10 @@
 package com.robomwm.ai.matrixrobobot;
 
+import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -16,6 +18,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -28,6 +31,9 @@ public class RoomHistoryManager {
     private static final DateTimeFormatter LEGACY_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter AI_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter AI_TIME_FORMATTER = DateTimeFormatter.ofPattern("H:mm");
+    private static final String QWEN_TOKENIZER_RESOURCE = "/tokenizers/qwen2.5-tokenizer.json";
+    private static final double TOKEN_SAFETY_MARGIN = 1.02;
+    private static final HuggingFaceTokenizer QWEN_TOKENIZER = loadQwenTokenizer();
 
     @FunctionalInterface
     public interface ProgressCallback {
@@ -38,20 +44,6 @@ public class RoomHistoryManager {
     private final ObjectMapper mapper;
     private final String homeserverUrl;
     private final String accessToken;
-
-    private static class RawLogLine {
-        final long timestamp;
-        final String sender;
-        final String body;
-        final String eventId;
-
-        RawLogLine(long timestamp, String sender, String body, String eventId) {
-            this.timestamp = timestamp;
-            this.sender = sender;
-            this.body = body;
-            this.eventId = eventId;
-        }
-    }
 
     public static class ChatLogsResult {
         public List<String> logs;
@@ -169,7 +161,7 @@ public class RoomHistoryManager {
         ZoneId effectiveZoneId = normalizeZoneId(zoneId);
         for (RawLogLine line : rawLines) {
             var zonedTimestamp = Instant.ofEpochMilli(line.timestamp).atZone(effectiveZoneId);
-            tokens += estimateTokens(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps));
+            tokens += estimateLogLineTokens(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps));
             previousDate = zonedTimestamp.toLocalDate();
         }
         return tokens;
@@ -836,42 +828,31 @@ public class RoomHistoryManager {
         }
     }
 
-/**
-     * Estimates the number of LLM tokens a string will use.
-     * Counts punctuation as 1 token each, and accounts for BPE subword tokenization
-     * by estimating longer words (>4 chars) as multiple tokens.
-     * Adds a 5% safety margin.
+    /**
+     * Estimates Qwen prompt tokens using the vendored HuggingFace tokenizer.
+     * A small margin covers chat-template and provider-specific framing differences.
      */
     public static int estimateTokens(String text) {
         if (text == null || text.isEmpty()) return 0;
-        int count = 0;
-        int wordLen = 0;
-        
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (Character.isWhitespace(c)) {
-                if (wordLen > 0) {
-                    // Estimate: ~4 characters per token
-                    count += 1 + Math.max(0, (wordLen - 4) / 4);
-                    wordLen = 0;
-                }
-            } else if (Character.isLetterOrDigit(c)) {
-                wordLen++;
-            } else {
-                if (wordLen > 0) {
-                    count += 1 + Math.max(0, (wordLen - 4) / 4);
-                    wordLen = 0;
-                }
-                // Punctuation, symbols, and special characters = 1 token each
-                count++;
+        int tokenCount = QWEN_TOKENIZER.encode(text, false, false).getIds().length;
+        return (int) Math.ceil(tokenCount * TOKEN_SAFETY_MARGIN);
+    }
+
+    private static int estimateLogLineTokens(String line) {
+        return estimateTokens(line + "\n");
+    }
+
+    private static HuggingFaceTokenizer loadQwenTokenizer() {
+        try (var stream = RoomHistoryManager.class.getResourceAsStream(QWEN_TOKENIZER_RESOURCE)) {
+            if (stream == null) {
+                throw new IllegalStateException("Missing tokenizer resource: " + QWEN_TOKENIZER_RESOURCE);
             }
+            Map<String, String> options = new HashMap<>();
+            options.put("addSpecialTokens", "false");
+            return HuggingFaceTokenizer.newInstance(stream, options);
+        } catch (IOException e) {
+            throw new ExceptionInInitializerError(e);
         }
-        // Handle trailing word
-        if (wordLen > 0) {
-            count += 1 + Math.max(0, (wordLen - 4) / 4);
-        }
-        // 5% safety margin + 1 for line structure tokens
-        return (int) Math.ceil(count * 1.05) + 1; 
     }
 
     /**
@@ -943,7 +924,7 @@ public class RoomHistoryManager {
                             line = "<" + sender + "> " + body;
                         }
 
-                        int lineTokens = estimateTokens(line);
+                        int lineTokens = estimateLogLineTokens(line);
 
                         if (currentTokens + lineTokens > tokenLimit) {
                             if (includeTimestamp) {
@@ -1154,5 +1135,19 @@ public class RoomHistoryManager {
             // ignore
         }
         return null;
+    }
+}
+
+final class RawLogLine {
+    final long timestamp;
+    final String sender;
+    final String body;
+    final String eventId;
+
+    RawLogLine(long timestamp, String sender, String body, String eventId) {
+        this.timestamp = timestamp;
+        this.sender = sender;
+        this.body = body;
+        this.eventId = eventId;
     }
 }
