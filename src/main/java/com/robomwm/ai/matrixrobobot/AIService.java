@@ -228,7 +228,7 @@ public class AIService {
 
     private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
         List<ProviderAttempt> attempts = new ArrayList<>();
-        Backend[] order = {Backend.CEREBRAS, Backend.GROQ, Backend.OPENROUTER, Backend.ARLIAI};
+        Backend[] order = {Backend.ARLIAI, Backend.CEREBRAS, Backend.GROQ, Backend.OPENROUTER};
         for (Backend backend : order) {
             if (preferredBackend != Backend.AUTO && preferredBackend != backend) {
                 continue;
