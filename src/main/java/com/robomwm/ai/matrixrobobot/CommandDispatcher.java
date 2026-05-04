@@ -316,11 +316,20 @@ public class CommandDispatcher {
             }
             question = remaining.trim().isEmpty() ? null : remaining.trim();
         } else {
-            // No valid first arg? Show usage.
-            matrixClient.sendText(responseRoomId, "Usage: " + commandName + " <link|count|duration> [question]\n" +
-                    "Example: " + commandName + " 1h what happened?\n" +
-                    "Example: " + commandName + " 50 summarize this\n" +
-                    "Example: " + commandName + " https://matrix.to/#/... 10 what is this about?");
+            // No valid first arg? Default to token limit (like !ask)
+            // Treat the whole args as the question
+            String questionArg = args.isEmpty() ? null : args;
+            System.out.println("Received " + commandName + " command in " + roomId + " from " + sender + " (defaulting to token limit)");
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+
+            new Thread(() -> {
+                try {
+                    service.queryAsk(responseRoomId, exportRoomId, prevBatch, questionArg, promptPrefix, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, backend);
+                } finally {
+                    runningOperations.remove(sender);
+                }
+            }).start();
             return;
         }
 
@@ -359,7 +368,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, forcedModel, timeoutSeconds, preferredBackend);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, "", abortFlag, forcedModel, timeoutSeconds, preferredBackend);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -443,7 +452,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, "", abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
             } finally {
                 runningOperations.remove(sender);
             }
