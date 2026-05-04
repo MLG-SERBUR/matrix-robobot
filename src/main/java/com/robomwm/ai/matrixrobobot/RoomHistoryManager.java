@@ -31,7 +31,7 @@ public class RoomHistoryManager {
     private static final DateTimeFormatter LEGACY_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter AI_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter AI_TIME_FORMATTER = DateTimeFormatter.ofPattern("H:mm");
-    private static final String LLAMA3_TOKENIZER_RESOURCE = "/tokenizers/llama3-tokenizer.json";
+    private static final String ARLIAI_TOKENIZER_RESOURCE = "/tokenizers/arliai-tokenizer.json";
     private static final double TOKEN_SAFETY_MARGIN = 1.05;
     private static final HuggingFaceTokenizer AI_TOKENIZER = loadTokenizer();
 
@@ -843,9 +843,9 @@ public class RoomHistoryManager {
     }
 
     private static HuggingFaceTokenizer loadTokenizer() {
-        try (var stream = RoomHistoryManager.class.getResourceAsStream(LLAMA3_TOKENIZER_RESOURCE)) {
+        try (var stream = RoomHistoryManager.class.getResourceAsStream(ARLIAI_TOKENIZER_RESOURCE)) {
             if (stream == null) {
-                throw new IllegalStateException("Missing tokenizer resource: " + LLAMA3_TOKENIZER_RESOURCE);
+                throw new IllegalStateException("Missing tokenizer resource: " + ARLIAI_TOKENIZER_RESOURCE);
             }
             Map<String, String> options = new HashMap<>();
             options.put("addSpecialTokens", "false");
