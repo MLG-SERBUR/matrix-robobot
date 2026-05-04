@@ -368,7 +368,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, "", abortFlag, forcedModel, timeoutSeconds, preferredBackend);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, forcedModel, timeoutSeconds, preferredBackend);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -452,7 +452,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, "", abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
+                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
             } finally {
                 runningOperations.remove(sender);
             }
