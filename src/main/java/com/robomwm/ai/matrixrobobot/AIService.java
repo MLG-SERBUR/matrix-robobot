@@ -101,8 +101,10 @@ public class AIService {
 
     public static class Prompts {
         public static final String SYSTEM_OVERVIEW = "You provide a concise, high level overview of a chat log.";
+        public static final String SYSTEM_ASK = "You answer the user's question using the provided chat logs as your primary source of information. Do not use tables; table markdown is not supported.";
         public static final String QUESTION_PREFIX = "'";
-        public static final String QUESTION_SUFFIX = "' Answer this prompt (don't use tables, table markdown is not supported) using these chat logs:\n\n";
+        public static final String QUESTION_SUFFIX = "' Answer this prompt using these chat logs:\n\n";
+        public static final String ASK_PREFIX = "";
         public static final String OVERVIEW_PREFIX = "Give a concise, high level overview of the following chat logs. No need for complete sentences. Use only a title and timestamp for each topic; include as bullet points one chat message verbatim (or more, only if necessary) with username for each topic. No table format. Then summarize with bullet points all of the chat at end in caveman style. This is caveman style: Terse like caveman. Only fluff die. Drop: articles, filler (just/really/basically), pleasantries, hedging. Fragments OK. Short synonyms.\n\n";
         public static final String SUMMARY_PREFIX = "Give a concise, high level overview of the following chat logs. No need for complete sentences. Use only a title and timestamp for each topic; include zero or more chat messages verbatim (with username) for each topic. Bias including discovered solutions or technical resources. Should take no more than 45 seconds to read.\n\n";
         public static final String TLDR_PREFIX = "Provide a very concise summary of the following chat logs that can be read in 15 seconds or less. Make use of bullet points of key topics with timestamp; be extremely brief, no need for complete sentences. Always include topics that are informative towards a discovered solution or resources; if the other topics are significantly discussed, these topics can be added on to increase reading time to no more than 30 seconds. Then directly include the best chat message verbatim; have bias towards one that is informative towards a discovered solution or informative resource:\n\n";
@@ -187,6 +189,7 @@ public class AIService {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
         boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
+        boolean isAsk = Prompts.ASK_PREFIX.equals(promptPrefix);
         String prompt = buildPrompt(question, history.logs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
@@ -199,11 +202,11 @@ public class AIService {
                     "Querying " + provider.noticeName + " (" + attempt.model + ")...");
             try {
                 if (provider.stream) {
-                    callStreamingToEvent(provider, prompt, attempt.model, skipSystem, responseRoomId,
+                    callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
                             new String[]{eventId}, footer, timeoutSeconds, abortFlag, true, exportRoomId,
                             history.firstEventId);
                 } else {
-                    String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, timeoutSeconds);
+                    String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
                     matrixClient.updateMarkdownMessage(responseRoomId, eventId,
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model));
@@ -291,7 +294,7 @@ public class AIService {
     protected String callOpenRouterStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
             String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
-        return callStreamingToEvent(getProviderConfig(Backend.OPENROUTER), prompt, model, skipSystem, responseRoomId,
+        return callStreamingToEvent(getProviderConfig(Backend.OPENROUTER), prompt, model, skipSystem, false, responseRoomId,
                 eventIdHolder, footer, timeoutSeconds, abortFlag, useNotice, exportRoomId, firstEventId);
     }
 
@@ -305,42 +308,42 @@ public class AIService {
 
 
     protected String callGroq(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
-        return callStreaming(getProviderConfig(Backend.GROQ), prompt, model, skipSystem, responseRoomId, exportRoomId,
+        return callStreaming(getProviderConfig(Backend.GROQ), prompt, model, skipSystem, false, responseRoomId, exportRoomId,
                 firstEventId, timeoutSeconds, abortFlag, footer);
     }
 
     protected String callGroqStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
             String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
-        return callStreamingToEvent(getProviderConfig(Backend.GROQ), prompt, model, skipSystem, responseRoomId,
+        return callStreamingToEvent(getProviderConfig(Backend.GROQ), prompt, model, skipSystem, false, responseRoomId,
                 eventIdHolder, footer, timeoutSeconds, abortFlag, useNotice, exportRoomId, firstEventId);
     }
 
     protected String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
-        return callStreaming(getProviderConfig(Backend.ARLIAI), prompt, model, skipSystem, responseRoomId, exportRoomId,
+        return callStreaming(getProviderConfig(Backend.ARLIAI), prompt, model, skipSystem, false, responseRoomId, exportRoomId,
                 firstEventId, timeoutSeconds, abortFlag, footer);
     }
 
     protected String callArliAIStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
             String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
-        return callStreamingToEvent(getProviderConfig(Backend.ARLIAI), prompt, model, skipSystem, responseRoomId,
+        return callStreamingToEvent(getProviderConfig(Backend.ARLIAI), prompt, model, skipSystem, false, responseRoomId,
                 eventIdHolder, footer, timeoutSeconds, abortFlag, useNotice, exportRoomId, firstEventId);
     }
 
     private String callStreaming(ProviderConfig provider, String prompt, String model, boolean skipSystem,
-            String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds,
+            boolean isAsk, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
-        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, true, timeoutSeconds);
+        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, true, timeoutSeconds);
         return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, provider.displayName, abortFlag,
                 footer);
     }
 
     private String callStreamingToEvent(ProviderConfig provider, String prompt, String model, boolean skipSystem,
-            String responseRoomId, String[] eventIdHolder, String footer, int timeoutSeconds,
+            boolean isAsk, String responseRoomId, String[] eventIdHolder, String footer, int timeoutSeconds,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, boolean useNotice, String exportRoomId,
             String firstEventId) throws Exception {
-        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, true, timeoutSeconds);
+        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, true, timeoutSeconds);
         return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, provider.displayName, abortFlag,
                 footer, useNotice, exportRoomId, firstEventId);
     }
@@ -577,12 +580,12 @@ public class AIService {
     }
 
     private String callCerebras(String prompt, String model, boolean skipSystem, int timeoutSeconds) throws Exception {
-        return callNonStreaming(getProviderConfig(Backend.CEREBRAS), prompt, model, skipSystem, timeoutSeconds);
+        return callNonStreaming(getProviderConfig(Backend.CEREBRAS), prompt, model, skipSystem, false, timeoutSeconds);
     }
 
     private String callNonStreaming(ProviderConfig provider, String prompt, String model, boolean skipSystem,
-            int timeoutSeconds) throws Exception {
-        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, false, timeoutSeconds);
+            boolean isAsk, int timeoutSeconds) throws Exception {
+        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, false, timeoutSeconds);
 
         System.out.println("Starting " + provider.displayName + " (" + model + ") request...");
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -610,7 +613,7 @@ public class AIService {
     }
 
     private HttpRequest buildChatCompletionRequest(ProviderConfig provider, String prompt, String model,
-            boolean skipSystem, boolean stream, int timeoutSeconds) throws Exception {
+            boolean skipSystem, boolean isAsk, boolean stream, int timeoutSeconds) throws Exception {
         if (provider == null || provider.apiKey == null || provider.apiKey.isEmpty()) {
             throw new Exception(provider == null ? "AI provider is not configured."
                     : provider.apiKeyName + " is not configured.");
@@ -618,7 +621,7 @@ public class AIService {
 
         Map<String, Object> payload = new HashMap<>();
         payload.put("model", model);
-        payload.put("messages", buildMessages(prompt, skipSystem));
+        payload.put("messages", buildMessages(prompt, skipSystem, isAsk));
         payload.put("stream", stream);
         payload.putAll(provider.extraPayload);
         if (provider.backend == Backend.ARLIAI) {
@@ -697,10 +700,11 @@ public class AIService {
         }
     }
 
-    private List<Map<String, String>> buildMessages(String prompt, boolean skipSystem) {
+    private List<Map<String, String>> buildMessages(String prompt, boolean skipSystem, boolean isAsk) {
         List<Map<String, String>> messages = new ArrayList<>();
         if (!skipSystem) {
-            messages.add(Map.of("role", "system", "content", Prompts.SYSTEM_OVERVIEW));
+            String systemPrompt = isAsk ? Prompts.SYSTEM_ASK : Prompts.SYSTEM_OVERVIEW;
+            messages.add(Map.of("role", "system", "content", systemPrompt));
         }
         messages.add(Map.of("role", "user", "content", prompt));
         return messages;
