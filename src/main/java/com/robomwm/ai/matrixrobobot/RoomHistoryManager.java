@@ -31,9 +31,9 @@ public class RoomHistoryManager {
     private static final DateTimeFormatter LEGACY_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter AI_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter AI_TIME_FORMATTER = DateTimeFormatter.ofPattern("H:mm");
-    private static final String QWEN_TOKENIZER_RESOURCE = "/tokenizers/qwen2.5-tokenizer.json";
-    private static final double TOKEN_SAFETY_MARGIN = 1.02;
-    private static final HuggingFaceTokenizer QWEN_TOKENIZER = loadQwenTokenizer();
+    private static final String LLAMA3_TOKENIZER_RESOURCE = "/tokenizers/llama3-tokenizer.json";
+    private static final double TOKEN_SAFETY_MARGIN = 1.05;
+    private static final HuggingFaceTokenizer AI_TOKENIZER = loadTokenizer();
 
     @FunctionalInterface
     public interface ProgressCallback {
@@ -829,12 +829,12 @@ public class RoomHistoryManager {
     }
 
     /**
-     * Estimates Qwen prompt tokens using the vendored HuggingFace tokenizer.
+     * Estimates prompt tokens using the vendored HuggingFace tokenizer.
      * A small margin covers chat-template and provider-specific framing differences.
      */
     public static int estimateTokens(String text) {
         if (text == null || text.isEmpty()) return 0;
-        int tokenCount = QWEN_TOKENIZER.encode(text, false, false).getIds().length;
+        int tokenCount = AI_TOKENIZER.encode(text, false, false).getIds().length;
         return (int) Math.ceil(tokenCount * TOKEN_SAFETY_MARGIN);
     }
 
@@ -842,10 +842,10 @@ public class RoomHistoryManager {
         return estimateTokens(line + "\n");
     }
 
-    private static HuggingFaceTokenizer loadQwenTokenizer() {
-        try (var stream = RoomHistoryManager.class.getResourceAsStream(QWEN_TOKENIZER_RESOURCE)) {
+    private static HuggingFaceTokenizer loadTokenizer() {
+        try (var stream = RoomHistoryManager.class.getResourceAsStream(LLAMA3_TOKENIZER_RESOURCE)) {
             if (stream == null) {
-                throw new IllegalStateException("Missing tokenizer resource: " + QWEN_TOKENIZER_RESOURCE);
+                throw new IllegalStateException("Missing tokenizer resource: " + LLAMA3_TOKENIZER_RESOURCE);
             }
             Map<String, String> options = new HashMap<>();
             options.put("addSpecialTokens", "false");
