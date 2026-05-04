@@ -32,7 +32,7 @@ public class RoomHistoryManager {
     private static final DateTimeFormatter AI_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter AI_TIME_FORMATTER = DateTimeFormatter.ofPattern("H:mm");
     private static final String ARLIAI_TOKENIZER_RESOURCE = "/tokenizers/arliai-tokenizer.json";
-    private static final double TOKEN_SAFETY_MARGIN = 1.05;
+    private static final double TOKEN_SAFETY_MARGIN = 1.50;
     private static final HuggingFaceTokenizer AI_TOKENIZER = loadTokenizer();
 
     @FunctionalInterface
