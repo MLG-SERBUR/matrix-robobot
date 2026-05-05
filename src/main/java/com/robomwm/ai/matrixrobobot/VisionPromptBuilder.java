@@ -11,16 +11,17 @@ public class VisionPromptBuilder {
 
     /**
      * Build content array for vision AI request.
-     * Content includes the text prompt first, then images.
+     * Content includes the optional text prompt first, then images.
      */
     public static List<Map<String, Object>> buildVisionContent(String textPrompt, List<String> base64Images) {
         List<Map<String, Object>> content = new ArrayList<>();
 
-        // Add text prompt
-        content.add(Map.of(
-            "type", "text",
-            "text", textPrompt
-        ));
+        if (textPrompt != null && !textPrompt.isEmpty()) {
+            content.add(Map.of(
+                "type", "text",
+                "text", textPrompt
+            ));
+        }
 
         // Add images
         for (String base64Image : base64Images) {
