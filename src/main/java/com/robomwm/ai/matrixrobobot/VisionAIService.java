@@ -79,9 +79,6 @@ public class VisionAIService extends AIService {
                 cachedCount++;
                 lastDescription = cachedDescription;
                 lastImageEventId = imageEventId;
-                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        buildImageDescriptionStatus(exportRoomId, i + 1, imageCount, cachedCount,
-                                lastDescription, lastImageEventId));
                 continue;
             }
 
