@@ -93,6 +93,7 @@ public class VisionAIService extends AIService {
                     imageDescriptionsByEventId.put(imageEventId, description);
                 }
                 cache.put(cacheKey, description);
+                saveDescriptionCache(cache);
             } else {
                 if (imageEventId != null) {
                     imageDescriptionsByEventId.put(imageEventId, "(could not describe)");
@@ -100,7 +101,6 @@ public class VisionAIService extends AIService {
             }
         }
 
-        saveDescriptionCache(cache);
         injectImageDescriptions(history, imageDescriptionsByEventId);
         System.out.println("Injected " + imageDescriptionsByEventId.size() + " image descriptions into chat logs"
                 + " (" + cachedCount + " from cache, " + (imageDescriptionsByEventId.size() - cachedCount) + " newly described)");
@@ -185,8 +185,7 @@ public class VisionAIService extends AIService {
             if (text != null) {
                 text = text.replaceAll("(?s)<think>.*?</think>", "").trim();
             }
-            System.out.println("Described image " + mxcUrl + ": "
-                    + (text != null ? text.substring(0, Math.min(100, text.length())) : "null"));
+            System.out.println("Described image " + mxcUrl + ": " + (text != null ? text : "null"));
             return text;
         }
 
