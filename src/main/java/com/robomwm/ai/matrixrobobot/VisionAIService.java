@@ -59,6 +59,8 @@ public class VisionAIService extends AIService {
         ObjectNode cache = loadDescriptionCache();
         int cachedCount = 0;
         Map<String, String> imageDescriptionsByEventId = new HashMap<>();
+        String lastDescription = null;
+        String lastImageEventId = null;
 
         for (int i = 0; i < imageCount; i++) {
             if (abortFlag != null && abortFlag.get()) return history;
@@ -75,12 +77,17 @@ public class VisionAIService extends AIService {
                     imageDescriptionsByEventId.put(imageEventId, cachedDescription);
                 }
                 cachedCount++;
+                lastDescription = cachedDescription;
+                lastImageEventId = imageEventId;
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        buildImageDescriptionStatus(exportRoomId, i + 1, imageCount, cachedCount,
+                                lastDescription, lastImageEventId));
                 continue;
             }
 
             matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                    "\uD83D\uDDBC\uFE0F Describing image " + (i + 1) + "/" + imageCount
-                    + " (" + cachedCount + " cached)");
+                    buildImageDescriptionStatus(exportRoomId, i + 1, imageCount, cachedCount,
+                            lastDescription, lastImageEventId));
 
             String description;
             try {
@@ -94,17 +101,40 @@ public class VisionAIService extends AIService {
                 }
                 cache.put(cacheKey, description);
                 saveDescriptionCache(cache);
+                lastDescription = description;
+                lastImageEventId = imageEventId;
             } else {
                 if (imageEventId != null) {
                     imageDescriptionsByEventId.put(imageEventId, "(could not describe)");
                 }
+                lastDescription = "(could not describe)";
+                lastImageEventId = imageEventId;
             }
+
+            matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                    buildImageDescriptionStatus(exportRoomId, i + 1, imageCount, cachedCount,
+                            lastDescription, lastImageEventId));
         }
 
         injectImageDescriptions(history, imageDescriptionsByEventId);
         System.out.println("Injected " + imageDescriptionsByEventId.size() + " image descriptions into chat logs"
                 + " (" + cachedCount + " from cache, " + (imageDescriptionsByEventId.size() - cachedCount) + " newly described)");
         return super.prepareHistoryForQuery(responseRoomId, exportRoomId, history, abortFlag, statusEventId);
+    }
+
+    private String buildImageDescriptionStatus(String exportRoomId, int imageNumber, int imageCount, int cachedCount,
+            String lastDescription, String lastImageEventId) {
+        String status = "\uD83D\uDDBC\uFE0F Describing image " + imageNumber + "/" + imageCount
+                + " (" + cachedCount + " cached)";
+        if (lastDescription == null || lastDescription.isEmpty()) {
+            return status;
+        }
+
+        status += "\n\nLast image description: " + lastDescription;
+        if (exportRoomId != null && lastImageEventId != null) {
+            status += "\nhttps://matrix.to/#/" + exportRoomId + "/" + lastImageEventId;
+        }
+        return status;
     }
 
     private void injectImageDescriptions(RoomHistoryManager.ChatLogsResult history, Map<String, String> imageDescriptionsByEventId) {
