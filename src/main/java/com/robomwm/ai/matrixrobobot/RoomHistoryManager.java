@@ -52,27 +52,30 @@ public class RoomHistoryManager {
         public List<String> eventIds;
         public List<String> imageUrls;
         public List<String> imageCaptions;
+        public List<String> imageEventIds;
 
         public ChatLogsResult(List<String> logs, String firstEventId) {
-            this(logs, firstEventId, null, null, null, null);
+            this(logs, firstEventId, null, null, null, null, null);
         }
 
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage) {
-            this(logs, firstEventId, errorMessage, null, null, null);
+            this(logs, firstEventId, errorMessage, null, null, null, null);
         }
 
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage, List<String> eventIds) {
-            this(logs, firstEventId, errorMessage, null, null, eventIds);
+            this(logs, firstEventId, errorMessage, null, null, null, eventIds);
         }
 
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage,
-                            List<String> imageUrls, List<String> imageCaptions, List<String> eventIds) {
+                            List<String> imageUrls, List<String> imageCaptions, List<String> imageEventIds,
+                            List<String> eventIds) {
             this.logs = logs;
             this.firstEventId = firstEventId;
             this.errorMessage = errorMessage;
             this.eventIds = eventIds;
             this.imageUrls = imageUrls;
             this.imageCaptions = imageCaptions;
+            this.imageEventIds = imageEventIds;
         }
     }
 
@@ -318,6 +321,7 @@ public class RoomHistoryManager {
         List<RawLogLine> rawLines = new ArrayList<>();
         List<String> imageUrls = collectImages ? new ArrayList<>() : null;
         List<String> imageCaptions = collectImages ? new ArrayList<>() : null;
+        List<String> imageEventIds = collectImages ? new ArrayList<>() : null;
         String firstEventId = null;
 
         TokenResult tokenRes = getTokenForEvent(roomId, startEventId, forward);
@@ -404,6 +408,7 @@ public class RoomHistoryManager {
                             if (imageUrl != null && !imageUrl.isEmpty()) {
                                 imageUrls.add(imageUrl);
                                 imageCaptions.add(body);
+                                imageEventIds.add(eventId);
                             }
                         }
 
@@ -436,6 +441,7 @@ public class RoomHistoryManager {
             if (collectImages) {
                 Collections.reverse(imageUrls);
                 Collections.reverse(imageCaptions);
+                Collections.reverse(imageEventIds);
             }
         }
 
@@ -445,6 +451,7 @@ public class RoomHistoryManager {
                 null,
                 imageUrls,
                 imageCaptions,
+                imageEventIds,
                 extractEventIds(rawLines));
     }
 
@@ -501,6 +508,7 @@ public class RoomHistoryManager {
         List<RawLogLine> rawLines = new ArrayList<>();
         List<String> imageUrls = collectImages ? new ArrayList<>() : null;
         List<String> imageCaptions = collectImages ? new ArrayList<>() : null;
+        List<String> imageEventIds = collectImages ? new ArrayList<>() : null;
         String firstEventId = null;
 
         long startTime = (startTimestamp > 0) ? startTimestamp
@@ -564,6 +572,7 @@ public class RoomHistoryManager {
                             if (imageUrl != null && !imageUrl.isEmpty()) {
                                 imageUrls.add(imageUrl);
                                 imageCaptions.add(body); // body is the caption/filename
+                                imageEventIds.add(eventId);
                             }
                         }
 
@@ -595,6 +604,7 @@ public class RoomHistoryManager {
         if (collectImages) {
             Collections.reverse(imageUrls);
             Collections.reverse(imageCaptions);
+            Collections.reverse(imageEventIds);
         }
         return new ChatLogsResult(
                 formatLogLines(rawLines, zoneId, aiFriendlyTimestamps),
@@ -602,6 +612,7 @@ public class RoomHistoryManager {
                 null,
                 imageUrls,
                 imageCaptions,
+                imageEventIds,
                 extractEventIds(rawLines));
     }
 

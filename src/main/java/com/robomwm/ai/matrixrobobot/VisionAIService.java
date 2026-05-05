@@ -58,46 +58,70 @@ public class VisionAIService extends AIService {
 
         ObjectNode cache = loadDescriptionCache();
         int cachedCount = 0;
-        List<String> imageDescriptions = new ArrayList<>();
+        Map<String, String> imageDescriptionsByEventId = new HashMap<>();
 
         for (int i = 0; i < imageCount; i++) {
             if (abortFlag != null && abortFlag.get()) return history;
 
             String imageUrl = history.imageUrls.get(i);
-            String caption = (history.imageCaptions != null && i < history.imageCaptions.size())
-                    ? history.imageCaptions.get(i) : "image";
+            String imageEventId = (history.imageEventIds != null && i < history.imageEventIds.size())
+                    ? history.imageEventIds.get(i) : null;
+            String cacheKey = descriptionCacheKey(imageUrl);
 
-            String cachedDescription = cache.has(imageUrl) ? cache.get(imageUrl).asText(null) : null;
+            String cachedDescription = cache.has(cacheKey) ? cache.get(cacheKey).asText(null) : null;
             if (cachedDescription != null && !cachedDescription.isEmpty()) {
                 System.out.println("Cache hit for image " + (i + 1) + "/" + imageCount + ": " + imageUrl);
-                imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 " + cachedDescription + "]");
+                if (imageEventId != null) {
+                    imageDescriptionsByEventId.put(imageEventId, cachedDescription);
+                }
                 cachedCount++;
                 continue;
             }
 
             matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                     "\uD83D\uDDBC\uFE0F Describing image " + (i + 1) + "/" + imageCount
-                    + " (" + cachedCount + " cached): " + caption);
+                    + " (" + cachedCount + " cached)");
 
             String description;
             try {
-                description = describeImage(imageUrl, caption);
+                description = describeImage(imageUrl);
             } catch (Exception e) {
-                throw new RuntimeException("Error describing image '" + caption + "': " + e.getMessage(), e);
+                throw new RuntimeException("Error describing image " + (i + 1) + ": " + e.getMessage(), e);
             }
             if (description != null && !description.isEmpty()) {
-                imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 " + description + "]");
-                cache.put(imageUrl, description);
+                if (imageEventId != null) {
+                    imageDescriptionsByEventId.put(imageEventId, description);
+                }
+                cache.put(cacheKey, description);
             } else {
-                imageDescriptions.add("[\uD83D\uDDBC\uFE0F Image: " + caption + " \u2014 (could not describe)]");
+                if (imageEventId != null) {
+                    imageDescriptionsByEventId.put(imageEventId, "(could not describe)");
+                }
             }
         }
 
         saveDescriptionCache(cache);
-        history.logs.addAll(imageDescriptions);
-        System.out.println("Injected " + imageDescriptions.size() + " image descriptions into chat logs"
-                + " (" + cachedCount + " from cache, " + (imageDescriptions.size() - cachedCount) + " newly described)");
-        return history;
+        injectImageDescriptions(history, imageDescriptionsByEventId);
+        System.out.println("Injected " + imageDescriptionsByEventId.size() + " image descriptions into chat logs"
+                + " (" + cachedCount + " from cache, " + (imageDescriptionsByEventId.size() - cachedCount) + " newly described)");
+        return super.prepareHistoryForQuery(responseRoomId, exportRoomId, history, abortFlag, statusEventId);
+    }
+
+    private void injectImageDescriptions(RoomHistoryManager.ChatLogsResult history, Map<String, String> imageDescriptionsByEventId) {
+        if (history.eventIds == null || imageDescriptionsByEventId.isEmpty()) {
+            return;
+        }
+
+        List<String> logsWithDescriptions = new ArrayList<>(history.logs.size() + imageDescriptionsByEventId.size());
+        for (int i = 0; i < history.logs.size(); i++) {
+            logsWithDescriptions.add(history.logs.get(i));
+            String eventId = i < history.eventIds.size() ? history.eventIds.get(i) : null;
+            String description = eventId != null ? imageDescriptionsByEventId.get(eventId) : null;
+            if (description != null && !description.isEmpty()) {
+                logsWithDescriptions.add("AI description: " + description);
+            }
+        }
+        history.logs = logsWithDescriptions;
     }
 
     /**
@@ -105,7 +129,7 @@ public class VisionAIService extends AIService {
      * Returns text description or null on non-fatal failure.
      * Throws Exception on fatal API errors (403, rate limit, etc.) to abort the entire operation.
      */
-    private String describeImage(String mxcUrl, String caption) throws Exception {
+    private String describeImage(String mxcUrl) throws Exception {
         // Fetch and encode single image
         System.out.println("Fetching image from Matrix: " + mxcUrl);
         List<String> encoded = imageFetcher.fetchAndEncodeImages(List.of(mxcUrl));
@@ -118,9 +142,7 @@ public class VisionAIService extends AIService {
         int base64Len = base64Image.length();
         System.out.println("Image fetched and encoded: " + mxcUrl + " (" + (base64Len / 1024) + "KB base64)");
 
-        // Build vision content: text prompt + single image
-        String prompt = "Briefly describe this image in 1-2 sentences. Context: it was shared in a chat with caption '" + caption + "'.";
-        List<Map<String, Object>> content = VisionPromptBuilder.buildVisionContent(prompt, List.of(base64Image));
+        List<Map<String, Object>> content = VisionPromptBuilder.buildVisionContent(null, List.of(base64Image));
 
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(Map.of("role", "system", "content", "Briefly describe the input image in 1-2 sentences. Be terse, incomplete sentence ok."));
@@ -133,7 +155,7 @@ public class VisionAIService extends AIService {
         AIService.applyArliAiNonThinkingDefaults(payload);
         String jsonPayload = mapper.writeValueAsString(payload);
 
-        System.out.println("Sending image to ArliAI vision API: " + mxcUrl + " (caption: " + caption + ")");
+        System.out.println("Sending image to ArliAI vision API: " + mxcUrl);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://api.arliai.com/v1/chat/completions"))
@@ -163,13 +185,17 @@ public class VisionAIService extends AIService {
             if (text != null) {
                 text = text.replaceAll("(?s)<think>.*?</think>", "").trim();
             }
-            System.out.println("Described image " + caption + ": "
+            System.out.println("Described image " + mxcUrl + ": "
                     + (text != null ? text.substring(0, Math.min(100, text.length())) : "null"));
             return text;
         }
 
         System.out.println("No choices in ArliAI response for: " + mxcUrl);
         return null;
+    }
+
+    private String descriptionCacheKey(String imageUrl) {
+        return "image-only-v1:" + imageUrl;
     }
 
     // --- Description Cache ---
