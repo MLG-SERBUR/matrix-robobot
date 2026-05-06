@@ -32,7 +32,7 @@ public class AIService {
             "Qwen3.5-27B-Derestricted"
     );
     public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
-    public static final List<String> GROQ_MODELS = Arrays.asList("groq/compound-mini");
+    public static final List<String> GROQ_MODELS = Arrays.asList("meta-llama/llama-4-scout-17b-16e-instruct");
     public static final List<String> OPENROUTER_MODELS = Arrays.asList("openrouter/free");
 
 
