@@ -259,7 +259,7 @@ public class AIService {
                 return new ProviderConfig(Backend.OPENROUTER, "OpenRouter", "OpenRouter", "OPENROUTER_API_KEY",
                         openrouterApiKey, "https://openrouter.ai/api/v1/chat/completions", true,
                         Map.of(
-                                "HTTP-Referer", "https://github.com/RoboMWM/matrix-robobot",
+                                "HTTP-Referer", "https://github.com/MLG-SERBUR/matrix-robobot",
                                 "X-Title", "Matrix Robobot"),
                         Map.of());
             case ARLIAI:
