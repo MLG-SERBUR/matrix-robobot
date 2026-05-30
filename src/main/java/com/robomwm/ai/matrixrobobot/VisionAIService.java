@@ -27,9 +27,11 @@ public class VisionAIService extends AIService {
     private static final String DESCRIPTION_CACHE_FILE = "image_description_cache.json";
 
     public VisionAIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
-                           String arliApiKey, String groqApiKey, String openrouterApiKey, ImageFetcher imageFetcher) {
+                           String arliApiKey, String groqApiKey, String openrouterApiKey, ImageFetcher imageFetcher,
+                           List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels) {
         // Pass null for cerebrasApiKey to ensure Vision AI never falls back to Cerebras
-        super(client, mapper, homeserver, accessToken, arliApiKey, null, groqApiKey, openrouterApiKey);
+        super(client, mapper, homeserver, accessToken, arliApiKey, null, groqApiKey, openrouterApiKey,
+              arliModels, cerebrasModels, groqModels, openrouterModels);
         this.imageFetcher = imageFetcher;
     }
 
