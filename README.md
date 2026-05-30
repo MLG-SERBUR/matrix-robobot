@@ -20,7 +20,14 @@ Create a `config.json` file in the same directory as the JAR:
   "accessToken": "YOUR_ACCESS_TOKEN",
   "commandRoomId": "!commandRoom:matrix.example.com",
   "exportRoomId": "!exportRoom:matrix.example.com",
-  "arliApiKey": "YOUR_ARLI_API_KEY"
+  "arliApiKey": "YOUR_ARLI_API_KEY",
+  "cerebrasApiKey": "YOUR_CEREBRAS_API_KEY",
+  "groqApiKey": "YOUR_GROQ_API_KEY",
+  "openrouterApiKey": "YOUR_OPENROUTER_API_KEY",
+  "arliModels": ["Qwen3.5-27B-Derestricted"],
+  "cerebrasModels": ["qwen-3-235b-a22b-instruct-2507"],
+  "groqModels": ["meta-llama/llama-4-scout-17b-16e-instruct"],
+  "openrouterModels": ["openrouter/auto"]
 }
 ```
 
@@ -29,7 +36,14 @@ Create a `config.json` file in the same directory as the JAR:
 - `accessToken`: Access token for the bot/user
 - `commandRoomId`: Room ID where commands are listened for and responses are sent
 - `exportRoomId`: Room ID where chat history is fetched from (for exports and AI queries)
-- `arliApiKey`: API key for Arli AI (optional, but required for `!arliai` commands)
+- `arliApiKey`: API key for Arli AI (optional, but required for Arli AI commands)
+- `cerebrasApiKey`: API key for Cerebras (optional)
+- `groqApiKey`: API key for Groq (optional)
+- `openrouterApiKey`: API key for OpenRouter (optional)
+- `arliModels`: List of Arli AI models to use (randomly selected for each query)
+- `cerebrasModels`: List of Cerebras models to try in sequence on fallback
+- `groqModels`: List of Groq models to try in sequence on fallback
+- `openrouterModels`: List of OpenRouter models (first model used)
 
 ## Commands
 
