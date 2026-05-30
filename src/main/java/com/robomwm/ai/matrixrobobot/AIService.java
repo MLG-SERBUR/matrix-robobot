@@ -28,16 +28,13 @@ public class AIService {
     protected final RoomHistoryManager historyManager;
     protected final Random random;
     public static final int AI_TIMEOUT_SECONDS = 1200;
-    public static final List<String> ARLI_MODELS = Arrays.asList(
-            "Qwen3.5-27B-Derestricted"
-    );
-    public static final List<String> CEREBRAS_MODELS = Arrays.asList("qwen-3-235b-a22b-instruct-2507");
-    public static final List<String> GROQ_MODELS = Arrays.asList("meta-llama/llama-4-scout-17b-16e-instruct");
-    public static final List<String> OPENROUTER_MODELS = Arrays.asList("openrouter/free");
-
+    protected final List<String> arliModels;
+    protected final List<String> cerebrasModels;
+    protected final List<String> groqModels;
+    protected final List<String> openrouterModels;
 
     public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
-            String cerebrasApiKey, String groqApiKey, String openrouterApiKey) {
+            String cerebrasApiKey, String groqApiKey, String openrouterApiKey, List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels) {
         this.client = client;
         this.mapper = mapper;
         this.homeserver = homeserver;
@@ -46,6 +43,10 @@ public class AIService {
         this.cerebrasApiKey = cerebrasApiKey;
         this.groqApiKey = groqApiKey;
         this.openrouterApiKey = openrouterApiKey;
+        this.arliModels = arliModels != null && !arliModels.isEmpty() ? arliModels : Arrays.asList("Qwen3.5-27B-Derestricted");
+        this.cerebrasModels = cerebrasModels != null && !cerebrasModels.isEmpty() ? cerebrasModels : Arrays.asList("qwen-3-235b-a22b-instruct-2507");
+        this.groqModels = groqModels != null && !groqModels.isEmpty() ? groqModels : Arrays.asList("meta-llama/llama-4-scout-17b-16e-instruct");
+        this.openrouterModels = openrouterModels != null && !openrouterModels.isEmpty() ? openrouterModels : Arrays.asList("openrouter/free");
         this.historyManager = new RoomHistoryManager(client, mapper, homeserver, accessToken);
         this.random = new Random();
     }
@@ -242,7 +243,24 @@ public class AIService {
                 continue;
             }
 
-            attempts.add(new ProviderAttempt(provider, selectModel(backend, preferredBackend, forcedModel)));
+            if (preferredBackend == backend && forcedModel != null) {
+                attempts.add(new ProviderAttempt(provider, forcedModel));
+                continue;
+            }
+
+            if (backend == Backend.CEREBRAS) {
+                for (String model : cerebrasModels) {
+                    attempts.add(new ProviderAttempt(provider, model));
+                }
+            } else if (backend == Backend.GROQ) {
+                for (String model : groqModels) {
+                    attempts.add(new ProviderAttempt(provider, model));
+                }
+            } else if (backend == Backend.ARLIAI) {
+                attempts.add(new ProviderAttempt(provider, getRandomModel(arliModels)));
+            } else if (backend == Backend.OPENROUTER) {
+                attempts.add(new ProviderAttempt(provider, openrouterModels.get(0)));
+            }
         }
         return attempts;
     }
@@ -272,19 +290,20 @@ public class AIService {
     }
 
     private String selectModel(Backend backend, Backend preferredBackend, String forcedModel) {
+        // This is no longer used by buildProviderAttempts, but keeping for compatibility if needed.
         if (preferredBackend == backend && forcedModel != null) {
             return forcedModel;
         }
 
         switch (backend) {
             case CEREBRAS:
-                return getRandomModel(CEREBRAS_MODELS);
+                return cerebrasModels.get(0);
             case GROQ:
-                return GROQ_MODELS.get(0);
+                return groqModels.get(0);
             case OPENROUTER:
-                return OPENROUTER_MODELS.get(0);
+                return openrouterModels.get(0);
             case ARLIAI:
-                return getRandomModel(ARLI_MODELS);
+                return getRandomModel(arliModels);
             default:
                 return "unknown-model";
         }

@@ -38,6 +38,10 @@ public class MatrixRobobot {
         public String cerebrasApiKey;
         public String groqApiKey;
         public String openrouterApiKey;
+        public java.util.List<String> arliModels;
+        public java.util.List<String> cerebrasModels;
+        public java.util.List<String> groqModels;
+        public java.util.List<String> openrouterModels;
     }
 
     private static final Map<String, AtomicBoolean> runningOperations = new ConcurrentHashMap<>();
@@ -70,10 +74,12 @@ public class MatrixRobobot {
         TextSearchService textSearchService = new TextSearchService(matrixClient, historyManager, client, mapper, url,
                 config, runningOperations);
         AIService aiService = new AIService(client, mapper, url, config.accessToken, config.arliApiKey,
-                config.cerebrasApiKey, config.groqApiKey, config.openrouterApiKey);
+                config.cerebrasApiKey, config.groqApiKey, config.openrouterApiKey,
+                config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels);
         ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
         VisionAIService visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
-                config.arliApiKey, config.groqApiKey, config.openrouterApiKey, imageFetcher);
+                config.arliApiKey, config.groqApiKey, config.openrouterApiKey, imageFetcher,
+                config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels);
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
         TimezoneService timezoneService = new TimezoneService(mapper);
