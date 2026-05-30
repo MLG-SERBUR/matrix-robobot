@@ -8,7 +8,7 @@
   "groqApiKey": "gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "openrouterApiKey": "sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "arliModels": ["Qwen3.5-27B-Derestricted"],
-  "cerebrasModels": ["qwen-3-235b-a22b-instruct-2507"],
+  "cerebrasModels": ["gpt-oss-120b", "zai-glm-4.7"],
   "groqModels": ["meta-llama/llama-4-scout-17b-16e-instruct"],
   "openrouterModels": ["openrouter/free"]
 }
