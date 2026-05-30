@@ -178,7 +178,7 @@ public class VisionAIService extends AIService {
         messages.add(Map.of("role", "user", "content", content));
 
         Map<String, Object> payload = new HashMap<>();
-        payload.put("model", "Qwen3.5-27B-Derestricted");
+        payload.put("model", getRandomModel(arliModels));
         payload.put("messages", messages);
         payload.put("stream", false);
         AIService.applyArliAiNonThinkingDefaults(payload);
