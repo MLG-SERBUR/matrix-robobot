@@ -28,11 +28,14 @@ public class VisionAIService extends AIService {
 
     public VisionAIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
                            String arliApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
+                           String ollamaProxyApiKey, String ollamaProxyUrl,
                            ImageFetcher imageFetcher,
-                           List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, List<String> freeLlmModels) {
+                           List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, 
+                           List<String> freeLlmModels, List<String> ollamaProxyModels) {
         // Pass null for cerebrasApiKey to ensure Vision AI never falls back to Cerebras
         super(client, mapper, homeserver, accessToken, arliApiKey, null, groqApiKey, openrouterApiKey, freeLlmApiKey,
-              arliModels, cerebrasModels, groqModels, openrouterModels, freeLlmModels);
+              ollamaProxyApiKey, ollamaProxyUrl,
+              arliModels, cerebrasModels, groqModels, openrouterModels, freeLlmModels, ollamaProxyModels);
         this.imageFetcher = imageFetcher;
     }
 

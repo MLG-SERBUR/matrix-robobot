@@ -8,9 +8,12 @@
   "groqApiKey": "gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "openrouterApiKey": "sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "freeLlmApiKey": "your-freellmapi-key-here",
+  "ollamaProxyApiKey": "your-ollama-proxy-api-key",
+  "ollamaProxyUrl": "http://localhost:8000/api/chat",
   "arliModels": ["Qwen3.5-27B-Derestricted"],
   "cerebrasModels": ["gpt-oss-120b", "zai-glm-4.7"],
   "groqModels": ["meta-llama/llama-4-scout-17b-16e-instruct"],
   "openrouterModels": ["openrouter/free"],
-  "freeLlmModels": ["auto"]
+  "freeLlmModels": ["auto"],
+  "ollamaProxyModels": ["llama3.2:3b"]
 }
