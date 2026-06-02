@@ -232,7 +232,9 @@ public class AIService {
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                 matrixClient.updateNoticeMessage(responseRoomId, eventId,
                         errorPrefix + provider.noticeName + " failed: " + errorMsg);
-                if (preferredBackend != Backend.AUTO || i == attempts.size() - 1) {
+                // Always allow fallback for OLLAMA_PROXY since it's not 24/7
+                // Otherwise only fallback in AUTO mode and if not the last attempt
+                if ((preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) || i == attempts.size() - 1) {
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
                             preferredBackend, forcedModel, timeoutSeconds, eventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
