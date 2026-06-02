@@ -26,6 +26,8 @@ public class AIService {
     protected final String groqApiKey;
     protected final String openrouterApiKey;
     protected final String freeLlmApiKey;
+    protected final String ollamaProxyApiKey;
+    protected final String ollamaProxyUrl;
     protected final RoomHistoryManager historyManager;
     protected final Random random;
     public static final int AI_TIMEOUT_SECONDS = 1200;
@@ -34,10 +36,13 @@ public class AIService {
     protected final List<String> groqModels;
     protected final List<String> openrouterModels;
     protected final List<String> freeLlmModels;
+    protected final List<String> ollamaProxyModels;
 
     public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
             String cerebrasApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
-            List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, List<String> freeLlmModels) {
+            String ollamaProxyApiKey, String ollamaProxyUrl,
+            List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, 
+            List<String> freeLlmModels, List<String> ollamaProxyModels) {
         this.client = client;
         this.mapper = mapper;
         this.homeserver = homeserver;
@@ -47,17 +52,20 @@ public class AIService {
         this.groqApiKey = groqApiKey;
         this.openrouterApiKey = openrouterApiKey;
         this.freeLlmApiKey = freeLlmApiKey;
+        this.ollamaProxyApiKey = ollamaProxyApiKey;
+        this.ollamaProxyUrl = ollamaProxyUrl != null ? ollamaProxyUrl : "http://localhost:8000/api/chat";
         this.arliModels = arliModels != null && !arliModels.isEmpty() ? arliModels : Arrays.asList("Qwen3.5-27B-Derestricted");
         this.cerebrasModels = cerebrasModels != null && !cerebrasModels.isEmpty() ? cerebrasModels : Arrays.asList("qwen-3-235b-a22b-instruct-2507");
         this.groqModels = groqModels != null && !groqModels.isEmpty() ? groqModels : Arrays.asList("meta-llama/llama-4-scout-17b-16e-instruct");
         this.openrouterModels = openrouterModels != null && !openrouterModels.isEmpty() ? openrouterModels : Arrays.asList("openrouter/free");
         this.freeLlmModels = freeLlmModels != null && !freeLlmModels.isEmpty() ? freeLlmModels : Arrays.asList("auto");
+        this.ollamaProxyModels = ollamaProxyModels != null && !ollamaProxyModels.isEmpty() ? ollamaProxyModels : Arrays.asList("llama3.2:3b");
         this.historyManager = new RoomHistoryManager(client, mapper, homeserver, accessToken);
         this.random = new Random();
     }
 
     public enum Backend {
-        AUTO, ARLIAI, FREELLM, CEREBRAS, GROQ, OPENROUTER
+        AUTO, ARLIAI, OLLAMA_PROXY, FREELLM, CEREBRAS, GROQ, OPENROUTER
     }
 
     public static void applyArliAiNonThinkingDefaults(Map<String, Object> payload) {
@@ -237,7 +245,7 @@ public class AIService {
 
     private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
         List<ProviderAttempt> attempts = new ArrayList<>();
-        Backend[] order = {Backend.ARLIAI, Backend.FREELLM, Backend.CEREBRAS, Backend.GROQ, Backend.OPENROUTER};
+        Backend[] order = {Backend.ARLIAI, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS, Backend.GROQ, Backend.OPENROUTER};
         for (Backend backend : order) {
             if (preferredBackend != Backend.AUTO && preferredBackend != backend) {
                 continue;
@@ -269,6 +277,10 @@ public class AIService {
                 for (String model : freeLlmModels) {
                     attempts.add(new ProviderAttempt(provider, model));
                 }
+            } else if (backend == Backend.OLLAMA_PROXY) {
+                for (String model : ollamaProxyModels) {
+                    attempts.add(new ProviderAttempt(provider, model));
+                }
             }
         }
         return attempts;
@@ -296,6 +308,9 @@ public class AIService {
             case FREELLM:
                 return new ProviderConfig(Backend.FREELLM, "FreeLLM", "FreeLLM", "FREELLM_API_KEY",
                         freeLlmApiKey, "http://localhost:3001/v1/chat/completions", true, Map.of(), Map.of());
+            case OLLAMA_PROXY:
+                return new ProviderConfig(Backend.OLLAMA_PROXY, "OllamaProxy", "Ollama Proxy", "OLLAMA_PROXY_API_KEY",
+                        ollamaProxyApiKey, ollamaProxyUrl, true, Map.of(), Map.of());
             default:
                 return null;
         }
@@ -318,6 +333,8 @@ public class AIService {
                 return getRandomModel(arliModels);
             case FREELLM:
                 return freeLlmModels.get(0);
+            case OLLAMA_PROXY:
+                return ollamaProxyModels.get(0);
             default:
                 return "unknown-model";
         }
