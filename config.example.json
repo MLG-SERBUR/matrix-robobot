@@ -7,8 +7,10 @@
   "cerebrasApiKey": "csk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "groqApiKey": "gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "openrouterApiKey": "sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "freeLlmApiKey": "your-freellmapi-key-here",
   "arliModels": ["Qwen3.5-27B-Derestricted"],
   "cerebrasModels": ["gpt-oss-120b", "zai-glm-4.7"],
   "groqModels": ["meta-llama/llama-4-scout-17b-16e-instruct"],
-  "openrouterModels": ["openrouter/free"]
+  "openrouterModels": ["openrouter/free"],
+  "freeLlmModels": ["auto"]
 }

@@ -38,10 +38,12 @@ public class MatrixRobobot {
         public String cerebrasApiKey;
         public String groqApiKey;
         public String openrouterApiKey;
+        public String freeLlmApiKey;
         public java.util.List<String> arliModels;
         public java.util.List<String> cerebrasModels;
         public java.util.List<String> groqModels;
         public java.util.List<String> openrouterModels;
+        public java.util.List<String> freeLlmModels;
     }
 
     private static final Map<String, AtomicBoolean> runningOperations = new ConcurrentHashMap<>();
@@ -74,12 +76,12 @@ public class MatrixRobobot {
         TextSearchService textSearchService = new TextSearchService(matrixClient, historyManager, client, mapper, url,
                 config, runningOperations);
         AIService aiService = new AIService(client, mapper, url, config.accessToken, config.arliApiKey,
-                config.cerebrasApiKey, config.groqApiKey, config.openrouterApiKey,
-                config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels);
+                config.cerebrasApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
+                config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels, config.freeLlmModels);
         ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
         VisionAIService visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
-                config.arliApiKey, config.groqApiKey, config.openrouterApiKey, imageFetcher,
-                config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels);
+                config.arliApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey, imageFetcher,
+                config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels, config.freeLlmModels);
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
         TimezoneService timezoneService = new TimezoneService(mapper);
