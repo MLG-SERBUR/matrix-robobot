@@ -420,6 +420,9 @@ public class AIService {
 
         int updateCount = 0;
         String[] clockFaces = {"🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦"};
+        
+        int lineCount = 0;
+        boolean gotDone = false;
 
         try {
             System.out.println("Starting " + aiName + " streaming request...");
@@ -427,7 +430,7 @@ public class AIService {
 
             if (response.statusCode() != 200) {
                 String errorBody = response.body().collect(java.util.stream.Collectors.joining("\n"));
-                throw new Exception("Status: " + response.statusCode() + " Body: " + errorBody);
+                throw new Exception("HTTP " + response.statusCode() + ": " + errorBody);
             }
 
             try (java.util.stream.Stream<String> lines = response.body()) {
@@ -438,6 +441,7 @@ public class AIService {
                         break;
                     }
                     String line = it.next();
+                    lineCount = lineCount + 1;
                     String data = line.trim();
                     if (data.isEmpty()) continue;
 
@@ -484,6 +488,7 @@ public class AIService {
                         }
                     } else if (data.contains("[DONE]")) {
                         System.out.println(aiName + " streaming finished normally ([DONE] received).");
+                        gotDone = true;
                         break;
                     }
                 }
@@ -495,7 +500,9 @@ public class AIService {
         }
 
         if (responseContent.length() == 0 && reasoning.length() == 0) {
-            throw new Exception("No response received from " + aiName + ".");
+            String details = (lineCount == 0) ? "No SSE data received" : 
+                           (gotDone ? "Stream ended with [DONE] but no content" : "Stream incomplete, no [DONE] received");
+            throw new Exception(aiName + " error: " + details + ".");
         }
 
         String finalOutput;
