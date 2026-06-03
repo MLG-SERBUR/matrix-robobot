@@ -588,20 +588,21 @@ public class AIService {
     }
 
     public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question, String promptPrefix,
-                         java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, Backend preferredBackend) {
+                         java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, 
+                         Backend preferredBackend, ZoneId zoneId) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             // Target context window for Arli AI is 16k tokens.
             // We reserve ~4000 tokens for the generated response to be safe.
             int targetPromptTokens = 12000;
-            
+
             // Calculate base tokens consumed by prompts and the user's question
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20; // Special tokens: BOS/EOS, role markers (im_start/im_end), separators
-            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) + 
+            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) +
                              RoomHistoryManager.estimateTokens(emptyPrompt) +
                              chatFormatOverhead;
-            
+
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
 
             // Send immediate status message
@@ -622,7 +623,7 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, tokenLimit, false, null, false, abortFlag, progressCallback);
+                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
 
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,

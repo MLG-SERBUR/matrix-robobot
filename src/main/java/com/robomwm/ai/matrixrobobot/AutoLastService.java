@@ -29,6 +29,7 @@ public class AutoLastService {
     private final LastMessageService lastMessageService;
     private final AIService aiService;
     private final TimezoneService timezoneService;
+    private final RoomHistoryManager historyManager;
     private final HttpClient httpClient;
     private final ObjectMapper mapper;
     private final String homeserver;
@@ -37,12 +38,13 @@ public class AutoLastService {
     private final Path summaryPersistenceFile;
 
     public AutoLastService(MatrixClient matrixClient, LastMessageService lastMessageService,
-            AIService aiService, TimezoneService timezoneService,
+            AIService aiService, TimezoneService timezoneService, RoomHistoryManager historyManager,
             HttpClient httpClient, ObjectMapper mapper, String homeserver, String accessToken) {
         this.matrixClient = matrixClient;
         this.lastMessageService = lastMessageService;
         this.aiService = aiService;
         this.timezoneService = timezoneService;
+        this.historyManager = historyManager;
         this.httpClient = httpClient;
         this.mapper = mapper;
         this.homeserver = homeserver;
@@ -145,7 +147,8 @@ public class AutoLastService {
                     long lastTrigger = lastTriggerTime.getOrDefault(userId, 0L);
                     // Debounce (30 minutes)
                     if (now - lastTrigger >= 1800000) {
-                        if (hasAtLeastMessages(roomId, previousReadInfo.eventId, eventId, 50)) {
+                        int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
+                        if (unreadCount >= 50) {
                             triggerLastMessage(roomId, userId, previousReadInfo);
                             lastTriggerTime.put(userId, now);
                         }
@@ -157,7 +160,8 @@ public class AutoLastService {
                     long lastTldrTrigger = lastTldrTriggerTime.getOrDefault(userId, 0L);
                     // Threshold: > 1 hour gap
                     if (now - lastTldrTrigger >= 3600000) {
-                        if (hasAtLeastMessages(roomId, previousReadInfo.eventId, eventId, 75)) {
+                        int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
+                        if (unreadCount >= 75) {
                             triggerTldr(roomId, userId, previousReadInfo);
                             lastTldrTriggerTime.put(userId, now);
                         }
@@ -208,59 +212,6 @@ public class AutoLastService {
             }).start();
         } else {
             System.out.println("Could not find DM room for auto-tldr user: " + userId);
-        }
-    }
-
-    /**
-     * Checks if there are >= threshold messages between fromEventId and toEventId
-     * (exclusive of from, inclusive of to).
-     */
-    private boolean hasAtLeastMessages(String roomId, String previousReadId, String currentReadId, int threshold) {
-        try {
-            // Fetch recent messages
-            String url = homeserver + "/_matrix/client/v3/rooms/" + roomId + "/messages?dir=b&limit=100";
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .GET()
-                    .build();
-
-            // FIX: Use local httpClient instead of matrixClient.getClient()
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200)
-                return false;
-
-            JsonNode root = mapper.readTree(resp.body());
-            JsonNode chunk = root.path("chunk");
-
-            int messagesFound = 0;
-            boolean foundCurrent = false;
-
-            for (JsonNode event : chunk) {
-                String id = event.path("event_id").asText();
-                String type = event.path("type").asText();
-
-                // Only count actual messages
-                boolean isMessage = "m.room.message".equals(type);
-
-                if (id.equals(currentReadId)) {
-                    foundCurrent = true;
-                }
-
-                if (foundCurrent && isMessage) {
-                    messagesFound++;
-                }
-
-                if (id.equals(previousReadId)) {
-                    break;
-                }
-            }
-
-            return messagesFound >= threshold;
-
-        } catch (Exception e) {
-            System.err.println("Error checking message gap: " + e.getMessage());
-            return false;
         }
     }
 
