@@ -325,7 +325,7 @@ public class CommandDispatcher {
 
             new Thread(() -> {
                 try {
-                    service.queryAsk(responseRoomId, exportRoomId, prevBatch, questionArg, promptPrefix, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, backend);
+                    service.queryAsk(responseRoomId, exportRoomId, null, questionArg, promptPrefix, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, backend, zoneId);
                 } finally {
                     runningOperations.remove(sender);
                 }
@@ -346,7 +346,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                service.queryAI(responseRoomId, exportRoomId, fHours, prevBatch, fQuestion, fEventId, fForward,
+                service.queryAI(responseRoomId, exportRoomId, fHours, null, fQuestion, fEventId, fForward,
                         zoneId, fMax, promptPrefix, abortFlag, backend);
             } finally {
                 runningOperations.remove(sender);
@@ -365,10 +365,11 @@ public class CommandDispatcher {
         runningOperations.put(sender, abortFlag);
 
         final String fQuestion = question;
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, forcedModel, timeoutSeconds, preferredBackend);
+                aiService.queryAsk(responseRoomId, exportRoomId, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, forcedModel, timeoutSeconds, preferredBackend, zoneId);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -449,10 +450,11 @@ public class CommandDispatcher {
 
         final String fQuestion = question;
         final String fModel = matchedModel;
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
 
         new Thread(() -> {
             try {
-                aiService.queryAsk(responseRoomId, exportRoomId, prevBatch, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI);
+                aiService.queryAsk(responseRoomId, exportRoomId, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI, zoneId);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -486,7 +488,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                debugAIService.queryDebugAI(responseRoomId, exportRoomId, prevBatch, fConfig, fPrompt, abortFlag, historyManager);
+                debugAIService.queryDebugAI(responseRoomId, exportRoomId, null, fConfig, fPrompt, abortFlag, historyManager);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -508,7 +510,7 @@ public class CommandDispatcher {
             System.out.println("Received semantic search command in " + roomId + " from " + sender);
             new Thread(() -> {
                 try {
-                    semanticSearchService.performSemanticSearch(responseRoomId, exportRoomId, hours, prevBatch,
+                    semanticSearchService.performSemanticSearch(responseRoomId, exportRoomId, hours, null,
                         query, zoneId, abortFlag);
                 } finally {
                     runningOperations.remove(sender);
@@ -535,7 +537,7 @@ public class CommandDispatcher {
             System.out.println("Received aisearch command in " + roomId + " from " + sender);
             new Thread(() -> {
                 try {
-                    aiSearchService.performAiSearch(responseRoomId, exportRoomId, hours, prevBatch,
+                    aiSearchService.performAiSearch(responseRoomId, exportRoomId, hours, null,
                         query, zoneId, abortFlag);
                 } finally {
                     runningOperations.remove(sender);
@@ -603,7 +605,7 @@ public class CommandDispatcher {
             int hours = unit.equals("d") ? duration * 24 : duration;
 
             System.out.println("Received " + commandName + " command in " + roomId + " from " + sender);
-            new Thread(() -> action.execute(roomId, sender, responseRoomId, exportRoomId, hours, prevBatch, input, zoneId)).start();
+            new Thread(() -> action.execute(roomId, sender, responseRoomId, exportRoomId, hours, null, input, zoneId)).start();
             return true;
         }
         return false;

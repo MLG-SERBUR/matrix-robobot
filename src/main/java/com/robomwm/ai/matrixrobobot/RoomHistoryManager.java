@@ -187,7 +187,7 @@ public class RoomHistoryManager {
 
     public List<String> fetchRoomHistory(String roomId, int hours, String fromToken, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
         ChatLogsResult result = fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1,
-                ZoneId.of("America/Los_Angeles"), -1, abortFlag);
+                ZoneId.of("UTC"), -1, abortFlag);
         return result.logs;
     }
 
@@ -216,7 +216,7 @@ public class RoomHistoryManager {
         List<String> eventIds = new ArrayList<>();
 
         long startTime = (startTimestamp > 0) ? startTimestamp
-                : System.currentTimeMillis() - (long) hours * 3600L * 1000L;
+                : (hours > 0 ? System.currentTimeMillis() - (long) hours * 3600L * 1000L : -1);
         long calculatedEndTime = (endTime > 0) ? endTime : System.currentTimeMillis();
 
         String token = getPaginationToken(roomId, fromToken);
@@ -738,7 +738,7 @@ public class RoomHistoryManager {
                     }
                 }
 
-                if (foundLastRead || count > 1000)
+                if (foundLastRead || count > 5000)
                     break; // Limit search
                 token = root.path("end").asText(null);
             }
@@ -826,7 +826,7 @@ public class RoomHistoryManager {
                     progressCallback.onProgress(rawLines.size(), estimateFormattedTokens(rawLines, zoneId, aiFriendlyTimestamps));
                 }
 
-                if (foundLastRead || rawLines.size() > 500)
+                if (foundLastRead || rawLines.size() > 2000)
                     break; // Safety limit
                 token = root.path("end").asText(null);
             }
@@ -1137,10 +1137,7 @@ public class RoomHistoryManager {
             HttpResponse<String> syncResp = httpClient.send(syncReq, HttpResponse.BodyHandlers.ofString());
             if (syncResp.statusCode() == 200) {
                 JsonNode root = mapper.readTree(syncResp.body());
-                JsonNode roomNode = root.path("rooms").path("join").path(roomId);
-                if (!roomNode.isMissingNode()) {
-                    return roomNode.path("timeline").path("prev_batch").asText(null);
-                }
+                return root.path("next_batch").asText(null);
             }
         } catch (Exception ignore) {
             // ignore

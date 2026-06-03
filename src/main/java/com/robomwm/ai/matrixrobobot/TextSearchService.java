@@ -69,10 +69,7 @@ public class TextSearchService {
                     HttpResponse<String> syncResp = httpClient.send(syncReq, HttpResponse.BodyHandlers.ofString());
                     if (syncResp.statusCode() == 200) {
                         JsonNode root = mapper.readTree(syncResp.body());
-                        JsonNode roomNode = root.path("rooms").path("join").path(exportRoomId);
-                        if (!roomNode.isMissingNode()) {
-                            token = roomNode.path("timeline").path("prev_batch").asText(null);
-                        }
+                        token = root.path("next_batch").asText(null);
                     }
                 } catch (Exception ignore) {
                     // ignore errors here, we'll just start fetching from the latest available if
@@ -359,10 +356,7 @@ public class TextSearchService {
                     HttpResponse<String> syncResp = httpClient.send(syncReq, HttpResponse.BodyHandlers.ofString());
                     if (syncResp.statusCode() == 200) {
                         JsonNode root = mapper.readTree(syncResp.body());
-                        JsonNode roomNode = root.path("rooms").path("join").path(exportRoomId);
-                        if (!roomNode.isMissingNode()) {
-                            token = roomNode.path("timeline").path("prev_batch").asText(null);
-                        }
+                        token = root.path("next_batch").asText(null);
                     }
                 } catch (Exception ignore) {
                     // ignore errors here, we'll just start fetching from the latest available if
@@ -572,10 +566,7 @@ public class TextSearchService {
                     HttpResponse<String> syncResp = httpClient.send(syncReq, HttpResponse.BodyHandlers.ofString());
                     if (syncResp.statusCode() == 200) {
                         JsonNode root = mapper.readTree(syncResp.body());
-                        JsonNode roomNode = root.path("rooms").path("join").path(exportRoomId);
-                        if (!roomNode.isMissingNode()) {
-                            token = roomNode.path("timeline").path("prev_batch").asText(null);
-                        }
+                        token = root.path("next_batch").asText(null);
                     }
                 } catch (Exception ignore) {
                     // ignore errors here, we'll just start fetching from the latest available if
