@@ -47,6 +47,8 @@ public class MatrixRobobot {
         public java.util.List<String> openrouterModels;
         public java.util.List<String> freeLlmModels;
         public java.util.List<String> ollamaProxyModels;
+        public String imageCaptionBackend;
+        public String imageCaptionModel;
     }
 
     private static final Map<String, AtomicBoolean> runningOperations = new ConcurrentHashMap<>();
@@ -84,11 +86,20 @@ public class MatrixRobobot {
                 config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels, 
                 config.freeLlmModels, config.ollamaProxyModels);
         ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
-        VisionAIService visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
-                config.arliApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
-                config.ollamaProxyApiKey, config.ollamaProxyUrl, imageFetcher,
-                config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels, 
-                config.freeLlmModels, config.ollamaProxyModels);
+        VisionAIService visionAIService;
+        if ("OLLAMA".equalsIgnoreCase(config.imageCaptionBackend) || "OLLAMA_PROXY".equalsIgnoreCase(config.imageCaptionBackend)) {
+            visionAIService = new OllamaVisionAIService(client, mapper, url, config.accessToken,
+                    config.arliApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
+                    config.ollamaProxyApiKey, config.ollamaProxyUrl, imageFetcher, config.imageCaptionModel,
+                    config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels,
+                    config.freeLlmModels, config.ollamaProxyModels);
+        } else {
+            visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
+                    config.arliApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
+                    config.ollamaProxyApiKey, config.ollamaProxyUrl, imageFetcher,
+                    config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels,
+                    config.freeLlmModels, config.ollamaProxyModels);
+        }
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
         TimezoneService timezoneService = new TimezoneService(mapper);

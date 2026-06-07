@@ -445,10 +445,14 @@ public class AIService {
                     String data = line.trim();
                     if (data.isEmpty()) continue;
 
+                    String json = null;
                     if (data.startsWith("data:") && !data.contains("[DONE]")) {
-                        String json = data.substring(5).trim();
-                        if (json.isEmpty()) continue;
+                        json = data.substring(5).trim();
+                    } else if (data.startsWith("{")) {
+                        json = data;
+                    }
 
+                    if (json != null && !json.isEmpty()) {
                         JsonNode node = mapper.readTree(json);
                         if (node.has("error")) {
                             JsonNode errorNode = node.get("error");
@@ -457,33 +461,50 @@ public class AIService {
                             else if (errorNode.has("statusCode")) code = errorNode.get("statusCode").asText();
                             throw new Exception("Status: " + code + " Body: " + errorNode.toString());
                         }
-                        JsonNode choices = node.path("choices");
+                        
                         if (node.has("model") && (actualModel == null || actualModel.isEmpty())) {
                             actualModel = node.get("model").asText();
                         }
-                        if (choices.isArray() && choices.size() > 0) {
-                            JsonNode delta = choices.get(0).path("delta");
-                            if (delta.has("content")) {
-                                responseContent.append(delta.get("content").asText());
-                            } else if (delta.has("reasoning")) {
-                                reasoning.append(delta.get("reasoning").asText());
-                            } else if (delta.has("reasoning_content")) {
-                                reasoning.append(delta.get("reasoning_content").asText());
-                            }
 
-                            long now = System.currentTimeMillis();
-                            if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
-                                lastUpdate = now;
-                                String rendered = buildStreamingOutput(reasoning, responseContent, footer, clockFaces, updateCount++, startTime);
-                                if (eventIdHolder[0] == null) {
-                                    eventIdHolder[0] = useNotice
-                                            ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, rendered)
-                                            : matrixClient.sendMarkdownWithEventId(responseRoomId, rendered);
-                                } else if (useNotice) {
-                                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], rendered);
-                                } else {
-                                    matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], rendered);
+                        // Handle Ollama native format
+                        if (node.has("message")) {
+                            JsonNode message = node.get("message");
+                            if (message.has("content")) {
+                                responseContent.append(message.get("content").asText());
+                            }
+                        } 
+                        // Handle OpenAI/ArliAI format
+                        else if (node.has("choices")) {
+                            JsonNode choices = node.path("choices");
+                            if (choices.isArray() && choices.size() > 0) {
+                                JsonNode delta = choices.get(0).path("delta");
+                                if (delta.has("content")) {
+                                    responseContent.append(delta.get("content").asText());
+                                } else if (delta.has("reasoning")) {
+                                    reasoning.append(delta.get("reasoning").asText());
+                                } else if (delta.has("reasoning_content")) {
+                                    reasoning.append(delta.get("reasoning_content").asText());
                                 }
+                            }
+                        }
+
+                        // Check if Ollama is done
+                        if (node.has("done") && node.get("done").asBoolean()) {
+                            gotDone = true;
+                        }
+
+                        long now = System.currentTimeMillis();
+                        if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
+                            lastUpdate = now;
+                            String rendered = buildStreamingOutput(reasoning, responseContent, footer, clockFaces, updateCount++, startTime);
+                            if (eventIdHolder[0] == null) {
+                                eventIdHolder[0] = useNotice
+                                        ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, rendered)
+                                        : matrixClient.sendMarkdownWithEventId(responseRoomId, rendered);
+                            } else if (useNotice) {
+                                matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], rendered);
+                            } else {
+                                matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], rendered);
                             }
                         }
                     } else if (data.contains("[DONE]")) {
@@ -491,6 +512,8 @@ public class AIService {
                         gotDone = true;
                         break;
                     }
+                    
+                    if (gotDone) break;
                 }
             }
         } catch (Exception e) {

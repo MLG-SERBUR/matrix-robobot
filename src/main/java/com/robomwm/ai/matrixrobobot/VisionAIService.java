@@ -23,7 +23,7 @@ import java.util.Map;
  * Image descriptions are cached to a JSON file keyed by mxc:// URL to avoid redundant API calls.
  */
 public class VisionAIService extends AIService {
-    private final ImageFetcher imageFetcher;
+    protected final ImageFetcher imageFetcher;
     private static final String DESCRIPTION_CACHE_FILE = "image_description_cache.json";
 
     public VisionAIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
@@ -162,7 +162,7 @@ public class VisionAIService extends AIService {
      * Returns text description or null on non-fatal failure.
      * Throws Exception on fatal API errors (403, rate limit, etc.) to abort the entire operation.
      */
-    private String describeImage(String mxcUrl) throws Exception {
+    protected String describeImage(String mxcUrl) throws Exception {
         // Fetch and encode single image
         System.out.println("Fetching image from Matrix: " + mxcUrl);
         List<String> encoded = imageFetcher.fetchAndEncodeImages(List.of(mxcUrl));
