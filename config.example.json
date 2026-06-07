@@ -15,5 +15,7 @@
   "groqModels": ["meta-llama/llama-4-scout-17b-16e-instruct"],
   "openrouterModels": ["openrouter/free"],
   "freeLlmModels": ["auto"],
-  "ollamaProxyModels": ["llama3.2:3b"]
+  "ollamaProxyModels": ["llama3.2:3b"],
+  "imageCaptionBackend": "OLLAMA",
+  "imageCaptionModel": "qwen3-vl:4b"
 }
