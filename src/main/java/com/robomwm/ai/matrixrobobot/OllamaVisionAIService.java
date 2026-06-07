@@ -41,6 +41,13 @@ public class OllamaVisionAIService extends VisionAIService {
         }
 
         String base64Image = encoded.get(0);
+        // Ollama expects raw base64, not data URL. Strip prefix if present.
+        if (base64Image.startsWith("data:")) {
+            int commaIdx = base64Image.indexOf(",");
+            if (commaIdx != -1) {
+                base64Image = base64Image.substring(commaIdx + 1);
+            }
+        }
         
         // Ollama native /api/chat format for vision
         Map<String, Object> message = new HashMap<>();
