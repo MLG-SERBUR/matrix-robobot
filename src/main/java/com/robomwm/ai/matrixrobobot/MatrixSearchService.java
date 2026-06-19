@@ -378,8 +378,8 @@ public class MatrixSearchService {
                         .atZone(zoneId)
                         .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
                 String messageLink = "https://matrix.to/#/" + searchRoomId + "/" + hit.eventId();
-                sb.append("- **").append(timestamp).append("** <").append(hit.sender()).append(">: ")
-                        .append(compactBody(hit.body())).append(" [link](").append(messageLink).append(")\n");
+                sb.append("- **[").append(timestamp).append("](").append(messageLink).append(")** <")
+                        .append(hit.sender()).append(">: ").append(compactBody(hit.body())).append("\n");
             }
 
             sb.append("\n");
