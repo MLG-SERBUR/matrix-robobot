@@ -113,6 +113,9 @@ public class MatrixRobobot {
         
         // NEW: PleadService for 🥺 reactions
         PleadService pleadService = new PleadService(matrixClient);
+        
+        // NEW: OkReactionService for consecutive "ok" reactions
+        OkReactionService okReactionService = new OkReactionService(matrixClient);
 
         String userId = matrixClient.getUserId();
 
@@ -207,6 +210,9 @@ public class MatrixRobobot {
                             
                             // Process emojis via PleadService
                             pleadService.processMessage(roomId, eventId, body, sender);
+                            
+                            // Process consecutive "ok" messages
+                            okReactionService.processMessage(roomId, eventId, body, sender);
 
                             // PRIMARY: !last command
                             if ("!last".equals(trimmed)) {

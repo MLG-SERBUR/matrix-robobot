@@ -12,7 +12,7 @@ public class PleadService {
     private boolean isEnabled = false;
     private final Random random = new Random();
 
-    private static final String[] THIRD_CHANCE_REACTIONS = {
+    protected static final String[] THIRD_CHANCE_REACTIONS = {
         "a", "c", "V", "C", "B",
         "F", "O", "J", "H", "😱",
         "💥", "G", "?", "A", "n",
