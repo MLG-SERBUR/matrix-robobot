@@ -24,6 +24,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Handles Matrix protocol native search using the /_matrix/client/v3/search API
  */
 public class MatrixSearchService {
+    private static final int PAGE_SIZE = 25;
+    private static final int MAX_RESULT_BODY_CHARS = 500;
+
     private final MatrixClient matrixClient;
     private final HttpClient httpClient;
     private final ObjectMapper mapper;
@@ -109,6 +112,11 @@ public class MatrixSearchService {
             String lookbackSuffix = lookbackHours > 0 ? " (last " + lookbackHours + "h)" : "";
             String initialMessage = "Searching Matrix for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + "...";
             String eventMessageId = matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, initialMessage);
+            if (eventMessageId == null) {
+                matrixClient.sendNotice(responseRoomId,
+                        "Unable to send Matrix search status message. Search was not started.");
+                return;
+            }
 
             SearchPaginationState paginationState = new SearchPaginationState(new ArrayList<>(), new HashSet<>(), sender,
                     query, searchRoomId, responseRoomId, eventMessageId, zoneId, cutoffTimestampMs);
@@ -133,7 +141,13 @@ public class MatrixSearchService {
             searchCache.put(sender, paginationState);
 
             // Render first page
-            matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventMessageId, paginationState.renderPage());
+            String updateEventId = matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventMessageId,
+                    paginationState.renderPage());
+            if (updateEventId == null) {
+                matrixClient.sendNotice(responseRoomId,
+                        "Matrix search found " + paginationState.getHitCount()
+                                + " results, but the result page was too large to send.");
+            }
 
         } catch (Exception e) {
             System.out.println("Failed to perform Matrix search: " + e.getMessage());
@@ -306,7 +320,7 @@ public class MatrixSearchService {
             this.allHits = allHits;
             this.seenEventIds = seenEventIds;
             this.currentPage = 0;
-            this.pageSize = 25;
+            this.pageSize = PAGE_SIZE;
             this.sender = sender;
             this.query = query;
             this.searchRoomId = searchRoomId;
@@ -365,7 +379,7 @@ public class MatrixSearchService {
                         .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
                 String messageLink = "https://matrix.to/#/" + searchRoomId + "/" + hit.eventId();
                 sb.append("- **").append(timestamp).append("** <").append(hit.sender()).append(">: ")
-                        .append(hit.body()).append(" [link](").append(messageLink).append(")\n");
+                        .append(compactBody(hit.body())).append(" [link](").append(messageLink).append(")\n");
             }
 
             sb.append("\n");
@@ -461,6 +475,14 @@ public class MatrixSearchService {
 
         public void sortHits() {
             allHits.sort(Comparator.comparingLong(SearchHit::originServerTs).reversed());
+        }
+
+        private static String compactBody(String body) {
+            String compacted = body.replaceAll("\\s+", " ").trim();
+            if (compacted.length() <= MAX_RESULT_BODY_CHARS) {
+                return compacted;
+            }
+            return compacted.substring(0, MAX_RESULT_BODY_CHARS).trim() + "...";
         }
     }
 
