@@ -7,10 +7,10 @@ import java.nio.file.Paths;
 import java.util.Random;
 
 public class PleadService {
-    private final MatrixClient matrixClient;
-    private final Path persistenceFile;
-    private boolean isEnabled = false;
-    private final Random random = new Random();
+    protected final MatrixClient matrixClient;
+    protected final Path persistenceFile;
+    protected boolean isEnabled = false;
+    protected final Random random = new Random();
 
     protected static final String[] THIRD_CHANCE_REACTIONS = {
         "a", "c", "V", "C", "B",
