@@ -16,7 +16,7 @@ public class OkReactionService extends PleadService {
             return;
         }
 
-        boolean isOk = "ok".equals(body);
+        boolean isOk = "ok".equals(body) || "Ok".equals(body);
         Boolean prevWasOk = lastMessageWasOk.get(senderId);
 
         if (isOk && prevWasOk != null && prevWasOk) {
