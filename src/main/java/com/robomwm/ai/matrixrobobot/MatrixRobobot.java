@@ -202,6 +202,7 @@ public class MatrixRobobot {
                                 continue;
 
                             String eventId = ev.path("event_id").asText(null);
+                            String msgtype = ev.path("content").path("msgtype").asText(null);
                             String trimmed = body.trim();
                             String responseRoomId = roomId;
 
@@ -212,7 +213,7 @@ public class MatrixRobobot {
                             pleadService.processMessage(roomId, eventId, body, sender);
                             
                             // Process consecutive "ok" messages
-                            okReactionService.processMessage(roomId, eventId, body, sender);
+                            okReactionService.processMessage(roomId, eventId, body, sender, msgtype);
 
                             // PRIMARY: !last command
                             if ("!last".equals(trimmed)) {
