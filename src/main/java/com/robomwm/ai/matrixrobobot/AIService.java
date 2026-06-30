@@ -8,6 +8,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.ZoneId;
+import java.time.Instant;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
@@ -17,6 +18,7 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class AIService {
+    protected static final long STATUS_UPDATE_INTERVAL_MS = 5000; // 5 seconds
     protected final HttpClient client;
     protected final ObjectMapper mapper;
     protected final String homeserver;
@@ -207,42 +209,99 @@ public class AIService {
         String prompt = buildPrompt(question, history.logs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
+        // Track batched status updates to reduce Matrix message spam
+        String batchEventId = null;
+        StringBuilder batchStatus = new StringBuilder();
+        Instant lastUpdateTime = null;
+        boolean batching = attempts.size() > 1; // Only batch if multiple attempts possible
+
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
 
             ProviderAttempt attempt = attempts.get(i);
             ProviderConfig provider = attempt.provider;
-            String eventId = matrixClient.sendNoticeWithEventId(responseRoomId,
-                    "Querying " + provider.noticeName + " (" + attempt.model + ")...");
+            
             try {
+                // For first attempt or non-batching mode, send immediate status
+                if (i == 0 || !batching) {
+                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId,
+                            "Querying " + provider.noticeName + " (" + attempt.model + ")...");
+                    lastUpdateTime = Instant.now();
+                    batchStatus.setLength(0);
+                }
+                
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
-                            new String[]{eventId}, footer, timeoutSeconds, abortFlag, true, exportRoomId,
+                            new String[]{batchEventId != null ? batchEventId : ""}, footer, timeoutSeconds, abortFlag, true, exportRoomId,
                             history.firstEventId);
                 } else {
                     String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
-                    matrixClient.updateMarkdownMessage(responseRoomId, eventId,
+                    matrixClient.updateMarkdownMessage(responseRoomId, batchEventId,
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model));
+                }
+                // Success - flush any batched status immediately
+                if (batching && batchStatus.length() > 0) {
+                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), true);
+                    batchStatus.setLength(0);
                 }
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                matrixClient.updateNoticeMessage(responseRoomId, eventId,
-                        errorPrefix + provider.noticeName + " failed: " + errorMsg);
+                
+                String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
+                
+                // Batch failures for grouped updates
+                if (batching) {
+                    if (batchStatus.length() > 0) {
+                        batchStatus.append("\n");
+                    }
+                    batchStatus.append(failureLine);
+                    
+                    // Flush batch if: last attempt, or enough time passed, or enough failures
+                    Instant now = Instant.now();
+                    if (i == attempts.size() - 1 || 
+                        (lastUpdateTime != null && Duration.between(lastUpdateTime, now).toMillis() >= STATUS_UPDATE_INTERVAL_MS) ||
+                        batchStatus.length() >= 500) { // Reasonable max length
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        batchStatus.setLength(0);
+                        lastUpdateTime = now;
+                    }
+                } else {
+                    // Non-batching mode: update immediately
+                    if (batchEventId != null) {
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId,
+                                errorPrefix + failureLine);
+                    }
+                }
+                
                 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 // Otherwise only fallback in AUTO mode and if not the last attempt
                 if ((preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) || i == attempts.size() - 1) {
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
-                            preferredBackend, forcedModel, timeoutSeconds, eventId,
+                            preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
+                    // Flush any remaining batched status on final error
+                    if (batching && batchStatus.length() > 0) {
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        batchStatus.setLength(0);
+                    }
                     return;
                 }
             }
         }
 
+    }
+
+    private void sendBatchedUpdate(MatrixClient matrixClient, String roomId, String eventId, String status, boolean success) {
+        if (eventId == null || eventId.isEmpty()) return;
+        if (success) {
+            // On success, we already updated with the answer, just ensure batch is cleared
+            return;
+        }
+        matrixClient.updateNoticeMessage(roomId, eventId, status);
     }
 
     private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
