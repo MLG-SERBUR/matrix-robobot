@@ -109,7 +109,7 @@ public class MatrixRobobot {
 
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, aiService,
-                timezoneService, historyManager, client, mapper, url, config.accessToken);
+                timezoneService, historyManager, client, mapper, url, config.accessToken, config.commandRoomId);
         
         // NEW: PleadService for 🥺 reactions
         PleadService pleadService = new PleadService(matrixClient);

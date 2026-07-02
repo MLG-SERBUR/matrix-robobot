@@ -38,7 +38,7 @@ fi
 
 # 3. Build the project
 echo -e "${BLUE}Building project with Maven...${NC}"
-mvn clean package -DskipTests
+mvn clean package
 
 JAR_FILE="target/matrix-robobot-1.0.0.jar"
 if [ ! -f "$JAR_FILE" ]; then
@@ -66,7 +66,7 @@ WorkingDirectory=$WORK_DIR
 # Build a new jar every time the service starts
 # Try to pull latest changes first (ignoring failure if offline)
 # ExecStartPre=-$GIT_BIN pull
-# ExecStartPre=$MVN_BIN clean package -DskipTests
+# ExecStartPre=$MVN_BIN clean package
 ExecStart=$JAVA_BIN -jar $WORK_DIR/$JAR_FILE
 Restart=always
 RestartSec=10

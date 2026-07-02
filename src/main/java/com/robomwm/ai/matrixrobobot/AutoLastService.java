@@ -39,6 +39,7 @@ public class AutoLastService {
     private final ObjectMapper mapper;
     private final String homeserver;
     private final String accessToken;
+    private final String commandRoomId;
     private final Path persistenceFile;
     private final Path summaryPersistenceFile;
     private final Path topicListPersistenceFile;
@@ -48,7 +49,7 @@ public class AutoLastService {
 
     public AutoLastService(MatrixClient matrixClient, LastMessageService lastMessageService,
             AIService aiService, TimezoneService timezoneService, RoomHistoryManager historyManager,
-            HttpClient httpClient, ObjectMapper mapper, String homeserver, String accessToken) {
+            HttpClient httpClient, ObjectMapper mapper, String homeserver, String accessToken, String commandRoomId) {
         this.matrixClient = matrixClient;
         this.lastMessageService = lastMessageService;
         this.aiService = aiService;
@@ -58,6 +59,7 @@ public class AutoLastService {
         this.mapper = mapper;
         this.homeserver = homeserver;
         this.accessToken = accessToken;
+        this.commandRoomId = commandRoomId;
         this.persistenceFile = Paths.get("autolast_enabled_users.json");
         this.summaryPersistenceFile = Paths.get("autotldr_enabled_users.json");
         this.topicListPersistenceFile = Paths.get("autotopiclist_enabled_users.json");
@@ -255,7 +257,7 @@ public class AutoLastService {
 
     private void triggerLastMessage(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo, String roomId) {
         boolean isPublic = userLastPublicPref.getOrDefault(userId, false);
-        String targetRoomId = isPublic ? roomId : findDirectMessageRoom(userId);
+        String targetRoomId = isPublic ? commandRoomId : findDirectMessageRoom(userId);
         
         if (targetRoomId != null) {
             System.out.println("Triggering Auto-Last for " + userId + " (public: " + isPublic + ")");
@@ -267,9 +269,9 @@ public class AutoLastService {
         }
     }
 
-     private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo, String roomId) {
-         boolean isPublic = userTldrPublicPref.getOrDefault(userId, false);
-         String targetRoomId = isPublic ? roomId : findDirectMessageRoom(userId);
+private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo, String roomId) {
+        boolean isPublic = userTldrPublicPref.getOrDefault(userId, false);
+        String targetRoomId = isPublic ? commandRoomId : findDirectMessageRoom(userId);
          
          if (targetRoomId != null) {
              System.out.println("Triggering Auto-TLDR for " + userId + " (public: " + isPublic + ")");
@@ -299,7 +301,7 @@ public class AutoLastService {
 
     private void triggerTopicList(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo, String roomId) {
         boolean isPublic = userTopicListPublicPref.getOrDefault(userId, false);
-        String targetRoomId = isPublic ? roomId : findDirectMessageRoom(userId);
+        String targetRoomId = isPublic ? commandRoomId : findDirectMessageRoom(userId);
         
         if (targetRoomId != null) {
             System.out.println("Triggering Auto-TopicList for " + userId + " (public: " + isPublic + ")");
