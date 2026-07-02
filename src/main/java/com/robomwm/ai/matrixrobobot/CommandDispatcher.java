@@ -109,6 +109,10 @@ public class CommandDispatcher {
             handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummary",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
+        } else if (trimmed.matches("!topiclist(?:\\s+.*)?")) {
+            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!topiclist",
+                    AIService.Backend.AUTO, AIService.Prompts.TOPICLIST_PREFIX);
+            return true;
         } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
             handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO);
             return true;
@@ -876,6 +880,7 @@ public class CommandDispatcher {
                         "* `!overview <link or count or duration> [question]` - Detailed overview (No chunking)\n" +
                         "* `!ioverview <link or count or duration> [question]` - Detailed overview with images (Vision ArliAI)\n" +
                         "* `!tldr <link or count or duration> [question]` - Quick 15s summary\n" +
+                        "* `!topiclist <link or count or duration> [question]` - List discussion topics with message counts\n" +
                         "* `!debugai <link or count or duration> [question]` - Query AI backend with a custom prompt via question or chat logs\n" +
                         "* `!arliai <model> <prompt>` - Query ArliAI with specific model (fuzzy matched)\n" +
                         "* `!debugarliai <model> [params...] <prompt>` - Query ArliAI with custom API parameters\n" +
