@@ -447,8 +447,9 @@ public class AIService {
             boolean isAsk, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
         HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, true, timeoutSeconds);
-        return streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, provider.displayName, abortFlag,
-                footer);
+        return AIRequestQueue.run(provider.displayName + " (" + model + ") streaming",
+                () -> streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, provider.displayName,
+                        abortFlag, footer));
     }
 
     private String callStreamingToEvent(ProviderConfig provider, String prompt, String model, boolean skipSystem,
@@ -456,8 +457,9 @@ public class AIService {
             java.util.concurrent.atomic.AtomicBoolean abortFlag, boolean useNotice, String exportRoomId,
             String firstEventId) throws Exception {
         HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, true, timeoutSeconds);
-        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, provider.displayName, abortFlag,
-                footer, useNotice, exportRoomId, firstEventId);
+        return AIRequestQueue.run(provider.displayName + " (" + model + ") streaming",
+                () -> streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, provider.displayName,
+                        abortFlag, footer, useNotice, exportRoomId, firstEventId));
     }
 
 
@@ -727,6 +729,12 @@ public class AIService {
     }
 
     private String callNonStreaming(ProviderConfig provider, String prompt, String model, boolean skipSystem,
+            boolean isAsk, int timeoutSeconds) throws Exception {
+        return AIRequestQueue.run(provider.displayName + " (" + model + ")",
+                () -> callNonStreamingUnqueued(provider, prompt, model, skipSystem, isAsk, timeoutSeconds));
+    }
+
+    private String callNonStreamingUnqueued(ProviderConfig provider, String prompt, String model, boolean skipSystem,
             boolean isAsk, int timeoutSeconds) throws Exception {
         HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, false, timeoutSeconds);
 

@@ -32,6 +32,10 @@ public class OllamaVisionAIService extends VisionAIService {
 
     @Override
     protected String describeImage(String mxcUrl) throws Exception {
+        return AIRequestQueue.run("Ollama vision image description", () -> describeImageUnqueued(mxcUrl));
+    }
+
+    private String describeImageUnqueued(String mxcUrl) throws Exception {
         // Fetch and encode single image
         System.out.println("Fetching image from Matrix for Ollama: " + mxcUrl);
         List<String> encoded = imageFetcher.fetchAndEncodeImages(List.of(mxcUrl));

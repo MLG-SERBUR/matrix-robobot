@@ -163,6 +163,10 @@ public class VisionAIService extends AIService {
      * Throws Exception on fatal API errors (403, rate limit, etc.) to abort the entire operation.
      */
     protected String describeImage(String mxcUrl) throws Exception {
+        return AIRequestQueue.run("ArliAI vision image description", () -> describeImageUnqueued(mxcUrl));
+    }
+
+    private String describeImageUnqueued(String mxcUrl) throws Exception {
         // Fetch and encode single image
         System.out.println("Fetching image from Matrix: " + mxcUrl);
         List<String> encoded = imageFetcher.fetchAndEncodeImages(List.of(mxcUrl));

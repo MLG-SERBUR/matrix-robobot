@@ -377,6 +377,17 @@ public class DebugAIService {
                                   List<Map<String, String>> messages, DebugConfig config,
                                   AtomicBoolean abortFlag, String statusEventId,
                                   String prevBatch, RoomHistoryManager historyManager) throws Exception {
+        AIRequestQueue.run("ArliAI debug query", () -> {
+            callArliAIDebugUnqueued(responseRoomId, exportRoomId, model, messages, config, abortFlag,
+                    statusEventId, prevBatch, historyManager);
+            return null;
+        });
+    }
+
+    private void callArliAIDebugUnqueued(String responseRoomId, String exportRoomId, String model,
+                                         List<Map<String, String>> messages, DebugConfig config,
+                                         AtomicBoolean abortFlag, String statusEventId,
+                                         String prevBatch, RoomHistoryManager historyManager) throws Exception {
         String arliApiUrl = "https://api.arliai.com";
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             throw new Exception("ARLI_API_KEY is not configured.");

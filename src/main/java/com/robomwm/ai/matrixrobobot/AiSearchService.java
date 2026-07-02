@@ -429,6 +429,15 @@ public class AiSearchService {
      * Returns null on rate limit or error.
      */
     private String queryArliAI(String userPrompt, AtomicBoolean abortFlag) {
+        try {
+            return AIRequestQueue.run("ArliAI search", () -> queryArliAIUnqueued(userPrompt, abortFlag));
+        } catch (Exception e) {
+            System.err.println("ArliAI search error: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private String queryArliAIUnqueued(String userPrompt, AtomicBoolean abortFlag) {
         if (arliApiKey == null || arliApiKey.isEmpty()) {
             System.err.println("ARLI_API_KEY is not configured.");
             return null;
