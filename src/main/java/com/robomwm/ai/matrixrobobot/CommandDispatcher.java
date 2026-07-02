@@ -900,6 +900,7 @@ public class CommandDispatcher {
                         "* `!lastsummary [question]` - Summarize all unread messages (uses saved TZ)\n" +
                         "* `!autolast [public]` - Toggle automatic last message notification (DM by default, use 'public' to send to channel)\n" +
                         "* `!autotldr [public]` - Toggle automatic AI TLDR notification (DM by default, use 'public' to send to channel)\n" +
+                        "* `!autotopiclist [public]` - Toggle automatic topic list notification (DM by default, use 'public' to send to channel)\n" +
                         "* `!abort` - Abort currently running operations\n\n" +
                         "Use `!help 1` for search commands, `!help 2` for AI commands";
                 break;
