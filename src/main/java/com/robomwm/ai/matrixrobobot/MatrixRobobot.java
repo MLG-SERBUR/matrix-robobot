@@ -223,14 +223,16 @@ public class MatrixRobobot {
                                         finalSender, responseRoomId)).start();
                             }
                             // NEW: !autolast command
-                            else if ("!autolast".equals(trimmed)) {
+                            else if (trimmed.startsWith("!autolast")) {
                                 System.out.println("Received !autolast command from " + sender);
-                                autoLastService.toggleAutoLast(sender, responseRoomId);
+                                boolean isPublic = trimmed.contains("public");
+                                autoLastService.toggleAutoLast(sender, responseRoomId, isPublic);
                             }
                             // NEW: !autotldr command
-                            else if ("!autotldr".equals(trimmed)) {
+                            else if (trimmed.startsWith("!autotldr")) {
                                 System.out.println("Received !autotldr command from " + sender);
-                                autoLastService.toggleAutoTldr(sender, responseRoomId);
+                                boolean isPublic = trimmed.contains("public");
+                                autoLastService.toggleAutoTldr(sender, responseRoomId, isPublic);
                             }
                             // NEW: !plead command
                             else if ("!plead".equals(trimmed)) {

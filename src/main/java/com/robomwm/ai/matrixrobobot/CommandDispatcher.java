@@ -898,8 +898,8 @@ public class CommandDispatcher {
                         "* `!ttsexport <count>` - Export messages with TTS-friendly formatting\n" +
                         "* `!ttsexport <duration>h` - Export messages from last specified hours with TTS-friendly formatting\n" +
                         "* `!lastsummary [question]` - Summarize all unread messages (uses saved TZ)\n" +
-                        "* `!autolast` - Toggle automatic DM of last message when reading export room\n" +
-                        "* `!autotldr` - Toggle automatic AI TLDR when reading export room\n" +
+                        "* `!autolast [public]` - Toggle automatic last message notification (DM by default, use 'public' to send to channel)\n" +
+                        "* `!autotldr [public]` - Toggle automatic AI TLDR notification (DM by default, use 'public' to send to channel)\n" +
                         "* `!abort` - Abort currently running operations\n\n" +
                         "Use `!help 1` for search commands, `!help 2` for AI commands";
                 break;
