@@ -66,7 +66,7 @@ public class AutoLastService {
         } else {
             enabledUsers.add(userId);
             matrixClient.sendText(roomId,
-                    "Auto-!last enabled. I will DM you your last message when you read the export room after being away.");
+                    "Auto-!last enabled. I will DM you your last message when you read the export room after being away for over an hour with over 75 unread messages.");
         }
         saveEnabledUsers();
     }
@@ -81,7 +81,7 @@ public class AutoLastService {
         } else {
             enabledTldrUsers.add(userId);
             matrixClient.sendText(roomId,
-                    "Auto-!autotldr enabled. I will DM you an AI TLDR when you read the export room after being away for over an hour with over 100 unread messages.");
+                    "Auto-!autotldr enabled. I will DM you an AI TLDR when you read the export room after being away for over an hour with over 75 unread messages.");
         }
         saveEnabledUsers();
     }
@@ -145,10 +145,10 @@ public class AutoLastService {
                 // 2. Handle Auto-Last
                 if (lastEnabled) {
                     long lastTrigger = lastTriggerTime.getOrDefault(userId, 0L);
-                    // Debounce (30 minutes)
-                    if (now - lastTrigger >= 1800000) {
+                    // Threshold: > 1 hour gap
+                    if (now - lastTrigger >= 3600000) {
                         int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
-                        if (unreadCount >= 50) {
+                        if (unreadCount >= 75) {
                             triggerLastMessage(roomId, userId, previousReadInfo);
                             lastTriggerTime.put(userId, now);
                         }
