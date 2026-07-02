@@ -89,3 +89,7 @@ image_description_cache.json
 .codex
 .kilo
 .antigravitycli
+autolast_public_preferences.json
+autotldr_public_preferences.json
+autotopiclist_public_preferences.json
+autotopiclist_enabled_users.json
