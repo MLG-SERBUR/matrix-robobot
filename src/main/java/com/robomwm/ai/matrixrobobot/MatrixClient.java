@@ -27,6 +27,7 @@ public class MatrixClient {
     private final String homeserverUrl;
     private final String accessToken;
     private final Map<String, String> displayNameCache = new ConcurrentHashMap<>();
+    private MatrixMessageQueue messageQueue;
 
     public MatrixClient(HttpClient httpClient, ObjectMapper mapper, String homeserverUrl, String accessToken) {
         this.httpClient = httpClient;
@@ -35,6 +36,18 @@ public class MatrixClient {
                 ? homeserverUrl.substring(0, homeserverUrl.length() - 1)
                 : homeserverUrl;
         this.accessToken = accessToken;
+        // Initialize message queue - will be lazily created on first use
+        this.messageQueue = null;
+    }
+    
+    /**
+     * Get or create the message queue for this client
+     */
+    private MatrixMessageQueue getMessageQueue() {
+        if (messageQueue == null) {
+            messageQueue = MatrixMessageQueue.getInstance(httpClient, mapper, homeserverUrl, accessToken);
+        }
+        return messageQueue;
     }
 
     /**
@@ -92,42 +105,19 @@ public class MatrixClient {
     }
 
     private String sendMessageWithEventId(String roomId, String message, boolean useMarkdown, String msgType) {
-        try {
-            String txnId = "m" + Instant.now().toEpochMilli();
-            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
-                    + txnId;
-
-            String sanitizedMessage = sanitizeUserIds(message);
-
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("msgtype", msgType);
-            payload.put("body", sanitizedMessage);
+        // Use the message queue for all sends
+        if ("m.notice".equals(msgType)) {
             if (useMarkdown) {
-                payload.put("format", "org.matrix.custom.html");
-                payload.put("formatted_body", convertMarkdownToHtml(sanitizedMessage));
+                return getMessageQueue().sendMarkdownNoticeWithEventId(roomId, message);
+            } else {
+                return getMessageQueue().sendNoticeWithEventId(roomId, message);
             }
-            payload.put("m.mentions", Map.of());
-            String json = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(120))
-                    .PUT(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 200) {
-                JsonNode root = mapper.readTree(response.body());
-                return root.path("event_id").asText(null);
+        } else {
+            if (useMarkdown) {
+                return getMessageQueue().sendMarkdownWithEventId(roomId, message);
+            } else {
+                return getMessageQueue().sendTextWithEventId(roomId, message);
             }
-            System.out.println("Sent message to " + roomId + " -> " + response.statusCode());
-            return null;
-        } catch (Exception e) {
-            System.out.println("Failed to send message: " + e.getMessage());
-            return null;
         }
     }
 
@@ -151,58 +141,20 @@ public class MatrixClient {
     }
 
     private String updateMessage(String roomId, String originalEventId, String message, boolean useMarkdown, String msgType) {
-        try {
-            String txnId = "m" + Instant.now().toEpochMilli();
-            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
-            String endpoint = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/send/m.room.message/"
-                    + txnId;
-
-            String sanitizedMessage = sanitizeUserIds(message);
-
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("msgtype", msgType);
-            payload.put("body", "* " + sanitizedMessage);
-            payload.put("m.mentions", Map.of());
-
-            Map<String, Object> newContent = new HashMap<>();
-            newContent.put("msgtype", msgType);
-            newContent.put("body", sanitizedMessage);
-            newContent.put("m.mentions", Map.of());
-            
+        // Use the message queue for all updates
+        if ("m.notice".equals(msgType)) {
             if (useMarkdown) {
-                String htmlBody = convertMarkdownToHtml(sanitizedMessage);
-                newContent.put("format", "org.matrix.custom.html");
-                newContent.put("formatted_body", htmlBody);
+                return getMessageQueue().updateMarkdownNoticeMessage(roomId, originalEventId, message);
+            } else {
+                return getMessageQueue().updateNoticeMessage(roomId, originalEventId, message);
             }
-            
-            payload.put("m.new_content", newContent);
-
-            Map<String, Object> relatesTo = new HashMap<>();
-            relatesTo.put("event_id", originalEventId);
-            relatesTo.put("rel_type", "m.replace");
-            payload.put("m.relates_to", relatesTo);
-
-            String json = mapper.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(120))
-                    .PUT(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            System.out.println("Updated message " + originalEventId + " -> " + response.statusCode());
-
-            if (response.statusCode() == 200) {
-                JsonNode root = mapper.readTree(response.body());
-                return root.path("event_id").asText(null);
+        } else {
+            if (useMarkdown) {
+                return getMessageQueue().updateMarkdownMessage(roomId, originalEventId, message);
+            } else {
+                return getMessageQueue().updateTextMessage(roomId, originalEventId, message);
             }
-        } catch (Exception e) {
-            System.out.println("Failed to update message: " + e.getMessage());
         }
-        return null;
     }
 
     /**

@@ -182,7 +182,7 @@ public class AIService {
 
         } catch (Exception e) {
             e.printStackTrace();
-            matrixClient.sendMarkdown(responseRoomId, "Error querying AI: " + e.getMessage());
+            matrixClient.sendMarkdownNotice(responseRoomId, "Error querying AI: " + e.getMessage());
         }
     }
 
@@ -668,7 +668,7 @@ public class AIService {
 
         } catch (Exception e) {
             e.printStackTrace();
-            matrixClient.sendMarkdown(responseRoomId, "Error summarizing unread messages: " + e.getMessage());
+            matrixClient.sendMarkdownNotice(responseRoomId, "Error summarizing unread messages: " + e.getMessage());
         }
     }
 
@@ -720,7 +720,7 @@ public class AIService {
 
         } catch (Exception e) {
             e.printStackTrace();
-            matrixClient.sendMarkdown(responseRoomId, "Error querying AI: " + e.getMessage());
+            matrixClient.sendMarkdownNotice(responseRoomId, "Error querying AI: " + e.getMessage());
         }
     }
 
