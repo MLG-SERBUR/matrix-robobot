@@ -53,22 +53,33 @@ public class RoomHistoryManager {
         public List<String> imageUrls;
         public List<String> imageCaptions;
         public List<String> imageEventIds;
+        public boolean antispamApplied = false;
 
         public ChatLogsResult(List<String> logs, String firstEventId) {
-            this(logs, firstEventId, null, null, null, null, null);
+            this(logs, firstEventId, null, null, null, null, null, false);
         }
 
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage) {
-            this(logs, firstEventId, errorMessage, null, null, null, null);
+            this(logs, firstEventId, errorMessage, null, null, null, null, false);
         }
 
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage, List<String> eventIds) {
-            this(logs, firstEventId, errorMessage, null, null, null, eventIds);
+            this(logs, firstEventId, errorMessage, null, null, null, eventIds, false);
         }
 
         public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage,
                             List<String> imageUrls, List<String> imageCaptions, List<String> imageEventIds,
                             List<String> eventIds) {
+            this(logs, firstEventId, errorMessage, imageUrls, imageCaptions, imageEventIds, eventIds, false);
+        }
+
+        public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage, boolean antispamApplied) {
+            this(logs, firstEventId, errorMessage, null, null, null, null, antispamApplied);
+        }
+
+        public ChatLogsResult(List<String> logs, String firstEventId, String errorMessage,
+                            List<String> imageUrls, List<String> imageCaptions, List<String> imageEventIds,
+                            List<String> eventIds, boolean antispamApplied) {
             this.logs = logs;
             this.firstEventId = firstEventId;
             this.errorMessage = errorMessage;
@@ -76,6 +87,7 @@ public class RoomHistoryManager {
             this.imageUrls = imageUrls;
             this.imageCaptions = imageCaptions;
             this.imageEventIds = imageEventIds;
+            this.antispamApplied = antispamApplied;
         }
     }
 

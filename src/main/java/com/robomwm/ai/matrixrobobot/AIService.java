@@ -253,6 +253,10 @@ public class AIService {
         StringBuilder accumulatedStatus = new StringBuilder();
         Instant lastUpdateTime = null;
         boolean batching = attempts.size() > 1; // Only batch if multiple attempts possible
+        
+        // Track context exceeded errors for antispam retry logic
+        List<String> contextExceededErrors = new ArrayList<>();
+        List<String> otherErrors = new ArrayList<>();
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -297,6 +301,13 @@ public class AIService {
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
                 
+                // Track error types for antispam retry logic
+                if (AntispamFilter.isContextExceededError(errorMsg)) {
+                    contextExceededErrors.add(provider.displayName + " (" + attempt.model + ")");
+                } else {
+                    otherErrors.add(provider.displayName + " (" + attempt.model + ")");
+                }
+                
                 // Batch failures for grouped updates
                 if (batching) {
                     batchStatus.setLength(0);
@@ -320,7 +331,151 @@ public class AIService {
                 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 // Otherwise only fallback in AUTO mode and if not the last attempt
                 if ((preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) || i == attempts.size() - 1) {
+                    // Check if all failures were due to context exceeded and we haven't tried antispam yet
+                    // Also handle OpenRouter: if all other providers failed due to context exceeded and OpenRouter failed too,
+                    // treat it as context exceeded since OpenRouter doesn't have explicit context exceeded detection
+                    boolean allContextExceeded = !contextExceededErrors.isEmpty() && otherErrors.isEmpty();
+                    boolean openrouterAndOthersContextExceeded = !contextExceededErrors.isEmpty() && 
+                            otherErrors.size() == 1 && 
+                            provider.backend == Backend.OPENROUTER &&
+                            contextExceededErrors.size() == attempts.size() - 1;
+                    
+                    if (i == attempts.size() - 1 && (allContextExceeded || openrouterAndOthersContextExceeded) && 
+                        !history.antispamApplied) {
+                        // All providers failed due to context exceeded, try with antispam filtering
+                        System.out.println("All providers failed due to context exceeded, retrying with antispam filtering...");
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, 
+                                "All providers failed due to context exceeded. Applying antispam filtering and retrying...");
+                        
+                        // Create filtered history with antispam applied
+                        RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
+                                AntispamFilter.applyAllFilters(history.logs), history.firstEventId, history.errorMessage, true);
+                        
+                        // Retry with antispam filtering
+                        performAIQueryWithAntispam(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, 
+                                                abortFlag, preferredBackend, forcedModel, timeoutSeconds, batchEventId, footer);
+                        return;
+                    }
+                    
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
+                            preferredBackend, forcedModel, timeoutSeconds, batchEventId,
+                            errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
+                    // Flush any remaining batched status on final error
+                    if (batching && batchStatus.length() > 0) {
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        batchStatus.setLength(0);
+                    }
+                    return;
+                }
+            }
+        }
+
+    }
+
+    private void performAIQueryWithAntispam(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
+                                        String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+                                        Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, 
+                                        String footer) {
+        if (abortFlag != null && abortFlag.get()) return;
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+
+        boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
+        boolean isAsk = Prompts.ASK_PREFIX.equals(promptPrefix);
+        
+        // Apply antispam filtering to logs
+        List<String> filteredLogs = AntispamFilter.applyAllFilters(history.logs);
+        RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
+                filteredLogs, history.firstEventId, history.errorMessage, true);
+        
+        String prompt = buildPrompt(question, filteredLogs, promptPrefix);
+        List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
+
+        // Track batched status updates to reduce Matrix message spam
+        String batchEventId = null;
+        StringBuilder batchStatus = new StringBuilder();
+        StringBuilder accumulatedStatus = new StringBuilder();
+        Instant lastUpdateTime = null;
+        boolean batching = attempts.size() > 1; // Only batch if multiple attempts possible
+
+        for (int i = 0; i < attempts.size(); i++) {
+            if (abortFlag != null && abortFlag.get()) return;
+
+            ProviderAttempt attempt = attempts.get(i);
+            ProviderConfig provider = attempt.provider;
+            
+            try {
+                // For first attempt or non-batching mode, send immediate status
+                if (i == 0 || !batching) {
+                    String initialStatus = "Querying " + provider.noticeName + " (" + attempt.model + ")... (with antispam filtering)";
+                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, initialStatus);
+                    lastUpdateTime = Instant.now();
+                    batchStatus.setLength(0);
+                    accumulatedStatus.setLength(0);
+                    accumulatedStatus.append(initialStatus);
+                }
+                
+                if (provider.stream) {
+                    callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
+                            new String[]{batchEventId != null ? batchEventId : ""}, footer, timeoutSeconds, abortFlag, true, exportRoomId,
+                            filteredHistory.firstEventId);
+                } else {
+                    String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    matrixClient.updateMarkdownMessage(responseRoomId, batchEventId,
+                            appendMessageLink(answer, exportRoomId, filteredHistory.firstEventId, provider.displayName,
+                                    attempt.model));
+                }
+                // Success - flush any batched status immediately
+                if (batching && batchStatus.length() > 0) {
+                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), true);
+                    batchStatus.setLength(0);
+                }
+                return;
+            } catch (Exception e) {
+                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                String errorPrefix = (footer != null ? footer + ": " : "");
+                System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
+                
+                String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
+                String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
+                accumulatedStatus.setLength(0);
+                accumulatedStatus.append(statusUpdate);
+                
+                // Batch failures for grouped updates
+                if (batching) {
+                    batchStatus.setLength(0);
+                    batchStatus.append(statusUpdate);
+                    
+                    // Flush batch if: last attempt, or enough time passed, or enough failures
+                    Instant now = Instant.now();
+                    if (i == attempts.size() - 1 || 
+                        (lastUpdateTime != null && Duration.between(lastUpdateTime, now).toMillis() >= STATUS_UPDATE_INTERVAL_MS) ||
+                        batchStatus.length() >= 500) { // Reasonable max length
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        lastUpdateTime = now;
+                    }
+                } else {
+                    // Non-batching mode: update immediately
+                    if (batchEventId != null) {
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, statusUpdate);
+                    }
+                }
+                
+                // For antispam retry, if any provider fails, we consider it final since we already applied filtering
+                if (i == attempts.size() - 1) {
+                    handleFinalError(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, abortFlag,
+                            preferredBackend, forcedModel, timeoutSeconds, batchEventId,
+                            errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
+                    // Flush any remaining batched status on final error
+                    if (batching && batchStatus.length() > 0) {
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        batchStatus.setLength(0);
+                    }
+                    return;
+                }
+                
+                // Always allow fallback for OLLAMA_PROXY since it's not 24/7
+                if (preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) {
+                    handleFinalError(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, abortFlag,
                             preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     // Flush any remaining batched status on final error
