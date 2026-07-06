@@ -66,6 +66,43 @@ public class AIService {
         this.random = new Random();
     }
 
+    // Cache for OpenRouter ZDR endpoint names (simple in-memory cache)
+    private volatile java.util.Set<String> openrouterZdrSet = null;
+    private volatile long openrouterZdrFetchedAt = 0L; // epoch ms
+    private static final long OPENROUTER_ZDR_TTL_MS = 86400 * 60 * 1000; // 1 day
+
+    private java.util.Set<String> getOpenrouterZdrSet() throws Exception {
+        long now = System.currentTimeMillis();
+        if (openrouterZdrSet != null && (now - openrouterZdrFetchedAt) < OPENROUTER_ZDR_TTL_MS) {
+            return openrouterZdrSet;
+        }
+        if (openrouterApiKey == null || openrouterApiKey.isEmpty()) {
+            throw new Exception("OPENROUTER_API_KEY not configured");
+        }
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create("https://openrouter.ai/api/v1/endpoints/zdr"))
+                .header("Authorization", "Bearer " + openrouterApiKey)
+                .timeout(Duration.ofSeconds(20))
+                .GET()
+                .build();
+        HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) {
+            throw new Exception("OpenRouter ZDR fetch failed. Status: " + resp.statusCode() + ", Body: " + resp.body());
+        }
+        JsonNode root = mapper.readTree(resp.body());
+        java.util.Set<String> names = new java.util.HashSet<>();
+        JsonNode data = root.path("data");
+        if (data.isArray()) {
+            for (JsonNode n : data) {
+                String name = n.path("name").asText(null);
+                if (name != null) names.add(name);
+            }
+        }
+        openrouterZdrSet = names;
+        openrouterZdrFetchedAt = now;
+        return openrouterZdrSet;
+    }
+
     public enum Backend {
         AUTO, ARLIAI, OLLAMA_PROXY, FREELLM, CEREBRAS, GROQ, OPENROUTER
     }
@@ -346,7 +383,10 @@ public class AIService {
             } else if (backend == Backend.ARLIAI) {
                 attempts.add(new ProviderAttempt(provider, getRandomModel(arliModels)));
             } else if (backend == Backend.OPENROUTER) {
-                attempts.add(new ProviderAttempt(provider, openrouterModels.get(0)));
+                // For OpenRouter, prefer sending full models array so OpenRouter can use native fallback.
+                // Use a joined string for display, actual request will use models list.
+                String displayModel = String.join(",", openrouterModels);
+                attempts.add(new ProviderAttempt(provider, displayModel));
             } else if (backend == Backend.FREELLM) {
                 for (String model : freeLlmModels) {
                     attempts.add(new ProviderAttempt(provider, model));
@@ -783,10 +823,34 @@ public class AIService {
         }
 
         Map<String, Object> payload = new HashMap<>();
-        payload.put("model", model);
-        payload.put("messages", buildMessages(prompt, skipSystem, isAsk));
-        payload.put("stream", stream);
-        payload.putAll(provider.extraPayload);
+        // For OpenRouter: send native fallback models array and request ZDR enforcement
+        if (provider.backend == Backend.OPENROUTER) {
+            java.util.List<String> modelsToSend = new ArrayList<>();
+            try {
+                java.util.Set<String> zdr = getOpenrouterZdrSet();
+                for (String m : openrouterModels) {
+                    if (m.contains(":free")) {
+                        if (zdr != null && zdr.contains(m)) modelsToSend.add(m);
+                    } else {
+                        modelsToSend.add(m);
+                    }
+                }
+            } catch (Exception e) {
+                // On failure to fetch ZDR list, fall back to configured models
+                modelsToSend = new ArrayList<>(openrouterModels);
+            }
+            if (modelsToSend.isEmpty()) modelsToSend = new ArrayList<>(openrouterModels);
+            payload.put("models", modelsToSend);
+            payload.put("messages", buildMessages(prompt, skipSystem, isAsk));
+            payload.put("stream", stream);
+            payload.putAll(provider.extraPayload);
+            payload.put("provider", Map.of("zdr", true));
+        } else {
+            payload.put("model", model);
+            payload.put("messages", buildMessages(prompt, skipSystem, isAsk));
+            payload.put("stream", stream);
+            payload.putAll(provider.extraPayload);
+        }
         if (provider.backend == Backend.ARLIAI) {
             applyArliAiNonThinkingDefaults(payload);
         }
