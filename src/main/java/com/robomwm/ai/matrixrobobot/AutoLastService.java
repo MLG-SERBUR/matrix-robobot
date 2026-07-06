@@ -212,9 +212,8 @@ public class AutoLastService {
 
                 // 2. Handle Auto-Last
                 if (lastEnabled) {
-                    long lastTrigger = lastTriggerTime.getOrDefault(userId, 0L);
-                    // Threshold: > 1 hour gap
-                    if (now - lastTrigger >= 3600000) {
+                    // Threshold: user was away for > 1 hour gap
+                    if (ts - previousReadInfo.timestamp >= 3600000) {
                         int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
                         if (unreadCount >= 75) {
                             triggerLastMessage(exportRoomId, userId, previousReadInfo, roomId);
@@ -225,9 +224,8 @@ public class AutoLastService {
 
                 // 3. Handle Auto-TLDR
                 if (tldrEnabled) {
-                    long lastTldrTrigger = lastTldrTriggerTime.getOrDefault(userId, 0L);
-                    // Threshold: > 1 hour gap
-                    if (now - lastTldrTrigger >= 3600000) {
+                    // Threshold: user was away for > 1 hour gap
+                    if (ts - previousReadInfo.timestamp >= 3600000) {
                         int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
                         if (unreadCount >= 75) {
                             triggerTldr(exportRoomId, userId, previousReadInfo, roomId);
@@ -238,9 +236,8 @@ public class AutoLastService {
 
                 // 4. Handle Auto-TopicList
                 if (topicListEnabled) {
-                    long lastTopicListTrigger = lastTopicListTriggerTime.getOrDefault(userId, 0L);
-                    // Threshold: > 1 hour gap
-                    if (now - lastTopicListTrigger >= 3600000) {
+                    // Threshold: user was away for > 1 hour gap
+                    if (ts - previousReadInfo.timestamp >= 3600000) {
                         int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
                         if (unreadCount >= 75) {
                             triggerTopicList(exportRoomId, userId, previousReadInfo, roomId);
