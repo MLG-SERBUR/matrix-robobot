@@ -213,6 +213,7 @@ public class AIService {
         // Track batched status updates to reduce Matrix message spam
         String batchEventId = null;
         StringBuilder batchStatus = new StringBuilder();
+        StringBuilder accumulatedStatus = new StringBuilder();
         Instant lastUpdateTime = null;
         boolean batching = attempts.size() > 1; // Only batch if multiple attempts possible
 
@@ -225,10 +226,12 @@ public class AIService {
             try {
                 // For first attempt or non-batching mode, send immediate status
                 if (i == 0 || !batching) {
-                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId,
-                            "Querying " + provider.noticeName + " (" + attempt.model + ")...");
+                    String initialStatus = "Querying " + provider.noticeName + " (" + attempt.model + ")...";
+                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, initialStatus);
                     lastUpdateTime = Instant.now();
                     batchStatus.setLength(0);
+                    accumulatedStatus.setLength(0);
+                    accumulatedStatus.append(initialStatus);
                 }
                 
                 if (provider.stream) {
@@ -253,13 +256,14 @@ public class AIService {
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                 
                 String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
+                String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
+                accumulatedStatus.setLength(0);
+                accumulatedStatus.append(statusUpdate);
                 
                 // Batch failures for grouped updates
                 if (batching) {
-                    if (batchStatus.length() > 0) {
-                        batchStatus.append("\n");
-                    }
-                    batchStatus.append(failureLine);
+                    batchStatus.setLength(0);
+                    batchStatus.append(statusUpdate);
                     
                     // Flush batch if: last attempt, or enough time passed, or enough failures
                     Instant now = Instant.now();
@@ -267,14 +271,12 @@ public class AIService {
                         (lastUpdateTime != null && Duration.between(lastUpdateTime, now).toMillis() >= STATUS_UPDATE_INTERVAL_MS) ||
                         batchStatus.length() >= 500) { // Reasonable max length
                         sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
-                        batchStatus.setLength(0);
                         lastUpdateTime = now;
                     }
                 } else {
                     // Non-batching mode: update immediately
                     if (batchEventId != null) {
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId,
-                                errorPrefix + failureLine);
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, statusUpdate);
                     }
                 }
                 
@@ -294,6 +296,16 @@ public class AIService {
             }
         }
 
+    }
+
+    static String appendStatusLine(String existingStatus, String newLine) {
+        if (newLine == null || newLine.isBlank()) {
+            return existingStatus == null ? "" : existingStatus;
+        }
+        if (existingStatus == null || existingStatus.isBlank()) {
+            return newLine;
+        }
+        return existingStatus + "\n" + newLine;
     }
 
     private void sendBatchedUpdate(MatrixClient matrixClient, String roomId, String eventId, String status, boolean success) {
