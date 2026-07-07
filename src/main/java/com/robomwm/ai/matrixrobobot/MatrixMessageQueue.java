@@ -192,11 +192,7 @@ public class MatrixMessageQueue {
      * Sanitize user IDs in message content to prevent mentioning issues
      */
     private String sanitizeUserIds(String message) {
-        // This is a simplified version of MatrixClient.sanitizeUserIds
-        // For the full implementation, we'd need to duplicate that logic here
-        // or find a way to share it without circular dependencies
-        if (message == null) return "";
-        return message.replace("@", "\\u0040"); // Simple sanitization for now
+        return MatrixClient.sanitizeUserIdsStatic(message);
     }
     
     /**
