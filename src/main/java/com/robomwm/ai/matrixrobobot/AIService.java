@@ -253,10 +253,6 @@ public class AIService {
         StringBuilder accumulatedStatus = new StringBuilder();
         Instant lastUpdateTime = null;
         boolean batching = attempts.size() > 1; // Only batch if multiple attempts possible
-        
-        // Track context exceeded errors for antispam retry logic
-        List<String> contextExceededErrors = new ArrayList<>();
-        List<String> otherErrors = new ArrayList<>();
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -301,13 +297,6 @@ public class AIService {
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
                 
-                // Track error types for antispam retry logic
-                if (AntispamFilter.isContextExceededError(errorMsg)) {
-                    contextExceededErrors.add(provider.displayName + " (" + attempt.model + ")");
-                } else {
-                    otherErrors.add(provider.displayName + " (" + attempt.model + ")");
-                }
-                
                 // Batch failures for grouped updates
                 if (batching) {
                     batchStatus.setLength(0);
@@ -331,21 +320,11 @@ public class AIService {
                 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 // Otherwise only fallback in AUTO mode and if not the last attempt
                 if ((preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) || i == attempts.size() - 1) {
-                    // Check if all failures were due to context exceeded and we haven't tried antispam yet
-                    // Also handle OpenRouter: if all other providers failed due to context exceeded and OpenRouter failed too,
-                    // treat it as context exceeded since OpenRouter doesn't have explicit context exceeded detection
-                    boolean allContextExceeded = !contextExceededErrors.isEmpty() && otherErrors.isEmpty();
-                    boolean openrouterAndOthersContextExceeded = !contextExceededErrors.isEmpty() && 
-                            otherErrors.size() == 1 && 
-                            provider.backend == Backend.OPENROUTER &&
-                            contextExceededErrors.size() == attempts.size() - 1;
-                    
-                    if (i == attempts.size() - 1 && (allContextExceeded || openrouterAndOthersContextExceeded) && 
-                        !history.antispamApplied) {
-                        // All providers failed due to context exceeded, try with antispam filtering
-                        System.out.println("All providers failed due to context exceeded, retrying with antispam filtering...");
+                    if (i == attempts.size() - 1 && !history.antispamApplied) {
+                        // All providers failed, try with antispam filtering
+                        System.out.println("All providers failed, retrying with antispam filtering...");
                         matrixClient.updateNoticeMessage(responseRoomId, batchEventId, 
-                                "All providers failed due to context exceeded. Applying antispam filtering and retrying...");
+                                "All providers failed. Applying antispam filtering and retrying...");
                         
                         // Create filtered history with antispam applied
                         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
@@ -353,7 +332,7 @@ public class AIService {
                         
                         // Retry with antispam filtering
                         performAIQueryWithAntispam(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, 
-                                                abortFlag, preferredBackend, forcedModel, timeoutSeconds, batchEventId, footer);
+                                                    abortFlag, preferredBackend, forcedModel, timeoutSeconds, batchEventId, footer);
                         return;
                     }
                     
