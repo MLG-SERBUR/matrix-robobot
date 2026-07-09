@@ -50,8 +50,12 @@ Create a `config.json` file in the same directory as the JAR:
 All commands must be sent in the **command room** specified in your config:
 
 - `!testcommand` — Bot replies `Hello, world!` in the **command room**
-- `!export<N>h` — Export the last N hours of chat from the **export room** and post the file info in the **command room**
-  - Example: `!export12h` will write a file like `!exportRoom-...-last12h-<ts>.txt`
+- `!export <N>` — Export the last N messages from the **export room** and post the file info in the **command room**
+  - Example: `!export 100` will write a file like `!exportRoom-...-last100msgs-<ts>.txt`
+- `!export <N>h` — Export the last N hours of chat from the **export room** and post the file info in the **command room**
+  - Example: `!export 12h` will write a file like `!exportRoom-...-last12h-<ts>.txt`
+- `!export <link> [+|-<N>]` — Export from a message link with optional +/- count
+  - Example: `!export https://matrix.to/#/.../$eventId +50` will export 50 messages after the linked message
 - `!arliai <TZ> <N>h [question]` — Queries Arli AI with chat logs from the **export room** for the last N hours. Chat logs will use the specified timezone for timestamps.
   - Example: `!arliai PST 12h` — Analyzes last 12 hours of chat with PST timestamps
   - Example: `!arliai EST 6h What was the main topic of discussion?` — Analyzes last 6 hours with a specific question

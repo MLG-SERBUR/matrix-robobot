@@ -30,6 +30,118 @@ public class CommandDispatcher {
     private final AiSearchService aiSearchService;
     private final MatrixSearchService matrixSearchService;
 
+    /**
+     * Parsed command arguments for history-based commands.
+     * Contains hours, maxMessages, startEventId, forward flag, and remaining question/text.
+     */
+    private static class ParsedHistoryArgs {
+        public final int hours;
+        public final int maxMessages;
+        public final String startEventId;
+        public final boolean forward;
+        public final String remaining;
+
+        public ParsedHistoryArgs(int hours, int maxMessages, String startEventId, boolean forward, String remaining) {
+            this.hours = hours;
+            this.maxMessages = maxMessages;
+            this.startEventId = startEventId;
+            this.forward = forward;
+            this.remaining = remaining;
+        }
+    }
+
+    /**
+     * Parse history command arguments (count, duration, message link with +/- count).
+     * This is shared between !export and AI commands like !summary, !overview, etc.
+     *
+     * @param commandName The command name to strip (e.g., "!export", "!summary")
+     * @param trimmed The full command string
+     * @param defaultToTokenLimit If true, defaults to token limit mode when no valid args found
+     * @return ParsedHistoryArgs containing the parsed parameters
+     */
+    private ParsedHistoryArgs parseHistoryCommandArgs(String commandName, String trimmed, boolean defaultToTokenLimit) {
+        // Remove command name prefix (handle both !cmd and !cmd-ts for backward compatibility)
+        String args = trimmed.replaceFirst("^" + commandName + "(?:-ts)?\\s*", "").trim();
+
+        // Default values
+        int hours = -1;
+        int maxMessages = -1;
+        String startEventId = null;
+        boolean forward = false;
+        String remaining = "";
+
+        if (args.isEmpty()) {
+            return new ParsedHistoryArgs(hours, maxMessages, startEventId, forward, remaining);
+        }
+
+        // Parse Args
+        // Pattern 1: Matrix Link [Duration/Count] [Question]
+        // Pattern 2: Duration/Count [Question]
+
+        String[] parts = args.split("\\s+", 2);
+        String firstArg = parts.length > 0 ? parts[0] : "";
+        remaining = parts.length > 1 ? parts[1] : "";
+
+        // Check for Matrix link
+        // Examples: 
+        // https://matrix.to/#/!roomId:server/$eventId
+        // https://matrix.to/#/!roomId:server/$eventId?via=server
+        if (firstArg.contains("/$") || firstArg.contains("/e/")) {
+            String eventId = null;
+            if (firstArg.contains("/$")) {
+                int start = firstArg.indexOf("/$") + 1;
+                int end = firstArg.indexOf("?", start);
+                if (end == -1) end = firstArg.length();
+                eventId = firstArg.substring(start, end);
+            } else if (firstArg.contains("/e/")) {
+                int start = firstArg.indexOf("/e/") + 3;
+                int end = firstArg.indexOf("/", start);
+                if (end == -1) end = firstArg.length();
+                eventId = firstArg.substring(start, end);
+            }
+
+            if (eventId != null && eventId.startsWith("$")) {
+                startEventId = eventId;
+                
+                // Check if next arg is duration/limit
+                String[] subParts = remaining.split("\\s+", 2);
+                String possibleLimit = subParts.length > 0 ? subParts[0] : "";
+
+                if (possibleLimit.matches("[+-]?\\d+(h)?")) {
+                    if (possibleLimit.startsWith("+")) forward = true;
+                    String cleanLimit = possibleLimit.replace("+", "").replace("-", "");
+                    
+                    if (cleanLimit.endsWith("h")) {
+                        hours = Integer.parseInt(cleanLimit.replace("h", ""));
+                    } else {
+                        maxMessages = Integer.parseInt(cleanLimit);
+                    }
+                    remaining = subParts.length > 1 ? subParts[1].trim() : "";
+                } else if (!possibleLimit.isEmpty()) {
+                    // If there's a non-empty argument that doesn't match the pattern, default to count
+                    maxMessages = 100;
+                    remaining = remaining.trim();
+                }
+            }
+        } else if (firstArg.matches("[+-]?\\d+(h)?")) {
+            // Count/Duration mode
+            if (firstArg.startsWith("+")) forward = true;
+            String cleanArg = firstArg.replace("+", "").replace("-", "");
+
+            if (cleanArg.endsWith("h")) {
+                hours = Integer.parseInt(cleanArg.replace("h", ""));
+            } else {
+                maxMessages = Integer.parseInt(cleanArg);
+            }
+            remaining = remaining.trim();
+        } else if (defaultToTokenLimit) {
+            // For commands like !ask, treat the whole args as the question
+            remaining = args;
+        }
+
+        return new ParsedHistoryArgs(hours, maxMessages, startEventId, forward, remaining);
+    }
+
     private static final List<String> ARLIAI_MODELS = List.of(
             "Qwen3.5-27B-Anko",
             "Qwen3.5-27B-BlueStar-Derestricted",
@@ -76,7 +188,7 @@ public class CommandDispatcher {
         if ("!testcommand".equals(trimmed)) {
             matrixClient.sendText(responseRoomId, "Hello, world!");
             return true;
-        } else if (trimmed.matches("!export\\d+h")) {
+        } else if (trimmed.startsWith("!export ") || trimmed.matches("!export\\d+h") || trimmed.matches("!export\\d+")) {
             handleExport(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.startsWith("!timezone")) {
@@ -165,30 +277,101 @@ public class CommandDispatcher {
 
     private void handleExport(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
             String exportRoomId) {
-        int hours = Integer.parseInt(trimmed.replaceAll("\\D+", ""));
-        System.out.println("Received export command in " + roomId + " from " + sender + " (" + hours + "h)");
-        
+        // Use shared parser
+        ParsedHistoryArgs parsed = parseHistoryCommandArgs("!export", trimmed, false);
+
+        // If we have a startEventId but no count or hours, use default
+        int hours = parsed.hours;
+        int maxMessages = parsed.maxMessages;
+        String startEventId = parsed.startEventId;
+        boolean forward = parsed.forward;
+
+        if (startEventId != null && hours == -1 && maxMessages == -1) {
+            maxMessages = 100;
+        }
+
+        // If no count or hours specified and no link, show usage
+        if (hours == -1 && maxMessages == -1 && startEventId == null) {
+            matrixClient.sendMarkdown(responseRoomId, "Please specify a count, duration, or link. Usage: `!export <count>`, `!export <duration>h`, or `!export <link> [+|-<count>]`");
+            return;
+        }
+
+        System.out.println("Received export command in " + roomId + " from " + sender + 
+                " (hours=" + hours + ", maxMessages=" + maxMessages + ", startEventId=" + startEventId + ", forward=" + forward + ")");
+
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+
+        // Make copies for lambda
+        final int fHours = hours;
+        final int fMaxMessages = maxMessages;
+        final String fStartEventId = startEventId;
+        final boolean fForward = forward;
+        final String fExportRoomId = exportRoomId;
+        final String fPrevBatch = prevBatch;
+
         AtomicBoolean abortFlag = new AtomicBoolean(false);
         runningOperations.put(sender, abortFlag);
 
         new Thread(() -> {
             try {
                 long now = System.currentTimeMillis();
-                String safeRoom = exportRoomId.replaceAll("[^A-Za-z0-9._-]", "_");
-                String filename = safeRoom + "-last" + hours + "h-" + now + ".txt";
+                String safeRoom = fExportRoomId.replaceAll("[^A-Za-z0-9._-]", "_");
+                String filename;
+                String description;
 
-                matrixClient.sendMarkdown(responseRoomId,
-                        "Starting export of last " + hours + "h from " + exportRoomId + " to " + filename);
+                if (fStartEventId != null) {
+                    String direction = fForward ? "after" : "before";
+                    if (fHours > 0) {
+                        filename = safeRoom + "-" + fStartEventId + "-" + direction + fHours + "h-" + now + ".txt";
+                        description = "Starting export of " + fHours + "h " + direction + " " + fStartEventId + " from " + fExportRoomId + " to " + filename;
+                    } else {
+                        filename = safeRoom + "-" + fStartEventId + "-" + direction + fMaxMessages + "msgs-" + now + ".txt";
+                        description = "Starting export of " + fMaxMessages + " messages " + direction + " " + fStartEventId + " from " + fExportRoomId + " to " + filename;
+                    }
+                } else if (fHours > 0) {
+                    filename = safeRoom + "-last" + fHours + "h-" + now + ".txt";
+                    description = "Starting export of last " + fHours + "h from " + fExportRoomId + " to " + filename;
+                } else {
+                    filename = safeRoom + "-last" + fMaxMessages + "msgs-" + now + ".txt";
+                    description = "Starting export of last " + fMaxMessages + " messages from " + fExportRoomId + " to " + filename;
+                }
 
-                java.util.List<String> lines = historyManager.fetchRoomHistory(exportRoomId, hours, prevBatch, abortFlag);
+                matrixClient.sendMarkdown(responseRoomId, description);
+
+                java.util.List<String> lines;
+
+                if (fStartEventId != null) {
+                    // Use relative fetching for message links
+                    RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryRelative(
+                            fExportRoomId, fHours, fPrevBatch, fStartEventId, fForward, zoneId, fMaxMessages, abortFlag);
+                    lines = result.logs;
+                } else {
+                    // Use detailed fetching for count or duration
+                    RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(
+                            fExportRoomId, fHours, fPrevBatch, -1, -1, zoneId, fMaxMessages, abortFlag);
+                    lines = result.logs;
+                }
 
                 if (lines.isEmpty()) {
                     if (abortFlag.get()) {
                         System.out.println("Export aborted by user.");
                         return;
                     }
-                    matrixClient.sendMarkdown(responseRoomId,
-                            "No chat logs found for the last " + hours + "h to export from " + exportRoomId + ".");
+                    String notFoundMessage = "No chat logs found";
+                    if (fStartEventId != null) {
+                        String direction = fForward ? "after" : "before";
+                        if (fHours > 0) {
+                            notFoundMessage += " for " + fHours + "h " + direction + " " + fStartEventId;
+                        } else {
+                            notFoundMessage += " for " + fMaxMessages + " messages " + direction + " " + fStartEventId;
+                        }
+                    } else if (fHours > 0) {
+                        notFoundMessage += " for the last " + fHours + "h";
+                    } else {
+                        notFoundMessage += " for the last " + fMaxMessages + " messages";
+                    }
+                    notFoundMessage += " to export from " + fExportRoomId + ".";
+                    matrixClient.sendMarkdown(responseRoomId, notFoundMessage);
                     return;
                 }
 
@@ -246,83 +429,14 @@ public class CommandDispatcher {
             String prevBatch, String responseRoomId,
             String exportRoomId, String commandName, AIService.Backend backend, String promptPrefix) {
 
-        // Remove command name prefix (handle both !cmd and !cmd-ts for backward
-        // compatibility in regex)
-        String args = trimmed.replaceFirst("^" + commandName + "(?:-ts)?\\s*", "").trim();
-
-        // Default values
-        int hours = -1;
-        int maxMessages = -1;
-        String question = null;
-
         ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+        
+        // Use shared parser
+        ParsedHistoryArgs parsed = parseHistoryCommandArgs(commandName, trimmed, true);
 
-        // Parse Args
-        // Pattern 1: Matrix Link [Duration/Count] [Question]
-        // Pattern 2: Duration/Count [Question]
-
-        String[] parts = args.split("\\s+", 2);
-        String firstArg = parts.length > 0 ? parts[0] : "";
-        String remaining = parts.length > 1 ? parts[1] : "";
-
-        String startEventId = null;
-        boolean forward = false;
-
-        // Check for Matrix link
-        // Examples: 
-        // https://matrix.to/#/!roomId:server/$eventId
-        // https://matrix.to/#/!roomId:server/$eventId?via=server
-        if (firstArg.contains("/$") || firstArg.contains("/e/")) {
-            String eventId = null;
-            if (firstArg.contains("/$")) {
-                int start = firstArg.indexOf("/$") + 1;
-                int end = firstArg.indexOf("?", start);
-                if (end == -1) end = firstArg.length();
-                eventId = firstArg.substring(start, end);
-            } else if (firstArg.contains("/e/")) {
-                int start = firstArg.indexOf("/e/") + 3;
-                int end = firstArg.indexOf("/", start);
-                if (end == -1) end = firstArg.length();
-                eventId = firstArg.substring(start, end);
-            }
-
-            if (eventId != null && eventId.startsWith("$")) {
-                startEventId = eventId;
-                
-                // Check if next arg is duration/limit
-                String[] subParts = remaining.split("\\s+", 2);
-                String possibleLimit = subParts.length > 0 ? subParts[0] : "";
-
-                if (possibleLimit.matches("[+-]?\\d+(h)?")) {
-                    if (possibleLimit.startsWith("+")) forward = true;
-                    String cleanLimit = possibleLimit.replace("+", "").replace("-", "");
-                    
-                    if (cleanLimit.endsWith("h")) {
-                        hours = Integer.parseInt(cleanLimit.replace("h", ""));
-                    } else {
-                        maxMessages = Integer.parseInt(cleanLimit);
-                    }
-                    question = subParts.length > 1 ? subParts[1].trim() : null;
-                } else {
-                    maxMessages = 100; // Default count
-                    question = remaining.trim();
-                }
-            }
-        } else if (firstArg.matches("[+-]?\\d+(h)?")) {
-            // Count/Duration mode
-            if (firstArg.startsWith("+")) forward = true;
-            String cleanArg = firstArg.replace("+", "").replace("-", "");
-
-            if (cleanArg.endsWith("h")) {
-                hours = Integer.parseInt(cleanArg.replace("h", ""));
-            } else {
-                maxMessages = Integer.parseInt(cleanArg);
-            }
-            question = remaining.trim().isEmpty() ? null : remaining.trim();
-        } else {
-            // No valid first arg? Default to token limit (like !ask)
-            // Treat the whole args as the question
-            String questionArg = args.isEmpty() ? null : args;
+        if (parsed.startEventId == null && parsed.hours == -1 && parsed.maxMessages == -1) {
+            // No valid history args found, default to token limit (like !ask)
+            String questionArg = parsed.remaining.isEmpty() ? null : parsed.remaining;
             System.out.println("Received " + commandName + " command in " + roomId + " from " + sender + " (defaulting to token limit)");
             AtomicBoolean abortFlag = new AtomicBoolean(false);
             runningOperations.put(sender, abortFlag);
@@ -339,14 +453,21 @@ public class CommandDispatcher {
 
         System.out.println("Received " + commandName + " command in " + roomId + " from " + sender);
 
+        // If we have a link but no count/hours, use default count
+        int hours = parsed.hours;
+        int maxMessages = parsed.maxMessages;
+        if (parsed.startEventId != null && hours == -1 && maxMessages == -1) {
+            maxMessages = 100;
+        }
+
         AtomicBoolean abortFlag = new AtomicBoolean(false);
         runningOperations.put(sender, abortFlag);
 
         final int fHours = hours;
         final int fMax = maxMessages;
-        final String fEventId = startEventId;
-        final boolean fForward = forward;
-        final String fQuestion = question;
+        final String fEventId = parsed.startEventId;
+        final boolean fForward = parsed.forward;
+        final String fQuestion = parsed.remaining.isEmpty() ? null : parsed.remaining;
 
         new Thread(() -> {
             try {
@@ -894,7 +1015,9 @@ public class CommandDispatcher {
                         "* `!ping` - Measure and report ping latency\n" +
                         "* `!testcommand` - Test if the bot is responding\n" +
                         "* `!timezone <TZ or Time>` - Set your preferred timezone\n" +
-                        "* `!export<duration>h` - Export chat history (e.g., `!export24h`)\n" +
+                        "* `!export <count>` - Export last N messages (e.g., `!export 100`)\n" +
+                        "* `!export <duration>h` - Export chat history by hours (e.g., `!export 24h`)\n" +
+                        "* `!export <link> [+|-<count>]` - Export from message link with optional +/- count (e.g., `!export https://matrix.to/#/.../$eventId +50`)\n" +
                         "* `!ttsexport <count>` - Export messages with TTS-friendly formatting\n" +
                         "* `!ttsexport <duration>h` - Export messages from last specified hours with TTS-friendly formatting\n" +
                         "* `!lastsummary [question]` - Summarize all unread messages (uses saved TZ)\n" +
