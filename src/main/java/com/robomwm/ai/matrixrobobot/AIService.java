@@ -791,9 +791,10 @@ public class AIService {
 
         int updateCount = 0;
         String[] clockFaces = {"🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦"};
-        
+
         int lineCount = 0;
         boolean gotDone = false;
+        boolean sentAsNotice = false;
 
         try {
             System.out.println("Starting " + aiName + " streaming request...");
@@ -868,14 +869,20 @@ public class AIService {
                         if ((responseContent.length() > 0 || reasoning.length() > 0) && now - lastUpdate > 10000) {
                             lastUpdate = now;
                             String rendered = buildStreamingOutput(reasoning, responseContent, footer, clockFaces, updateCount++, startTime);
+                            boolean isThinkingOnly = reasoning.length() > 0 && responseContent.length() == 0;
                             if (eventIdHolder[0] == null) {
-                                eventIdHolder[0] = useNotice
+                                sentAsNotice = !isThinkingOnly && useNotice;
+                                eventIdHolder[0] = isThinkingOnly
+                                        ? matrixClient.sendMarkdownWithEventId(responseRoomId, rendered)
+                                        : (useNotice
                                         ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, rendered)
-                                        : matrixClient.sendMarkdownWithEventId(responseRoomId, rendered);
-                            } else if (useNotice) {
-                                matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], rendered);
+                                        : matrixClient.sendMarkdownWithEventId(responseRoomId, rendered));
                             } else {
-                                matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], rendered);
+                                if (sentAsNotice) {
+                                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], rendered);
+                                } else {
+                                    matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], rendered);
+                                }
                             }
                         }
                     } else if (data.contains("[DONE]")) {
@@ -922,11 +929,19 @@ public class AIService {
         finalOutput = appendMessageLink(finalOutput, exportRoomId, firstEventId, aiName, actualModel);
 
         if (eventIdHolder[0] == null) {
-            eventIdHolder[0] = useNotice
+            boolean isThinkingOnly = responseContent.toString().trim().isEmpty() && reasoning.length() > 0;
+            sentAsNotice = !isThinkingOnly && useNotice;
+            eventIdHolder[0] = isThinkingOnly
+                    ? matrixClient.sendMarkdownWithEventId(responseRoomId, finalOutput)
+                    : (useNotice
                     ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, finalOutput)
-                    : matrixClient.sendMarkdownWithEventId(responseRoomId, finalOutput);
+                    : matrixClient.sendMarkdownWithEventId(responseRoomId, finalOutput));
         } else {
-            matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], finalOutput);
+            if (sentAsNotice) {
+                matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], finalOutput);
+            } else {
+                matrixClient.updateMarkdownMessage(responseRoomId, eventIdHolder[0], finalOutput);
+            }
         }
         return finalOutput;
     }
