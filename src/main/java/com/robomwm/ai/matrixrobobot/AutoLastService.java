@@ -18,13 +18,10 @@ public class AutoLastService {
 
     private final Set<String> enabledUsers = ConcurrentHashMap.newKeySet();
     private final Set<String> enabledTldrUsers = ConcurrentHashMap.newKeySet();
-    private final Set<String> enabledTopicListUsers = ConcurrentHashMap.newKeySet();
     private final Map<String, Boolean> userLastPublicPref = new ConcurrentHashMap<>();
     private final Map<String, Boolean> userTldrPublicPref = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> userTopicListPublicPref = new ConcurrentHashMap<>();
     private final Map<String, Long> lastTriggerTime = new ConcurrentHashMap<>();
     private final Map<String, Long> lastTldrTriggerTime = new ConcurrentHashMap<>();
-    private final Map<String, Long> lastTopicListTriggerTime = new ConcurrentHashMap<>();
     private final Map<String, RoomHistoryManager.EventInfo> lastReadInfo = new ConcurrentHashMap<>();
     
     // Track if we've processed the first sync to avoid triggering on old receipts
@@ -42,10 +39,8 @@ public class AutoLastService {
     private final String commandRoomId;
     private final Path persistenceFile;
     private final Path summaryPersistenceFile;
-    private final Path topicListPersistenceFile;
     private final Path lastPublicPreferenceFile;
     private final Path tldrPublicPreferenceFile;
-    private final Path topicListPublicPreferenceFile;
 
     public AutoLastService(MatrixClient matrixClient, LastMessageService lastMessageService,
             AIService aiService, TimezoneService timezoneService, RoomHistoryManager historyManager,
@@ -62,10 +57,8 @@ public class AutoLastService {
         this.commandRoomId = commandRoomId;
         this.persistenceFile = Paths.get("autolast_enabled_users.json");
         this.summaryPersistenceFile = Paths.get("autotldr_enabled_users.json");
-        this.topicListPersistenceFile = Paths.get("autotopiclist_enabled_users.json");
         this.lastPublicPreferenceFile = Paths.get("autolast_public_preferences.json");
         this.tldrPublicPreferenceFile = Paths.get("autotldr_public_preferences.json");
-        this.topicListPublicPreferenceFile = Paths.get("autotopiclist_public_preferences.json");
 
         // Load persisted enabled users
         loadEnabledUsers();
@@ -127,33 +120,6 @@ public class AutoLastService {
     }
 
     /**
-     * Toggles the topiclist feature for a user (backward compatibility).
-     */
-    public void toggleAutoTopicList(String userId, String roomId) {
-        toggleAutoTopicList(userId, roomId, false);
-    }
-
-    /**
-     * Toggles the topiclist feature for a user.
-     */
-    public void toggleAutoTopicList(String userId, String roomId, boolean isPublic) {
-        if (enabledTopicListUsers.contains(userId)) {
-            enabledTopicListUsers.remove(userId);
-            userTopicListPublicPref.remove(userId);
-            matrixClient.sendText(roomId, "Auto-!topiclist disabled.");
-        } else {
-            enabledTopicListUsers.add(userId);
-            userTopicListPublicPref.put(userId, isPublic);
-            String message = isPublic
-                ? "Auto-!topiclist enabled. I will send a topic list to this channel when you read the export room after being away for over an hour with over 75 unread messages."
-                : "Auto-!topiclist enabled. I will DM you a topic list when you read the export room after being away for over an hour with over 75 unread messages.";
-            matrixClient.sendText(roomId, message);
-        }
-        saveEnabledUsers();
-        savePublicPreferences();
-    }
-
-    /**
      * Processes ephemeral events (read receipts) from the sync loop.
      */
     public void processEphemeralEvents(String roomId, JsonNode ephemeralEvents, String exportRoomId) {
@@ -193,9 +159,8 @@ public class AutoLastService {
                 // 1. Check if user is enabled for at least one feature
                 boolean lastEnabled = enabledUsers.contains(userId);
                 boolean tldrEnabled = enabledTldrUsers.contains(userId);
-                boolean topicListEnabled = enabledTopicListUsers.contains(userId);
                 
-                if (!lastEnabled && !tldrEnabled && !topicListEnabled)
+                if (!lastEnabled && !tldrEnabled)
                     continue;
 
                 long now = System.currentTimeMillis();
@@ -223,12 +188,6 @@ public class AutoLastService {
                         if (tldrEnabled) {
                             triggerTldr(exportRoomId, userId, previousReadInfo, roomId);
                             lastTldrTriggerTime.put(userId, now);
-                        }
-
-                        // 4. Handle Auto-TopicList
-                        if (topicListEnabled) {
-                            triggerTopicList(exportRoomId, userId, previousReadInfo, roomId);
-                            lastTopicListTriggerTime.put(userId, now);
                         }
                     }
                 }
@@ -282,37 +241,6 @@ private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.
             System.out.println("Could not find " + (isPublic ? "room" : "DM room") + " for auto-tldr user: " + userId);
         }
     }
-
-    private void triggerTopicList(String exportRoomId, String userId, RoomHistoryManager.EventInfo previousReadInfo, String roomId) {
-        boolean isPublic = userTopicListPublicPref.getOrDefault(userId, false);
-        String targetRoomId = isPublic ? commandRoomId : findDirectMessageRoom(userId);
-        
-        if (targetRoomId != null) {
-            System.out.println("Triggering Auto-TopicList for " + userId + " (public: " + isPublic + ")");
-            java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(userId);
-            if (zoneId == null) {
-                zoneId = java.time.ZoneId.of("UTC");
-                if (targetRoomId != null) {
-                    matrixClient.sendNotice(targetRoomId, "Timezone not set. Using UTC by default. " +
-                            "Set it with !timezone <TZ> or your local time: !timezone 1:14am or !timezone 14:30");
-                }
-            }
-            final java.time.ZoneId finalZoneId = zoneId;
-            
-            new Thread(() -> {
-                try {
-                    aiService.queryAIUnread(targetRoomId, exportRoomId, userId, finalZoneId, null,
-                           AIService.Prompts.TOPICLIST_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false),
-                           previousReadInfo != null ? previousReadInfo.eventId : null);
-               } catch (Exception e) {
-                   System.err.println("Error running auto-topiclist: " + e.getMessage());
-               }
-           }).start();
-        } else {
-            System.out.println("Could not find " + (isPublic ? "room" : "DM room") + " for auto-topiclist user: " + userId);
-        }
-    }
-
     /**
      * Helper to find a Room ID that is a DM with the specific user.
      */
@@ -390,18 +318,6 @@ private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.
                 System.err.println("Error loading autotldr enabled users: " + e.getMessage());
             }
         }
-
-        // Load autotopiclist enabled users
-        if (Files.exists(topicListPersistenceFile)) {
-            try {
-                String content = Files.readString(topicListPersistenceFile);
-                String[] users = mapper.readValue(content, String[].class);
-                enabledTopicListUsers.addAll(Arrays.asList(users));
-                System.out.println("Loaded " + users.length + " autotopiclist enabled users from persistence");
-            } catch (IOException e) {
-                System.err.println("Error loading autotopiclist enabled users: " + e.getMessage());
-            }
-        }
     }
 
     /**
@@ -416,10 +332,6 @@ private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.
             String[] tldrUsers = enabledTldrUsers.toArray(new String[0]);
             String tldrContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(tldrUsers);
             Files.writeString(summaryPersistenceFile, tldrContent);
-
-            String[] topicListUsers = enabledTopicListUsers.toArray(new String[0]);
-            String topicListContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(topicListUsers);
-            Files.writeString(topicListPersistenceFile, topicListContent);
         } catch (IOException e) {
             System.err.println("Error saving enabled users: " + e.getMessage());
         }
@@ -452,18 +364,6 @@ private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.
                 System.err.println("Error loading autotldr public preferences: " + e.getMessage());
             }
         }
-
-        // Load autotopiclist public preferences
-        if (Files.exists(topicListPublicPreferenceFile)) {
-            try {
-                String content = Files.readString(topicListPublicPreferenceFile);
-                Map<String, Boolean> preferences = mapper.readValue(content, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Boolean>>() {});
-                userTopicListPublicPref.putAll(preferences);
-                System.out.println("Loaded " + preferences.size() + " autotopiclist public preferences from persistence");
-            } catch (IOException e) {
-                System.err.println("Error loading autotopiclist public preferences: " + e.getMessage());
-            }
-        }
     }
 
     /**
@@ -476,9 +376,6 @@ private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.
 
             String tldrContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(userTldrPublicPref);
             Files.writeString(tldrPublicPreferenceFile, tldrContent);
-
-            String topicListContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(userTopicListPublicPref);
-            Files.writeString(topicListPublicPreferenceFile, topicListContent);
         } catch (IOException e) {
             System.err.println("Error saving public preferences: " + e.getMessage());
         }

@@ -221,10 +221,6 @@ public class CommandDispatcher {
             handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummary",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
-        } else if (trimmed.matches("!topiclist(?:\\s+.*)?")) {
-            handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!topiclist",
-                    AIService.Backend.AUTO, AIService.Prompts.TOPICLIST_PREFIX);
-            return true;
         } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
             handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO);
             return true;
@@ -1000,8 +996,7 @@ public class CommandDispatcher {
                         "* `!isummary <link or count or duration> [question]` - Condensed summary with images (Vision ArliAI)\n" +
                         "* `!overview <link or count or duration> [question]` - Detailed overview (No chunking)\n" +
                         "* `!ioverview <link or count or duration> [question]` - Detailed overview with images (Vision ArliAI)\n" +
-                        "* `!tldr <link or count or duration> [question]` - Quick 15s summary\n" +
-                        "* `!topiclist <link or count or duration> [question]` - List discussion topics with message counts\n" +
+                        "* `!tldr <link or count or duration> [question]` - Very concise summary in bullet points, reading time under 15s. May append [question] for focused output.\n" +
                         "* `!debugai <link or count or duration> [question]` - Query AI backend with a custom prompt via question or chat logs\n" +
                         "* `!arliai <model> <prompt>` - Query ArliAI with specific model (fuzzy matched)\n" +
                         "* `!debugarliai <model> [params...] <prompt>` - Query ArliAI with custom API parameters\n" +
@@ -1023,7 +1018,6 @@ public class CommandDispatcher {
                         "* `!lastsummary [question]` - Summarize all unread messages (uses saved TZ)\n" +
                         "* `!autolast [public]` - Toggle automatic last message notification (DM by default, use 'public' to send to channel)\n" +
                         "* `!autotldr [public]` - Toggle automatic AI TLDR notification (DM by default, use 'public' to send to channel)\n" +
-                        "* `!autotopiclist [public]` - Toggle automatic topic list notification (DM by default, use 'public' to send to channel)\n" +
                         "* `!abort` - Abort currently running operations\n\n" +
                         "Use `!help 1` for search commands, `!help 2` for AI commands";
                 break;

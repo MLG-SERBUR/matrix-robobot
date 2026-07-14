@@ -234,12 +234,6 @@ public class MatrixRobobot {
                                 boolean isPublic = trimmed.contains("public");
                                 autoLastService.toggleAutoTldr(sender, responseRoomId, isPublic);
                             }
-                            // NEW: !autotopiclist command
-                            else if (trimmed.startsWith("!autotopiclist")) {
-                                System.out.println("Received !autotopiclist command from " + sender);
-                                boolean isPublic = trimmed.contains("public");
-                                autoLastService.toggleAutoTopicList(sender, responseRoomId, isPublic);
-                            }
                             // NEW: !plead command
                             else if ("!plead".equals(trimmed)) {
                                 System.out.println("Received !plead command from " + sender);
