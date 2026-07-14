@@ -164,21 +164,20 @@ public class AutoLastService {
         if (ephemeralEvents == null || !ephemeralEvents.isArray())
             return;
 
-        // Skip processing on first sync to avoid triggering on old receipts from before bot started
-        if (!firstSyncProcessed) {
+        boolean isInitialSync = !firstSyncProcessed;
+        if (isInitialSync) {
             firstSyncProcessed = true;
-            System.out.println("First sync processed - will start tracking read receipts from now");
-            return;
+            System.out.println("First sync processed - initializing read receipts from current state");
         }
 
         for (JsonNode event : ephemeralEvents) {
             if ("m.receipt".equals(event.path("type").asText())) {
-                processReceiptEvent(roomId, event.path("content"), exportRoomId);
+                processReceiptEvent(roomId, event.path("content"), exportRoomId, isInitialSync);
             }
         }
     }
 
-    private void processReceiptEvent(String roomId, JsonNode content, String exportRoomId) {
+    private void processReceiptEvent(String roomId, JsonNode content, String exportRoomId, boolean isInitialSync) {
         // Content structure: { "$event_id": { "m.read": { "@user_id": { "ts": 1234 } }
         // } }
         Iterator<String> eventIds = content.fieldNames();
@@ -205,7 +204,7 @@ public class AutoLastService {
                 RoomHistoryManager.EventInfo previousReadInfo = lastReadInfo.get(userId);
 
                 // Update state for next trigger check, but we need the previous info to check gaps
-                if (previousReadInfo == null || previousReadInfo.eventId.equals(eventId)) {
+                if (previousReadInfo == null || previousReadInfo.eventId.equals(eventId) || isInitialSync) {
                     lastReadInfo.put(userId, currentReadInfo);
                     continue;
                 }
