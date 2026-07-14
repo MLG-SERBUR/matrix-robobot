@@ -104,13 +104,14 @@ public class MatrixSearchService {
      * Perform a Matrix native search using the server's search API
      */
     public void performMatrixSearch(String roomId, String sender, String responseRoomId, String searchRoomId,
-            String query, int lookbackHours, ZoneId zoneId, AtomicBoolean abortFlag) {
+            String query, String filterSender, int lookbackHours, ZoneId zoneId, AtomicBoolean abortFlag) {
         try {
             long cutoffTimestampMs = lookbackHours > 0
                     ? java.time.Instant.now().minus(java.time.Duration.ofHours(lookbackHours)).toEpochMilli()
                     : -1;
             String lookbackSuffix = lookbackHours > 0 ? " (last " + lookbackHours + "h)" : "";
-            String initialMessage = "Searching Matrix for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + "...";
+            String userSuffix = filterSender != null ? " from " + filterSender : "";
+            String initialMessage = "Searching Matrix for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + userSuffix + "...";
             String eventMessageId = matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, initialMessage);
             if (eventMessageId == null) {
                 matrixClient.sendNotice(responseRoomId,
@@ -119,7 +120,7 @@ public class MatrixSearchService {
             }
 
             SearchPaginationState paginationState = new SearchPaginationState(new ArrayList<>(), new HashSet<>(), sender,
-                    query, searchRoomId, responseRoomId, eventMessageId, zoneId, cutoffTimestampMs);
+                    query, filterSender, searchRoomId, responseRoomId, eventMessageId, zoneId, cutoffTimestampMs);
 
             System.out.println("Starting Matrix search for '" + query + "' in room " + searchRoomId);
             boolean searchFailed = fetchSearchResults(paginationState, sender, abortFlag, 1);
@@ -133,7 +134,7 @@ public class MatrixSearchService {
 
             if (paginationState.isEmpty()) {
                 matrixClient.updateTextMessage(responseRoomId, eventMessageId,
-                        "No Matrix search results found for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + ".");
+                        "No Matrix search results found for: \"" + query + "\" in " + searchRoomId + lookbackSuffix + userSuffix + ".");
                 return;
             }
 
@@ -171,7 +172,7 @@ public class MatrixSearchService {
                 return true;
             }
 
-            Map<String, Object> searchBody = buildSearchRequest(state.getSearchRoomId(), state.getQuery());
+            Map<String, Object> searchBody = buildSearchRequest(state.getSearchRoomId(), state.getQuery(), state.getFilterSender());
             String json = mapper.writeValueAsString(searchBody);
 
             HttpRequest request = HttpRequest.newBuilder()
@@ -307,6 +308,7 @@ public class MatrixSearchService {
         private final int pageSize;
         private final String sender;
         private final String query;
+        private final String filterSender;
         private final String searchRoomId;
         private final String responseRoomId;
         private final String eventMessageId;
@@ -316,13 +318,14 @@ public class MatrixSearchService {
         private boolean hasMoreResults;
 
         public SearchPaginationState(List<SearchHit> allHits, Set<String> seenEventIds, String sender, String query,
-                String searchRoomId, String responseRoomId, String eventMessageId, ZoneId zoneId, long cutoffTimestampMs) {
+                String filterSender, String searchRoomId, String responseRoomId, String eventMessageId, ZoneId zoneId, long cutoffTimestampMs) {
             this.allHits = allHits;
             this.seenEventIds = seenEventIds;
             this.currentPage = 0;
             this.pageSize = PAGE_SIZE;
             this.sender = sender;
             this.query = query;
+            this.filterSender = filterSender;
             this.searchRoomId = searchRoomId;
             this.responseRoomId = responseRoomId;
             this.eventMessageId = eventMessageId;
@@ -358,7 +361,11 @@ public class MatrixSearchService {
         public String renderPage() {
             List<SearchHit> pageHits = getCurrentPageHits();
             StringBuilder sb = new StringBuilder();
-            sb.append("**Matrix search results for \"").append(query).append("\" in ").append(searchRoomId).append("**\n");
+            sb.append("**Matrix search results for \"").append(query).append("\" in ").append(searchRoomId);
+            if (filterSender != null) {
+                sb.append(" from ").append(filterSender);
+            }
+            sb.append("**\n");
             sb.append("*Page ").append(currentPage + 1).append("/");
             if (hasMoreResults) {
                 sb.append("?");
@@ -437,6 +444,10 @@ public class MatrixSearchService {
             return searchRoomId;
         }
 
+        public String getFilterSender() {
+            return filterSender;
+        }
+
         public int getHitCount() {
             return allHits.size();
         }
@@ -497,7 +508,7 @@ public class MatrixSearchService {
         return URI.create(base + "?next_batch=" + URLEncoder.encode(nextBatch, StandardCharsets.UTF_8));
     }
 
-    private Map<String, Object> buildSearchRequest(String roomId, String query) {
+    private Map<String, Object> buildSearchRequest(String roomId, String query, String filterSender) {
         Map<String, Object> searchBody = new HashMap<>();
 
         Map<String, Object> roomEvents = new HashMap<>();
@@ -511,6 +522,9 @@ public class MatrixSearchService {
         Map<String, Object> filter = new HashMap<>();
         filter.put("rooms", List.of(roomId));
         filter.put("limit", 25);
+        if (filterSender != null) {
+            filter.put("senders", List.of(filterSender));
+        }
         roomEvents.put("filter", filter);
 
         Map<String, Object> searchCategories = new HashMap<>();

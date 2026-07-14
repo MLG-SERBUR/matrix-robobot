@@ -669,7 +669,24 @@ public class CommandDispatcher {
 
     private void handleMatrixSearch(String trimmed, String roomId, String sender, String responseRoomId,
             String searchRoomId) {
-        Matcher matcher = Pattern.compile("!search\\s+(?:(\\d+)([dh])\\s+)?(.+)").matcher(trimmed);
+        // Extract optional user:@mxid parameter from anywhere in the arguments
+        String filterSender = null;
+        String remaining = trimmed.substring("!search".length()).trim();
+        java.util.regex.Matcher userMatcher = Pattern.compile("user:(\\S+)").matcher(remaining);
+        if (userMatcher.find()) {
+            filterSender = userMatcher.group(1);
+            remaining = remaining.substring(0, userMatcher.start()) + remaining.substring(userMatcher.end());
+            remaining = remaining.trim().replaceAll("\\s{2,}", " ");
+        }
+
+        if (remaining.isEmpty()) {
+            matrixClient.sendText(responseRoomId,
+                    "Usage: !search [<hours>h|<days>d] [user:@mxid] <query>\n" +
+                    "Example: !search 24h user:@alice:example.com hello");
+            return;
+        }
+
+        Matcher matcher = Pattern.compile("(?:(\\d+)([dh])\\s+)?(.+)").matcher(remaining);
         if (matcher.matches()) {
             int hours = -1;
             if (matcher.group(1) != null && matcher.group(2) != null) {
@@ -684,12 +701,14 @@ public class CommandDispatcher {
             AtomicBoolean abortFlag = new AtomicBoolean(false);
             runningOperations.put(sender, abortFlag);
 
-            System.out.println("Received Matrix search command in " + roomId + " from " + sender);
+            System.out.println("Received Matrix search command in " + roomId + " from " + sender
+                    + (filterSender != null ? " (filtering by user: " + filterSender + ")" : ""));
             final int searchHours = hours;
+            final String searchFilterSender = filterSender;
             new Thread(() -> {
                 try {
                     matrixSearchService.performMatrixSearch(roomId, sender, responseRoomId, searchRoomId, query,
-                            searchHours, zoneId, abortFlag);
+                            searchFilterSender, searchHours, zoneId, abortFlag);
                 } finally {
                     runningOperations.remove(sender);
                 }
@@ -980,7 +999,7 @@ public class CommandDispatcher {
         switch (page) {
             case 1:
                 helpText = "**Search Commands (Page 1/3)**\n" +
-                        "* `!search [<hours>h|<days>d] <query>` - Matrix native search (paginated, all results)\n" +
+                        "* `!search [<hours>h|<days>d] [user:@mxid] <query>` - Matrix native search (paginated, filter by user)\n" +
                         "* `!page <n>` - Jump to page n of search results\n" +
                         "* `!semantic <hours>h <query>` - AI-free semantic search using local embeddings\n" +
                         "* `!grep <hours>h <pattern>` - Fast pattern-based search (100 result limit)\n" +
