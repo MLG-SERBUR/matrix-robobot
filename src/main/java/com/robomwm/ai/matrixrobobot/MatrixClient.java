@@ -336,6 +336,40 @@ public class MatrixClient {
     }
 
     /**
+     * Get a list of user IDs for joined or invited room members
+     */
+    public java.util.List<String> getRoomMemberIds(String roomId) {
+        java.util.List<String> memberIds = new java.util.ArrayList<>();
+        try {
+            String membersUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
+                    + URLEncoder.encode(roomId, StandardCharsets.UTF_8) + "/members";
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(membersUrl))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                JsonNode members = mapper.readTree(response.body()).path("chunk");
+                if (members.isArray()) {
+                    for (JsonNode member : members) {
+                        String membership = member.path("content").path("membership").asText(null);
+                        if ("join".equals(membership) || "invite".equals(membership)) {
+                            String userId = member.path("state_key").asText(null);
+                            if (userId != null) {
+                                memberIds.add(userId);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Error getting room member IDs: " + e.getMessage());
+        }
+        return memberIds;
+    }
+
+    /**
      * Get list of joined rooms
      */
     public java.util.List<String> getJoinedRooms() {

@@ -669,20 +669,27 @@ public class CommandDispatcher {
 
     private void handleMatrixSearch(String trimmed, String roomId, String sender, String responseRoomId,
             String searchRoomId) {
-        // Extract optional user:@mxid parameter from anywhere in the arguments
-        String filterSender = null;
+        // Extract optional user:@mxid or u:@mxid parameter from anywhere in the arguments
+        java.util.List<String> filterSenders = null;
         String remaining = trimmed.substring("!search".length()).trim();
-        java.util.regex.Matcher userMatcher = Pattern.compile("user:(\\S+)").matcher(remaining);
+        java.util.regex.Matcher userMatcher = Pattern.compile("(?i)(?:user|u):(\\S+)").matcher(remaining);
         if (userMatcher.find()) {
-            filterSender = userMatcher.group(1);
+            String filterSender = userMatcher.group(1);
             remaining = remaining.substring(0, userMatcher.start()) + remaining.substring(userMatcher.end());
             remaining = remaining.trim().replaceAll("\\s{2,}", " ");
+            filterSenders = resolveSearchSenders(roomId, filterSender);
+            if (filterSenders.isEmpty()) {
+                matrixClient.sendNotice(responseRoomId,
+                        "No matching room member(s) found for user parameter: " + filterSender);
+                return;
+            }
         }
 
         if (remaining.isEmpty()) {
             matrixClient.sendText(responseRoomId,
-                    "Usage: !search [<hours>h|<days>d] [user:@mxid] <query>\n" +
-                    "Example: !search 24h user:@alice:example.com hello");
+                    "Usage: !search [<hours>h|<days>d] [user:<username>|u:<username>] <query>\n" +
+                    "Example: !search 24h u:alice:example.com hello\n" +
+                    "Example: !search 24h u:alice hello");
             return;
         }
 
@@ -702,18 +709,43 @@ public class CommandDispatcher {
             runningOperations.put(sender, abortFlag);
 
             System.out.println("Received Matrix search command in " + roomId + " from " + sender
-                    + (filterSender != null ? " (filtering by user: " + filterSender + ")" : ""));
+                    + (filterSenders != null ? " (filtering by user(s): " + String.join(", ", filterSenders) + ")" : ""));
             final int searchHours = hours;
-            final String searchFilterSender = filterSender;
+            final java.util.List<String> searchFilterSenders = filterSenders;
             new Thread(() -> {
                 try {
                     matrixSearchService.performMatrixSearch(roomId, sender, responseRoomId, searchRoomId, query,
-                            searchFilterSender, searchHours, zoneId, abortFlag);
+                            searchFilterSenders, searchHours, zoneId, abortFlag);
                 } finally {
                     runningOperations.remove(sender);
                 }
             }).start();
         }
+    }
+
+    private java.util.List<String> resolveSearchSenders(String roomId, String userParameter) {
+        if (userParameter == null || userParameter.isBlank()) {
+            return List.of();
+        }
+
+        String normalized = userParameter.startsWith("@") ? userParameter : "@" + userParameter;
+        if (normalized.indexOf(':', 1) > 0) {
+            return List.of(normalized);
+        }
+
+        String localpart = normalized.substring(1);
+        java.util.List<String> memberIds = matrixClient.getRoomMemberIds(roomId);
+        java.util.List<String> matches = new ArrayList<>();
+        for (String memberId : memberIds) {
+            if (memberId == null || !memberId.startsWith("@") || memberId.indexOf(':', 1) < 0) {
+                continue;
+            }
+            String memberLocalpart = memberId.substring(1, memberId.indexOf(':', 1));
+            if (memberLocalpart.equalsIgnoreCase(localpart)) {
+                matches.add(memberId);
+            }
+        }
+        return matches;
     }
 
     private void handlePage(String trimmed, String sender, String responseRoomId) {
