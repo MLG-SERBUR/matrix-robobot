@@ -209,36 +209,24 @@ public class AutoLastService {
                     continue;
                 }
 
-                // 2. Handle Auto-Last
-                if (lastEnabled) {
-                    // Threshold: user was away for > 1 hour gap
-                    if (ts - previousReadInfo.timestamp >= 3600000) {
-                        int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
-                        if (unreadCount >= 75) {
+                // Calculate gap and unread count once if any feature is enabled
+                if (ts - previousReadInfo.timestamp >= 3600000) {
+                    int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
+                    if (unreadCount >= 75) {
+                        // 2. Handle Auto-Last
+                        if (lastEnabled) {
                             triggerLastMessage(exportRoomId, userId, previousReadInfo, roomId);
                             lastTriggerTime.put(userId, now);
                         }
-                    }
-                }
 
-                // 3. Handle Auto-TLDR
-                if (tldrEnabled) {
-                    // Threshold: user was away for > 1 hour gap
-                    if (ts - previousReadInfo.timestamp >= 3600000) {
-                        int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
-                        if (unreadCount >= 75) {
+                        // 3. Handle Auto-TLDR
+                        if (tldrEnabled) {
                             triggerTldr(exportRoomId, userId, previousReadInfo, roomId);
                             lastTldrTriggerTime.put(userId, now);
                         }
-                    }
-                }
 
-                // 4. Handle Auto-TopicList
-                if (topicListEnabled) {
-                    // Threshold: user was away for > 1 hour gap
-                    if (ts - previousReadInfo.timestamp >= 3600000) {
-                        int unreadCount = historyManager.countUnreadMessages(roomId, previousReadInfo.eventId);
-                        if (unreadCount >= 75) {
+                        // 4. Handle Auto-TopicList
+                        if (topicListEnabled) {
                             triggerTopicList(exportRoomId, userId, previousReadInfo, roomId);
                             lastTopicListTriggerTime.put(userId, now);
                         }
