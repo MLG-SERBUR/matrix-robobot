@@ -272,11 +272,11 @@ public class AIService {
                 
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
-                            new String[]{batchEventId != null ? batchEventId : ""}, footer, timeoutSeconds, abortFlag, true, exportRoomId,
+                            new String[]{null}, footer, timeoutSeconds, abortFlag, false, exportRoomId,
                             history.firstEventId);
                 } else {
                     String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
-                    matrixClient.updateMarkdownMessage(responseRoomId, batchEventId,
+                    matrixClient.sendMarkdownWithEventId(responseRoomId,
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model));
                 }
@@ -389,11 +389,11 @@ public class AIService {
                 
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
-                            new String[]{batchEventId != null ? batchEventId : ""}, footer, timeoutSeconds, abortFlag, true, exportRoomId,
+                            new String[]{null}, footer, timeoutSeconds, abortFlag, false, exportRoomId,
                             history.firstEventId);
                 } else {
                     String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
-                    matrixClient.updateMarkdownMessage(responseRoomId, batchEventId,
+                    matrixClient.sendMarkdownWithEventId(responseRoomId,
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model));
                 }
@@ -517,13 +517,13 @@ public class AIService {
                 String[] outputEventIdHolder = new String[]{null};
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
-                            outputEventIdHolder, footer, timeoutSeconds, abortFlag, true, exportRoomId,
+                            outputEventIdHolder, footer, timeoutSeconds, abortFlag, false, exportRoomId,
                             filteredHistory.firstEventId);
                 } else {
                     String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
                     String renderedAnswer = appendMessageLink(answer, exportRoomId, filteredHistory.firstEventId,
                             provider.displayName, attempt.model);
-                    matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, renderedAnswer);
+                    matrixClient.sendMarkdownWithEventId(responseRoomId, renderedAnswer);
                 }
                 // Success - flush any batched status immediately
                 if (batching && batchStatus.length() > 0) {
