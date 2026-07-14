@@ -41,6 +41,7 @@ public class AutoLastService {
     private final Path summaryPersistenceFile;
     private final Path lastPublicPreferenceFile;
     private final Path tldrPublicPreferenceFile;
+    private final Path lastReadInfoPersistenceFile;
 
     public AutoLastService(MatrixClient matrixClient, LastMessageService lastMessageService,
             AIService aiService, TimezoneService timezoneService, RoomHistoryManager historyManager,
@@ -59,10 +60,12 @@ public class AutoLastService {
         this.summaryPersistenceFile = Paths.get("autotldr_enabled_users.json");
         this.lastPublicPreferenceFile = Paths.get("autolast_public_preferences.json");
         this.tldrPublicPreferenceFile = Paths.get("autotldr_public_preferences.json");
+        this.lastReadInfoPersistenceFile = Paths.get("autolast_read_info.json");
 
         // Load persisted enabled users
         loadEnabledUsers();
         loadPublicPreferences();
+        loadLastReadInfo();
     }
 
     /**
@@ -194,6 +197,7 @@ public class AutoLastService {
 
                 // Update state for next time
                 lastReadInfo.put(userId, currentReadInfo);
+                saveLastReadInfo();
             }
         }
     }
@@ -378,6 +382,28 @@ private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.
             Files.writeString(tldrPublicPreferenceFile, tldrContent);
         } catch (IOException e) {
             System.err.println("Error saving public preferences: " + e.getMessage());
+        }
+    }
+
+    private void loadLastReadInfo() {
+        if (Files.exists(lastReadInfoPersistenceFile)) {
+            try {
+                String content = Files.readString(lastReadInfoPersistenceFile);
+                Map<String, RoomHistoryManager.EventInfo> info = mapper.readValue(content, new com.fasterxml.jackson.core.type.TypeReference<Map<String, RoomHistoryManager.EventInfo>>() {});
+                lastReadInfo.putAll(info);
+                System.out.println("Loaded " + info.size() + " last read infos from persistence");
+            } catch (IOException e) {
+                System.err.println("Error loading last read info: " + e.getMessage());
+            }
+        }
+    }
+
+    private void saveLastReadInfo() {
+        try {
+            String content = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(lastReadInfo);
+            Files.writeString(lastReadInfoPersistenceFile, content);
+        } catch (IOException e) {
+            System.err.println("Error saving last read info: " + e.getMessage());
         }
     }
 }

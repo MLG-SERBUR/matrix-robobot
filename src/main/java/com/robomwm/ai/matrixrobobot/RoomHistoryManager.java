@@ -105,6 +105,8 @@ public class RoomHistoryManager {
         public String eventId;
         public long timestamp;
 
+        public EventInfo() {}
+
         public EventInfo(String eventId, long timestamp) {
             this.eventId = eventId;
             this.timestamp = timestamp;
