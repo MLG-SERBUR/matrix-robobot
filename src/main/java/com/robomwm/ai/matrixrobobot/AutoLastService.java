@@ -236,7 +236,7 @@ private void triggerTldr(String exportRoomId, String userId, RoomHistoryManager.
              
              new Thread(() -> {
                  try {
-                     aiService.queryAIUnread(targetRoomId, exportRoomId, userId, finalZoneId, null,
+                     aiService.queryAIUnreadFiltered(targetRoomId, exportRoomId, userId, finalZoneId, null,
                             AIService.Prompts.TLDR_PREFIX, new java.util.concurrent.atomic.AtomicBoolean(false),
                             previousReadInfo != null ? previousReadInfo.eventId : null);
                 } catch (Exception e) {

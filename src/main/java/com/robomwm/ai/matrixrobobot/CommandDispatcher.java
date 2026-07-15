@@ -197,6 +197,21 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!lastsummary(?:\\s+(.*))?")) {
             handleLastSummary(trimmed, roomId, sender, responseRoomId, exportRoomId);
             return true;
+        } else if (trimmed.matches("!qtldr(?:\\s+.*)?") || trimmed.matches("!qtldr-ts(?:\\s+.*)?")) {
+            handleHistoryAICommandFiltered(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!qtldr",
+                    AIService.Backend.AUTO, AIService.Prompts.TLDR_PREFIX);
+            return true;
+        } else if (trimmed.matches("!qoverview(?:\\s+.*)?")) {
+            handleHistoryAICommandFiltered(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!qoverview",
+                    AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
+            return true;
+        } else if (trimmed.matches("!qsummary(?:\\s+.*)?")) {
+            handleHistoryAICommandFiltered(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!qsummary",
+                    AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
+            return true;
+        } else if (trimmed.matches("!qask(?:\\s+.*)?")) {
+            handleAskFiltered(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
+            return true;
         } else if (trimmed.matches("!debugai(?:\\s+.*)?") || trimmed.matches("!debugai-ts(?:\\s+.*)?")) {
             handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!debugai",
                     AIService.Backend.AUTO, AIService.Prompts.DEBUGAI_PREFIX);
@@ -475,6 +490,57 @@ public class CommandDispatcher {
         }).start();
     }
 
+    private void handleHistoryAICommandFiltered(AIService service, String trimmed, String roomId, String sender,
+            String prevBatch, String responseRoomId,
+            String exportRoomId, String commandName, AIService.Backend backend, String promptPrefix) {
+
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+        
+        ParsedHistoryArgs parsed = parseHistoryCommandArgs(commandName, trimmed, true);
+
+        if (parsed.startEventId == null && parsed.hours == -1 && parsed.maxMessages == -1) {
+            String questionArg = parsed.remaining.isEmpty() ? null : parsed.remaining;
+            System.out.println("Received " + commandName + " command in " + roomId + " from " + sender + " (defaulting to token limit, quality filtered)");
+            AtomicBoolean abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
+
+            new Thread(() -> {
+                try {
+                    service.queryAskFiltered(responseRoomId, exportRoomId, null, questionArg, promptPrefix, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, backend, zoneId);
+                } finally {
+                    runningOperations.remove(sender);
+                }
+            }).start();
+            return;
+        }
+
+        System.out.println("Received " + commandName + " command in " + roomId + " from " + sender + " (quality filtered)");
+
+        int hours = parsed.hours;
+        int maxMessages = parsed.maxMessages;
+        if (parsed.startEventId != null && hours == -1 && maxMessages == -1) {
+            maxMessages = 100;
+        }
+
+        AtomicBoolean abortFlag = new AtomicBoolean(false);
+        runningOperations.put(sender, abortFlag);
+
+        final int fHours = hours;
+        final int fMax = maxMessages;
+        final String fEventId = parsed.startEventId;
+        final boolean fForward = parsed.forward;
+        final String fQuestion = parsed.remaining.isEmpty() ? null : parsed.remaining;
+
+        new Thread(() -> {
+            try {
+                service.queryAIFiltered(responseRoomId, exportRoomId, fHours, null, fQuestion, fEventId, fForward,
+                        zoneId, fMax, promptPrefix, abortFlag, backend);
+            } finally {
+                runningOperations.remove(sender);
+            }
+        }).start();
+    }
+
     private void handleAsk(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
                             String exportRoomId, String forcedModel, int timeoutSeconds, AIService.Backend preferredBackend) {
         String question = trimmed.replaceFirst("^!ask\\s*", "").trim();
@@ -491,6 +557,28 @@ public class CommandDispatcher {
         new Thread(() -> {
             try {
                 aiService.queryAsk(responseRoomId, exportRoomId, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, forcedModel, timeoutSeconds, preferredBackend, zoneId);
+            } finally {
+                runningOperations.remove(sender);
+            }
+        }).start();
+    }
+
+    private void handleAskFiltered(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
+                            String exportRoomId) {
+        String question = trimmed.replaceFirst("^!qask\\s*", "").trim();
+        if (question.isEmpty()) question = null;
+
+        System.out.println("Received !qask command in " + roomId + " from " + sender + " (quality filtered)");
+
+        AtomicBoolean abortFlag = new AtomicBoolean(false);
+        runningOperations.put(sender, abortFlag);
+
+        final String fQuestion = question;
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+
+        new Thread(() -> {
+            try {
+                aiService.queryAskFiltered(responseRoomId, exportRoomId, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -1052,6 +1140,8 @@ public class CommandDispatcher {
                         "* `!arliai <model> <prompt>` - Query ArliAI with specific model (fuzzy matched)\n" +
                         "* `!debugarliai <model> [params...] <prompt>` - Query ArliAI with custom API parameters\n" +
                         "* `!aisearch <hours>h <query>` - AI-powered agentic search (files, images, videos, conversations)\n\n" +
+                        "**Quality-filtered variants** (ignores specific spammy user):\n" +
+                        "* `!qtldr`, `!qsummary`, `!qoverview`, `!qask` - Same as above but with quality filtering\n\n" +
                         "Use `!help 1` for search commands, `!help 3` for other commands";
                 break;
             case 3:

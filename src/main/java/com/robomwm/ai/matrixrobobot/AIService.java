@@ -33,6 +33,7 @@ public class AIService {
     protected final RoomHistoryManager historyManager;
     protected final Random random;
     public static final int AI_TIMEOUT_SECONDS = 1200;
+    public static final String QUALITY_FILTER_USER = "@buynbadrah:mikuplushfarm.ovh";
     protected final List<String> arliModels;
     protected final List<String> cerebrasModels;
     protected final List<String> groqModels;
@@ -206,6 +207,70 @@ public class AIService {
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
+                return;
+            }
+
+            history = prepareHistoryForQuery(responseRoomId, exportRoomId, history, abortFlag, statusEventId);
+            if (history == null || history.logs.isEmpty()) {
+                return;
+            }
+
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, AI_TIMEOUT_SECONDS, statusEventId, null);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            matrixClient.sendMarkdownNotice(responseRoomId, "Error querying AI: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Quality-filtered variant of queryAI that removes messages from QUALITY_FILTER_USER.
+     */
+    public void queryAIFiltered(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
+            String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        try {
+            final String timeInfo;
+            if (startEventId != null) {
+                timeInfo = (forward ? "after " : "before ") + "message " + startEventId + " (limit "
+                        + (maxMessages > 0 ? maxMessages + " messages" : hours + "h") + ")";
+            } else if (maxMessages > 0) {
+                timeInfo = "last " + maxMessages + " messages";
+            } else {
+                timeInfo = "last " + (hours > 0 ? hours + "h" : "all history");
+            }
+
+            String gatherMsg = "\uD83D\uDCE8 Gathering " + timeInfo + " (quality filtered)...";
+            String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
+
+            final String fStatusEventId = statusEventId;
+            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
+                long now = System.currentTimeMillis();
+                if (now - lastProgressUpdate.get() >= 5000) {
+                    lastProgressUpdate.set(now);
+                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
+                            "\uD83D\uDCE8 Gathering " + timeInfo + " (quality filtered)... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                }
+            };
+
+            RoomHistoryManager.ChatLogsResult history = fetchHistoryForQuery(exportRoomId, hours, fromToken,
+                    startEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
+
+            if (history.errorMessage != null) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, history.errorMessage);
+                return;
+            }
+
+            // Apply quality filter
+            history = new RoomHistoryManager.ChatLogsResult(
+                    filterUserMessages(history.logs, QUALITY_FILTER_USER), history.firstEventId, history.errorMessage, history.antispamApplied);
+
+            if (history.logs.isEmpty()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        "No chat logs found for " + timeInfo + " in " + exportRoomId + " (after quality filtering).");
                 return;
             }
 
@@ -995,6 +1060,61 @@ public class AIService {
         }
     }
 
+    /**
+     * Quality-filtered variant of queryAIUnread that removes messages from QUALITY_FILTER_USER.
+     */
+    public void queryAIUnreadFiltered(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
+            String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            String startEventId) {
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        try {
+            String lastReadEventId = startEventId;
+            if (lastReadEventId == null) {
+                RoomHistoryManager.EventInfo lastRead = historyManager.getReadReceipt(exportRoomId, sender);
+                if (lastRead == null) {
+                    matrixClient.sendMarkdown(responseRoomId, "No read receipt found for you in " + exportRoomId + ".");
+                    return;
+                }
+                lastReadEventId = lastRead.eventId;
+            }
+
+            String gatherMsg = "\uD83D\uDCE8 Gathering unread messages (quality filtered)...";
+            String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
+
+            final String fStatusEventId = statusEventId;
+            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
+                long now = System.currentTimeMillis();
+                if (now - lastProgressUpdate.get() >= 5000) {
+                    lastProgressUpdate.set(now);
+                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
+                            "\uD83D\uDCE8 Gathering unread messages (quality filtered)... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                }
+            };
+
+            RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
+                    lastReadEventId,
+                    zoneId, true, abortFlag, progressCallback);
+
+            // Apply quality filter
+            result = new RoomHistoryManager.ChatLogsResult(
+                    filterUserMessages(result.logs, QUALITY_FILTER_USER), result.firstEventId, result.errorMessage, result.antispamApplied);
+
+            if (result.logs.isEmpty()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        "No unread messages found for you in " + exportRoomId + " (after quality filtering).");
+                return;
+            }
+
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            matrixClient.sendMarkdownNotice(responseRoomId, "Error summarizing unread messages: " + e.getMessage());
+        }
+    }
+
     public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question, String promptPrefix,
                          java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, 
                          Backend preferredBackend, ZoneId zoneId) {
@@ -1036,6 +1156,59 @@ public class AIService {
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "No chat logs found in " + exportRoomId + ".");
+                return;
+            }
+
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            matrixClient.sendMarkdownNotice(responseRoomId, "Error querying AI: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Quality-filtered variant of queryAsk that removes messages from QUALITY_FILTER_USER.
+     */
+    public void queryAskFiltered(String responseRoomId, String exportRoomId, String fromToken, String question, String promptPrefix,
+                         java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, 
+                         Backend preferredBackend, ZoneId zoneId) {
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        try {
+            int targetPromptTokens = 12000;
+            String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
+            int chatFormatOverhead = 20;
+            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) +
+                             RoomHistoryManager.estimateTokens(emptyPrompt) +
+                             chatFormatOverhead;
+
+            int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
+
+            String gatherMsg = "\uD83D\uDCE8 Gathering messages (quality filtered, up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
+            String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
+
+            final String fStatusEventId = statusEventId;
+            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
+                long now = System.currentTimeMillis();
+                if (now - lastProgressUpdate.get() >= 5000) {
+                    lastProgressUpdate.set(now);
+                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
+                            "\uD83D\uDCE8 Gathering messages (quality filtered)... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                }
+            };
+
+            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
+                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
+
+            // Apply quality filter
+            history = new RoomHistoryManager.ChatLogsResult(
+                    filterUserMessages(history.logs, QUALITY_FILTER_USER), history.firstEventId, history.errorMessage, history.antispamApplied);
+
+            if (history.logs.isEmpty()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        "No chat logs found in " + exportRoomId + " (after quality filtering).");
                 return;
             }
 
