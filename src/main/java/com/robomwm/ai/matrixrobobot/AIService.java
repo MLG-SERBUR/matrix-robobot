@@ -1290,6 +1290,7 @@ public class AIService {
                 modelsToSend = new ArrayList<>(openrouterModels);
             }
             if (modelsToSend.isEmpty()) modelsToSend = new ArrayList<>(openrouterModels);
+            System.out.println("OpenRouter request models: " + modelsToSend);
             payload.put("models", modelsToSend);
             payload.put("messages", buildMessages(prompt, skipSystem, isAsk));
             payload.put("stream", stream);
