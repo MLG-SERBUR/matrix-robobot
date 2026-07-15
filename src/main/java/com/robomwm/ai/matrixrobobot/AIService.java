@@ -279,7 +279,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, AI_TIMEOUT_SECONDS, statusEventId, null);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, AI_TIMEOUT_SECONDS, statusEventId, null, true);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -303,6 +303,12 @@ public class AIService {
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer) {
+        performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, false);
+    }
+
+    protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
+                                String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+                                Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer, boolean skipUserFilterRetry) {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
@@ -384,7 +390,7 @@ public class AIService {
 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 // Otherwise only fallback in AUTO mode and if not the last attempt
                 if ((preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) || i == attempts.size() - 1) {
-                    if (i == attempts.size() - 1 && !history.antispamApplied) {
+                    if (i == attempts.size() - 1 && !history.antispamApplied && !skipUserFilterRetry) {
                         // All providers failed, try removing messages from specific spammy user first
                         System.out.println("All providers failed, retrying with specific user filtering...");
                         matrixClient.updateNoticeMessage(responseRoomId, batchEventId, 
@@ -1107,7 +1113,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null);
+            performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null, true);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -1212,7 +1218,7 @@ public class AIService {
                 return;
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null, true);
 
         } catch (Exception e) {
             e.printStackTrace();
