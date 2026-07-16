@@ -841,8 +841,9 @@ public class CommandDispatcher {
         if (matcher.matches()) {
             int pageNum = Integer.parseInt(matcher.group(1));
             System.out.println("Received !page " + pageNum + " command from " + sender);
-            if (!matrixSearchService.goToPage(sender, pageNum)) {
-                matrixClient.sendNotice(responseRoomId,
+            if (matrixSearchService.goToPage(sender, pageNum)) return;
+            if (textSearchService.goToPage(sender, pageNum)) return;
+            matrixClient.sendNotice(responseRoomId,
                         "Invalid page number or no active search. Use !search <query> to start a new search.");
             }
         }
