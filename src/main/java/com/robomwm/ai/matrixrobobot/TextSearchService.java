@@ -599,14 +599,16 @@ public class TextSearchService {
             sb.append(label).append(" results for \"").append(query).append("\"");
             sb.append(" from last ").append((endTime - startTime) / 3600000).append(" hours in ");
             sb.append(exportRoomId).append("\n");
+            int totalPages = getTotalPages();
+            boolean hasMorePages = hasMoreResults && allResults.size() >= PAGE_SIZE;
             sb.append("Page ").append(currentPage + 1).append("/");
-            if (hasMoreResults) {
+            if (hasMorePages) {
                 sb.append("?");
             } else {
-                sb.append(getTotalPages());
+                sb.append(totalPages);
             }
             sb.append(" (");
-            if (hasMoreResults) {
+            if (hasMorePages) {
                 sb.append("over ").append(allResults.size()).append(" results");
             } else {
                 sb.append(allResults.size()).append(" total matches");
@@ -619,10 +621,10 @@ public class TextSearchService {
             }
 
             sb.append("\n");
-            if (hasMoreResults || getTotalPages() > 1) {
+            if (hasMorePages || totalPages > 1) {
                 sb.append("Use !page <n> to navigate pages");
-                if (!hasMoreResults) {
-                    sb.append(" (1-").append(getTotalPages()).append(")");
+                if (!hasMorePages) {
+                    sb.append(" (1-").append(totalPages).append(")");
                 }
                 sb.append(".");
             }
