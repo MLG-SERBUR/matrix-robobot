@@ -357,11 +357,16 @@ public class TextSearchService {
                     if (syncResp.statusCode() == 200) {
                         JsonNode root = mapper.readTree(syncResp.body());
                         token = root.path("next_batch").asText(null);
+                    } else {
+                        System.out.println("Sync returned " + syncResp.statusCode() + " for search pagination token");
                     }
-                } catch (Exception ignore) {
-                    // ignore errors here, we'll just start fetching from the latest available if
-                    // sync fails
+                } catch (Exception e) {
+                    System.out.println("Sync failed getting pagination token for search: " + e.getMessage());
                 }
+            }
+
+            if (token == null) {
+                System.out.println("No pagination token available for search — results will be empty");
             }
 
             // Parse search terms (space-separated, case-insensitive)
