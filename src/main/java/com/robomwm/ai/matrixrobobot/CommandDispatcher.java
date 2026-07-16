@@ -253,8 +253,6 @@ public class CommandDispatcher {
             return true;
         } else if (trimmed.matches("!grep\\s+(\\d+)([dh])\\s+(.+)")) {
             return handleTextSearchCommand(trimmed, "!grep\\s+(\\d+)([dh])\\s+(.+)", "grep", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrep);
-        } else if (trimmed.matches("!grep-slow\\s+(\\d+)([dh])\\s+(.+)")) {
-            return handleTextSearchCommand(trimmed, "!grep-slow\\s+(\\d+)([dh])\\s+(.+)", "grep-slow", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrepSlow);
         } else if (trimmed.matches("!searchtext\\s*")) {
             matrixClient.sendText(responseRoomId, "Usage: !searchtext <hours>h <pattern>\nSearches message text for the given pattern.");
             return true;
@@ -844,8 +842,7 @@ public class CommandDispatcher {
             if (matrixSearchService.goToPage(sender, pageNum)) return;
             if (textSearchService.goToPage(sender, pageNum)) return;
             matrixClient.sendNotice(responseRoomId,
-                        "Invalid page number or no active search. Use !search <query> to start a new search.");
-            }
+                    "Invalid page number or no active search. Use !search <query> or !searchtext <hours>h <pattern> to start a search.");
         }
     }
 
@@ -1123,9 +1120,8 @@ public class CommandDispatcher {
                         "* `!search [<hours>h|<days>d] [user:@mxid] <query>` - Matrix native search (paginated, filter by user)\n" +
                         "* `!page <n>` - Jump to page n of search results\n" +
                         "* `!semantic <hours>h <query>` - AI-free semantic search using local embeddings\n" +
-                        "* `!grep <hours>h <pattern>` - Fast pattern-based search (100 result limit)\n" +
-                        "* `!grep-slow <hours>h <pattern>` - Complete history search, no result limit\n" +
-                        "* `!searchtext <hours>h <pattern>` - Term-based search\n" +
+                        "* `!grep <hours>h <pattern>` - Pattern-based search (paginated)\n" +
+                        "* `!searchtext <hours>h <term1 term2 ...>` - AND-term search (paginated)\n" +
                         "* `!media <hours>h <pattern>` - Search for file attachments\n\n" +
                         "Use `!help 2` for AI commands, `!help 3` for other commands";
                 break;

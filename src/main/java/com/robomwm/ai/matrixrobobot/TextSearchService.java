@@ -48,289 +48,41 @@ public class TextSearchService {
     public void performGrep(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
             String fromToken, String pattern, ZoneId zoneId) {
         try {
-            // Register this operation for abort capability
-            AtomicBoolean abortFlag = new AtomicBoolean(false);
-            runningOperations.put(sender, abortFlag);
-
             String timeInfo = "last " + hours + "h";
 
-            // Send initial message and get event ID for updates
-            String initialMessage = "Performing grep search in " + exportRoomId + " for: \"" + pattern + "\" ("
-                    + timeInfo + ")...";
+            String initialMessage = "Performing grep in " + exportRoomId + " for: \"" + pattern + "\" (" + timeInfo
+                    + ")...";
             String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
-            String originalEventId = eventMessageId; // Track the original event ID for all updates
+            String originalEventId = eventMessageId;
 
-            // Calculate the time range
             long startTime = System.currentTimeMillis() - (long) hours * 3600L * 1000L;
             long endTime = System.currentTimeMillis();
 
-            // If we don't have a pagination token, try to get one via a short sync
-            String token = fromToken;
-            if (token == null) {
-                try {
-                    String filter = "{\"room\":{\"rooms\":[\"" + exportRoomId + "\"],\"timeline\":{\"limit\":1},\"state\":{\"lazy_load_members\":true}},\"presence\":{\"not_types\":[\"m.presence\"]}}";
-                    HttpRequest syncReq = HttpRequest.newBuilder()
-                            .uri(URI.create(homeserverUrl + "/_matrix/client/v3/sync?timeout=0&filter=" + URLEncoder.encode(filter, StandardCharsets.UTF_8)))
-                            .header("Authorization", "Bearer " + config.accessToken)
-                            .GET()
-                            .build();
-                    HttpResponse<String> syncResp = httpClient.send(syncReq, HttpResponse.BodyHandlers.ofString());
-                    if (syncResp.statusCode() == 200) {
-                        JsonNode root = mapper.readTree(syncResp.body());
-                        token = root.path("next_batch").asText(null);
-                    } else {
-                        System.out.println("Sync returned " + syncResp.statusCode() + " for grep pagination token");
-                    }
-                } catch (Exception e) {
-                    System.out.println("Sync failed getting pagination token for grep: " + e.getMessage());
-                }
-            }
+            TextSearchPaginationState state = new TextSearchPaginationState(sender, pattern, null,
+                    pattern.toLowerCase(), true, "Grep", exportRoomId,
+                    responseRoomId, originalEventId, zoneId, startTime, endTime);
 
-            if (token == null) {
-                System.out.println("No pagination token available for grep — results will be empty");
-            }
+            fetchMoreResults(state);
 
-            java.util.List<String> results = new java.util.ArrayList<>();
-            java.util.List<String> eventIds = new java.util.ArrayList<>();
-            int maxResults = 100;
-            boolean truncated = false;
-
-            // Case-insensitive literal pattern matching
-            String lowerPattern = pattern.toLowerCase();
-            long lastUpdateTime = 0;
-            int lastResultCount = 0;
-
-            while (token != null && results.size() < maxResults) {
-                // Check for abort signal
-                if (abortFlag.get()) {
-                    System.out.println("Grep search aborted by user: " + sender);
-                    runningOperations.remove(sender);
-                    return;
-                }
-
-                try {
-                    String messagesUrl = homeserverUrl + "/_matrix/client/v3/rooms/"
-                            + URLEncoder.encode(exportRoomId, StandardCharsets.UTF_8)
-                            + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8)
-                            + "&dir=b&limit=1000";
-                    HttpRequest msgReq = HttpRequest.newBuilder()
-                            .uri(URI.create(messagesUrl))
-                            .header("Authorization", "Bearer " + config.accessToken)
-                            .GET()
-                            .build();
-                    HttpResponse<String> msgResp = httpClient.send(msgReq, HttpResponse.BodyHandlers.ofString());
-                    if (msgResp.statusCode() != 200) {
-                        System.out
-                                .println("Failed to fetch messages: " + msgResp.statusCode() + " - " + msgResp.body());
-                        break;
-                    }
-                    JsonNode root = mapper.readTree(msgResp.body());
-                    JsonNode chunk = root.path("chunk");
-                    if (!chunk.isArray() || chunk.size() == 0)
-                        break;
-
-                    boolean reachedStart = false;
-                    for (JsonNode ev : chunk) {
-                        // Check for abort signal inside the loop too
-                        if (abortFlag.get()) {
-                            System.out.println("Grep search aborted by user: " + sender);
-                            runningOperations.remove(sender);
-                            return;
-                        }
-
-                        if (!"m.room.message".equals(ev.path("type").asText(null)))
-                            continue;
-                        long originServerTs = ev.path("origin_server_ts").asLong(0);
-
-                        if (originServerTs > endTime) {
-                            continue; // Skip messages newer than our range
-                        }
-
-                        if (originServerTs < startTime) {
-                            reachedStart = true;
-                            break; // Stop when we reach messages older than start time
-                        }
-
-                        String body = ev.path("content").path("body").asText(null);
-                        String senderMsg = ev.path("sender").asText(null);
-                        String eventId = ev.path("event_id").asText(null);
-                        if (body != null && senderMsg != null && eventId != null) {
-                            // Format timestamp with timezone (convert UTC to user's timezone)
-                            String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
-                                    .atZone(zoneId)
-                                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
-                            String formattedLog = "[" + timestamp + "] <" + senderMsg + "> " + body;
-
-                            // Case-insensitive literal search on the formatted log line
-                            if (formattedLog.toLowerCase().contains(lowerPattern)) {
-                                results.add(formattedLog);
-                                eventIds.add(eventId);
-
-                                // Update message every every 3 seconds
-                                if (eventMessageId != null && (System.currentTimeMillis() - lastUpdateTime > 3000)) {
-                                    StringBuilder updateMsg = new StringBuilder();
-                                    updateMsg.append("Grep results for \"").append(pattern).append("\" - ");
-                                    updateMsg.append("from last ").append(hours).append(" hours. ");
-                                    updateMsg.append(results.size()).append(" matches (searching...)\n");
-                                    for (int i = 0; i < results.size(); i++) {
-                                        updateMsg.append(results.get(i)).append(" ");
-                                        String messageLink = "https://matrix.to/#/" + exportRoomId + "/"
-                                                + eventIds.get(i);
-                                        updateMsg.append(messageLink).append("\n");
-                                    }
-                                    // Always use original event ID for updates
-                                    matrixClient.updateNoticeMessage(responseRoomId, originalEventId,
-                                            updateMsg.toString());
-                                    lastUpdateTime = System.currentTimeMillis();
-                                    lastResultCount = results.size();
-                                }
-
-                                if (results.size() >= maxResults) {
-                                    truncated = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if (reachedStart) {
-                        break; // We've collected all messages in our time range
-                    }
-
-                    if (token != null) {
-                        token = root.path("end").asText(null);
-                    }
-
-                } catch (Exception e) {
-                    System.out.println("Error during grep search: " + e.getMessage());
-                    break;
-                }
-            }
-
-            if (results.isEmpty()) {
+            if (state.allResults.isEmpty()) {
                 if (originalEventId != null) {
-                    matrixClient.updateTextMessage(responseRoomId, originalEventId, "No matches found for pattern: \""
-                            + pattern + "\" in " + timeInfo + " of " + exportRoomId + ".");
+                    matrixClient.updateTextMessage(responseRoomId, originalEventId,
+                            "No matches found for pattern: \"" + pattern + "\" in " + timeInfo + " of "
+                                    + exportRoomId + ".");
                 } else {
                     matrixClient.sendText(responseRoomId, "No matches found for pattern: \"" + pattern + "\" in "
                             + timeInfo + " of " + exportRoomId + ".");
                 }
-                runningOperations.remove(sender);
                 return;
             }
 
-            // Final update with complete results
-            StringBuilder response = new StringBuilder();
-            response.append("Grep results for \"").append(pattern).append("\" - ");
-            response.append("from last ").append(hours).append(" hours. ");
-            response.append(results.size()).append(" matches.\n");
+            searchCache.put(sender, state);
 
-            for (int i = 0; i < results.size(); i++) {
-                response.append(results.get(i)).append(" ");
-                // Add message link
-                String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + eventIds.get(i);
-                response.append(messageLink).append("\n");
-            }
-
-            if (originalEventId != null) {
-                matrixClient.updateTextMessage(responseRoomId, originalEventId, response.toString());
-            } else {
-                matrixClient.sendText(responseRoomId, response.toString());
-            }
-
-            runningOperations.remove(sender);
+            matrixClient.updateNoticeMessage(responseRoomId, originalEventId, state.renderPage());
 
         } catch (Exception e) {
             System.out.println("Failed to perform grep: " + e.getMessage());
             matrixClient.sendText(responseRoomId, "Error performing grep: " + e.getMessage());
-            runningOperations.remove(sender);
-        }
-    }
-
-    public void performGrepSlow(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
-            String fromToken, String pattern, ZoneId zoneId) {
-        try {
-            // Register this operation for abort capability
-            AtomicBoolean abortFlag = new AtomicBoolean(false);
-            runningOperations.put(sender, abortFlag);
-
-            String timeInfo = "last " + hours + "h";
-
-            matrixClient.sendNotice(responseRoomId, "Performing slow grep search in " + exportRoomId + " for: \""
-                    + pattern + "\" (" + timeInfo + ")...");
-
-            // Calculate the time range
-            long startTime = System.currentTimeMillis() - (long) hours * 3600L * 1000L;
-            long endTime = System.currentTimeMillis();
-
-            // Use existing fetchRoomHistoryWithIds to get all messages first
-            RoomHistoryManager.ChatLogsWithIds result = historyManager.fetchRoomHistoryWithIds(exportRoomId, hours,
-                    fromToken, startTime, endTime, zoneId, abortFlag);
-
-            // Check for abort after fetch
-            if (abortFlag.get()) {
-                System.out.println("Grep-slow aborted by user: " + sender);
-                runningOperations.remove(sender);
-                return;
-            }
-
-            if (result.logs.isEmpty()) {
-                matrixClient.sendText(responseRoomId,
-                        "No chat logs found for " + timeInfo + " in " + exportRoomId + ".");
-                runningOperations.remove(sender);
-                return;
-            }
-
-            // Case-insensitive literal pattern matching
-            String lowerPattern = pattern.toLowerCase();
-            java.util.List<String> results = new java.util.ArrayList<>();
-            java.util.List<String> eventIds = new java.util.ArrayList<>();
-
-            for (int i = 0; i < result.logs.size(); i++) {
-                // Check for abort during processing
-                if (abortFlag.get()) {
-                    System.out.println("Grep-slow aborted by user: " + sender);
-                    runningOperations.remove(sender);
-                    return;
-                }
-
-                String log = result.logs.get(i);
-                String eventId = result.eventIds.get(i);
-
-                // Case-insensitive literal search
-                if (log.toLowerCase().contains(lowerPattern)) {
-                    results.add(log);
-                    eventIds.add(eventId);
-                }
-            }
-
-            if (results.isEmpty()) {
-                matrixClient.sendText(responseRoomId, "No matches found for pattern: \"" + pattern + "\" in " + timeInfo
-                        + " of " + exportRoomId + ".");
-                runningOperations.remove(sender);
-                return;
-            }
-
-            // Format results
-            StringBuilder response = new StringBuilder();
-            response.append("Grep-Slow results for \"").append(pattern).append("\" - ");
-            response.append("from last ").append(hours).append(" hours. ");
-            response.append(results.size()).append(" matches.\n");
-
-            for (int i = 0; i < results.size(); i++) {
-                response.append(results.get(i)).append(" ");
-                // Add message link
-                String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + eventIds.get(i);
-                response.append(messageLink).append("\n");
-            }
-
-            matrixClient.sendText(responseRoomId, response.toString());
-            runningOperations.remove(sender);
-
-        } catch (Exception e) {
-            System.out.println("Failed to perform grep-slow: " + e.getMessage());
-            matrixClient.sendText(responseRoomId, "Error performing grep-slow: " + e.getMessage());
-            runningOperations.remove(sender);
         }
     }
 
@@ -490,15 +242,20 @@ public class TextSearchService {
             String formattedLog = "[" + timestamp + "] <" + senderMsg + "> " + body;
 
             String lowerLog = formattedLog.toLowerCase();
-            boolean allTermsFound = true;
-            for (String term : state.searchTerms) {
-                if (!lowerLog.contains(term)) {
-                    allTermsFound = false;
-                    break;
+            boolean matches;
+            if (state.isGrep) {
+                matches = lowerLog.contains(state.lowerPattern);
+            } else {
+                matches = true;
+                for (String term : state.searchTerms) {
+                    if (!lowerLog.contains(term)) {
+                        matches = false;
+                        break;
+                    }
                 }
             }
 
-            if (allTermsFound) {
+            if (matches) {
                 state.allResults.add(new TextSearchHit(formattedLog, eventId));
             }
         }
@@ -783,6 +540,9 @@ public class TextSearchService {
         final String sender;
         final String query;
         final String[] searchTerms;
+        final String lowerPattern; // null for search mode, set for grep mode
+        final boolean isGrep;
+        final String label;
         final String exportRoomId;
         final String responseRoomId;
         final String eventMessageId;
@@ -797,9 +557,19 @@ public class TextSearchService {
         TextSearchPaginationState(String sender, String query, String[] searchTerms,
                 String exportRoomId, String responseRoomId, String eventMessageId,
                 ZoneId zoneId, long startTime, long endTime) {
+            this(sender, query, searchTerms, null, false, "Search", exportRoomId,
+                    responseRoomId, eventMessageId, zoneId, startTime, endTime);
+        }
+
+        TextSearchPaginationState(String sender, String query, String[] searchTerms, String lowerPattern, boolean isGrep, String label,
+                String exportRoomId, String responseRoomId, String eventMessageId,
+                ZoneId zoneId, long startTime, long endTime) {
             this.sender = sender;
             this.query = query;
             this.searchTerms = searchTerms;
+            this.lowerPattern = lowerPattern;
+            this.isGrep = isGrep;
+            this.label = label;
             this.exportRoomId = exportRoomId;
             this.responseRoomId = responseRoomId;
             this.eventMessageId = eventMessageId;
@@ -826,7 +596,7 @@ public class TextSearchService {
         String renderPage() {
             List<TextSearchHit> pageHits = getCurrentPageHits();
             StringBuilder sb = new StringBuilder();
-            sb.append("Search results for \"").append(query).append("\"");
+            sb.append(label).append(" results for \"").append(query).append("\"");
             sb.append(" from last ").append((endTime - startTime) / 3600000).append(" hours in ");
             sb.append(exportRoomId).append("\n");
             sb.append("Page ").append(currentPage + 1).append("/");
