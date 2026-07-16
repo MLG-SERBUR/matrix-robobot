@@ -149,7 +149,7 @@ public class PleadService {
             }
 
             String reaction;
-            int chance = random.nextInt(5);
+            int chance = random.nextInt(14);
             if (chance == 0) {
                 reaction = "🥺";
             } else if (chance == 1) {
@@ -158,6 +158,24 @@ public class PleadService {
                 reaction = "👈👉";
             } else if (chance == 3) {
                 reaction = "👉😵👈";
+            } else if (chance == 4) {
+                reaction = "☝️👇";
+            } else if (chance == 5) {
+                reaction = "👇☝️";
+            } else if (chance == 6) {
+                reaction = "☝️☝️";
+            } else if (chance == 7) {
+                reaction = "👇👇";
+            } else if (chance == 8) {
+                reaction = "👈👈";
+            } else if (chance == 9) {
+                reaction = "👉👉";
+            } else if (chance == 10) {
+                reaction = "👆👇";
+            } else if (chance == 11) {
+                reaction = "👇👆";
+            } else if (chance == 12) {
+                reaction = "👆👆";
             } else {
                 reaction = THIRD_CHANCE_REACTIONS[random.nextInt(THIRD_CHANCE_REACTIONS.length)];
             }
