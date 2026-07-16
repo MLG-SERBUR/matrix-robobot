@@ -61,8 +61,9 @@ public class TextSearchService {
             String token = fromToken;
             if (token == null) {
                 try {
+                    String filter = "{\"room\":{\"rooms\":[\"" + exportRoomId + "\"],\"timeline\":{\"limit\":1},\"state\":{\"lazy_load_members\":true}},\"presence\":{\"not_types\":[\"m.presence\"]}}";
                     HttpRequest syncReq = HttpRequest.newBuilder()
-                            .uri(URI.create(homeserverUrl + "/_matrix/client/v3/sync?timeout=0"))
+                            .uri(URI.create(homeserverUrl + "/_matrix/client/v3/sync?timeout=0&filter=" + URLEncoder.encode(filter, StandardCharsets.UTF_8)))
                             .header("Authorization", "Bearer " + config.accessToken)
                             .GET()
                             .build();
@@ -70,11 +71,16 @@ public class TextSearchService {
                     if (syncResp.statusCode() == 200) {
                         JsonNode root = mapper.readTree(syncResp.body());
                         token = root.path("next_batch").asText(null);
+                    } else {
+                        System.out.println("Sync returned " + syncResp.statusCode() + " for grep pagination token");
                     }
-                } catch (Exception ignore) {
-                    // ignore errors here, we'll just start fetching from the latest available if
-                    // sync fails
+                } catch (Exception e) {
+                    System.out.println("Sync failed getting pagination token for grep: " + e.getMessage());
                 }
+            }
+
+            if (token == null) {
+                System.out.println("No pagination token available for grep — results will be empty");
             }
 
             java.util.List<String> results = new java.util.ArrayList<>();
@@ -348,8 +354,9 @@ public class TextSearchService {
             String token = fromToken;
             if (token == null) {
                 try {
+                    String filter = "{\"room\":{\"rooms\":[\"" + exportRoomId + "\"],\"timeline\":{\"limit\":1},\"state\":{\"lazy_load_members\":true}},\"presence\":{\"not_types\":[\"m.presence\"]}}";
                     HttpRequest syncReq = HttpRequest.newBuilder()
-                            .uri(URI.create(homeserverUrl + "/_matrix/client/v3/sync?timeout=0"))
+                            .uri(URI.create(homeserverUrl + "/_matrix/client/v3/sync?timeout=0&filter=" + URLEncoder.encode(filter, StandardCharsets.UTF_8)))
                             .header("Authorization", "Bearer " + config.accessToken)
                             .GET()
                             .build();
@@ -563,8 +570,9 @@ public class TextSearchService {
             String token = fromToken;
             if (token == null) {
                 try {
+                    String filter = "{\"room\":{\"rooms\":[\"" + exportRoomId + "\"],\"timeline\":{\"limit\":1},\"state\":{\"lazy_load_members\":true}},\"presence\":{\"not_types\":[\"m.presence\"]}}";
                     HttpRequest syncReq = HttpRequest.newBuilder()
-                            .uri(URI.create(homeserverUrl + "/_matrix/client/v3/sync?timeout=0"))
+                            .uri(URI.create(homeserverUrl + "/_matrix/client/v3/sync?timeout=0&filter=" + URLEncoder.encode(filter, StandardCharsets.UTF_8)))
                             .header("Authorization", "Bearer " + config.accessToken)
                             .GET()
                             .build();
@@ -572,11 +580,16 @@ public class TextSearchService {
                     if (syncResp.statusCode() == 200) {
                         JsonNode root = mapper.readTree(syncResp.body());
                         token = root.path("next_batch").asText(null);
+                    } else {
+                        System.out.println("Sync returned " + syncResp.statusCode() + " for media search pagination token");
                     }
-                } catch (Exception ignore) {
-                    // ignore errors here, we'll just start fetching from the latest available if
-                    // sync fails
+                } catch (Exception e) {
+                    System.out.println("Sync failed getting pagination token for media search: " + e.getMessage());
                 }
+            }
+
+            if (token == null) {
+                System.out.println("No pagination token available for media search — results will be empty");
             }
 
             // Parse search terms (space-separated, case-insensitive)
