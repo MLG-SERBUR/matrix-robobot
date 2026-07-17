@@ -265,8 +265,7 @@ public class AIService {
             }
 
             // Apply quality filter
-            history = new RoomHistoryManager.ChatLogsResult(
-                    filterUserMessages(history.logs, QUALITY_FILTER_USER), history.firstEventId, history.errorMessage, history.antispamApplied);
+            history = filterLogsByUser(history, QUALITY_FILTER_USER);
 
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
@@ -344,9 +343,10 @@ public class AIService {
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
                             new String[]{null}, footer, timeoutSeconds, abortFlag, false, exportRoomId,
-                            history.firstEventId);
+                            history.firstEventId, history.logs, history.eventIds);
                 } else {
                     String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    answer = MessageLinkMapper.mapLinks(answer, history.logs, history.eventIds, exportRoomId);
                     matrixClient.sendMarkdownWithEventId(responseRoomId,
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model));
@@ -397,8 +397,7 @@ public class AIService {
                                 "All providers failed. Removing spammer messages from specific spammy user and retrying...");
                         
                         // Create filtered history removing messages from the specific user
-                        RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
-                                filterUserMessages(history.logs, "@buynbadrah:mikuplushfarm.ovh"), history.firstEventId, history.errorMessage, false);
+                        RoomHistoryManager.ChatLogsResult filteredHistory = filterLogsByUser(history, "@buynbadrah:mikuplushfarm.ovh");
                         
                         // Retry with specific user filtering
                         performAIQueryWithUserFilter(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, 
@@ -461,9 +460,10 @@ public class AIService {
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
                             new String[]{null}, footer, timeoutSeconds, abortFlag, false, exportRoomId,
-                            history.firstEventId);
+                            history.firstEventId, history.logs, history.eventIds);
                 } else {
                     String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    answer = MessageLinkMapper.mapLinks(answer, history.logs, history.eventIds, exportRoomId);
                     matrixClient.sendMarkdownWithEventId(responseRoomId,
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model));
@@ -478,7 +478,7 @@ public class AIService {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                
+
                 String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
                 accumulatedStatus.setLength(0);
@@ -515,7 +515,9 @@ public class AIService {
                         
                         // Create filtered history - antispam will be applied by performAIQueryWithAntispam
                         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
-                                history.logs, history.firstEventId, history.errorMessage, false);
+                                history.logs, history.firstEventId, history.errorMessage,
+                                history.imageUrls, history.imageCaptions, history.imageEventIds,
+                                history.eventIds, false);
                         
                         // Retry with antispam filtering
                         performAIQueryWithAntispam(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, 
@@ -556,7 +558,9 @@ public class AIService {
             filteredLogs = AntispamFilter.applyAllFilters(history.logs);
         }
         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
-                filteredLogs, history.firstEventId, history.errorMessage, true);
+                filteredLogs, history.firstEventId, history.errorMessage,
+                history.imageUrls, history.imageCaptions, history.imageEventIds,
+                history.antispamApplied ? history.eventIds : null, true);
         
         String prompt = buildPrompt(question, filteredLogs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
@@ -589,9 +593,10 @@ public class AIService {
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
                             outputEventIdHolder, footer, timeoutSeconds, abortFlag, false, exportRoomId,
-                            filteredHistory.firstEventId);
+                            filteredHistory.firstEventId, filteredHistory.logs, filteredHistory.eventIds);
                 } else {
                     String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    answer = MessageLinkMapper.mapLinks(answer, filteredHistory.logs, filteredHistory.eventIds, exportRoomId);
                     String renderedAnswer = appendMessageLink(answer, exportRoomId, filteredHistory.firstEventId,
                             provider.displayName, attempt.model);
                     matrixClient.sendMarkdownWithEventId(responseRoomId, renderedAnswer);
@@ -835,22 +840,32 @@ public class AIService {
             boolean isAsk, String responseRoomId, String[] eventIdHolder, String footer, int timeoutSeconds,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, boolean useNotice, String exportRoomId,
             String firstEventId) throws Exception {
+        return callStreamingToEvent(provider, prompt, model, skipSystem, isAsk, responseRoomId,
+                eventIdHolder, footer, timeoutSeconds, abortFlag, useNotice, exportRoomId, firstEventId,
+                null, null);
+    }
+
+    private String callStreamingToEvent(ProviderConfig provider, String prompt, String model, boolean skipSystem,
+            boolean isAsk, String responseRoomId, String[] eventIdHolder, String footer, int timeoutSeconds,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, boolean useNotice, String exportRoomId,
+            String firstEventId, List<String> logs, List<String> eventIds) throws Exception {
         HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, true, timeoutSeconds);
         return AIRequestQueue.run(provider.displayName + " (" + model + ") streaming",
                 () -> streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, provider.displayName,
-                        abortFlag, footer, useNotice, exportRoomId, firstEventId));
+                        abortFlag, footer, useNotice, exportRoomId, firstEventId, logs, eventIds));
     }
 
 
     protected String streamArliAIResponse(HttpRequest request, String responseRoomId, String exportRoomId, String firstEventId, String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
         String[] eventIdHolder = new String[]{null};
         return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, aiName, abortFlag, footer, true,
-                exportRoomId, firstEventId);
+                exportRoomId, firstEventId, null, null);
     }
 
     protected String streamArliAIResponseToEvent(HttpRequest request, String responseRoomId, String[] eventIdHolder,
             String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer, boolean useNotice,
-            String exportRoomId, String firstEventId) throws Exception {
+            String exportRoomId, String firstEventId,
+            List<String> logs, List<String> eventIds) throws Exception {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
         StringBuilder reasoning = new StringBuilder();
@@ -996,6 +1011,7 @@ public class AIService {
             finalOutput = finalOutput + "\n\n" + footer;
         }
 
+        finalOutput = MessageLinkMapper.mapLinks(finalOutput, logs, eventIds, exportRoomId);
         finalOutput = appendMessageLink(finalOutput, exportRoomId, firstEventId, aiName, actualModel);
 
         if (eventIdHolder[0] == null) {
@@ -1104,8 +1120,7 @@ public class AIService {
                     zoneId, true, abortFlag, progressCallback);
 
             // Apply quality filter
-            result = new RoomHistoryManager.ChatLogsResult(
-                    filterUserMessages(result.logs, QUALITY_FILTER_USER), result.firstEventId, result.errorMessage, result.antispamApplied);
+            result = filterLogsByUser(result, QUALITY_FILTER_USER);
 
             if (result.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
@@ -1209,8 +1224,7 @@ public class AIService {
                     fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
 
             // Apply quality filter
-            history = new RoomHistoryManager.ChatLogsResult(
-                    filterUserMessages(history.logs, QUALITY_FILTER_USER), history.firstEventId, history.errorMessage, history.antispamApplied);
+            history = filterLogsByUser(history, QUALITY_FILTER_USER);
 
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
@@ -1468,17 +1482,23 @@ public class AIService {
         return aiAnswer + footer;
     }
 
-    private static List<String> filterUserMessages(List<String> logs, String userId) {
-        if (logs == null || logs.isEmpty()) {
-            return logs;
-        }
-        List<String> filtered = new ArrayList<>();
-        for (String log : logs) {
-            if (!log.contains("<" + userId + ">")) {
-                filtered.add(log);
+    private static RoomHistoryManager.ChatLogsResult filterLogsByUser(
+            RoomHistoryManager.ChatLogsResult history, String userId) {
+        if (history == null || history.logs == null) return history;
+        List<String> newLogs = new ArrayList<>();
+        List<String> newEventIds = new ArrayList<>();
+        for (int i = 0; i < history.logs.size(); i++) {
+            if (!history.logs.get(i).contains("<" + userId + ">")) {
+                newLogs.add(history.logs.get(i));
+                if (history.eventIds != null && i < history.eventIds.size()) {
+                    newEventIds.add(history.eventIds.get(i));
+                }
             }
         }
-        return filtered;
+        return new RoomHistoryManager.ChatLogsResult(
+                newLogs, history.firstEventId, history.errorMessage,
+                history.imageUrls, history.imageCaptions, history.imageEventIds,
+                newEventIds, history.antispamApplied);
     }
 
 }
