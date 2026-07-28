@@ -6,12 +6,12 @@ import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class FingerGunReactionService {
+public class LifeReactService {
     private final MatrixClient matrixClient;
     private final Random random = new Random();
     private static final Pattern WORD_PATTERN = Pattern.compile("\\b\\w+\\b");
 
-    public FingerGunReactionService(MatrixClient matrixClient) {
+    public LifeReactService(MatrixClient matrixClient) {
         this.matrixClient = matrixClient;
     }
 

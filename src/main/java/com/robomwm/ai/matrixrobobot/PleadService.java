@@ -11,10 +11,10 @@ public class PleadService {
     protected final Path persistenceFile;
     protected boolean isEnabled = false;
     protected final Random random = new Random();
-    private FingerGunReactionService fingerGunReactionService;
+    private LifeReactService lifeReactService;
 
-    public void setFingerGunReactionService(FingerGunReactionService service) {
-        this.fingerGunReactionService = service;
+    public void setLifeReactService(LifeReactService service) {
+        this.lifeReactService = service;
     }
 
     protected static final String[] THIRD_CHANCE_REACTIONS = {
@@ -147,8 +147,8 @@ public class PleadService {
             return;
         }
 
-        if (senderId != null && senderId.contains("@17lifers:") && fingerGunReactionService != null) {
-            fingerGunReactionService.processMessage(roomId, eventId, body, senderId);
+        if (senderId != null && senderId.contains("@17lifers:") && lifeReactService != null) {
+            lifeReactService.processMessage(roomId, eventId, body, senderId);
             return;
         }
 
