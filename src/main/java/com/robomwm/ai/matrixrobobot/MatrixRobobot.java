@@ -113,6 +113,7 @@ public class MatrixRobobot {
         
         // NEW: PleadService for 🥺 reactions
         PleadService pleadService = new PleadService(matrixClient);
+        pleadService.setFingerGunReactionService(new FingerGunReactionService(matrixClient));
         
         // NEW: OkReactionService for consecutive "ok" reactions
         OkReactionService okReactionService = new OkReactionService(matrixClient);
