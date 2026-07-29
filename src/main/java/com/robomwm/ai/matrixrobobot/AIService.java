@@ -1481,4 +1481,75 @@ public class AIService {
         return filtered;
     }
 
+    static List<String> filterOnlyUserMessages(List<String> logs, String userId) {
+        if (logs == null || logs.isEmpty()) {
+            return logs;
+        }
+        List<String> filtered = new ArrayList<>();
+        for (String log : logs) {
+            if (log.contains("<" + userId + ">")) {
+                filtered.add(log);
+            }
+        }
+        return filtered;
+    }
+
+    public void queryUserAsk(String responseRoomId, String exportRoomId, String targetUser, String question,
+                             java.util.concurrent.atomic.AtomicBoolean abortFlag, ZoneId zoneId) {
+        MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
+        try {
+            int targetPromptTokens = 12000;
+            String emptyPrompt = buildPrompt(question, new ArrayList<>(), Prompts.ASK_PREFIX);
+            int chatFormatOverhead = 20;
+            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) +
+                             RoomHistoryManager.estimateTokens(emptyPrompt) +
+                             chatFormatOverhead;
+            int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
+
+            String displayName = targetUser.contains(":") ? targetUser.substring(1, targetUser.indexOf(":")) : targetUser.substring(1);
+            String gatherMsg = "\uD83D\uDCE8 Gathering messages from " + displayName + " (up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
+            String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
+
+            final String fStatusEventId = statusEventId;
+            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
+                long now = System.currentTimeMillis();
+                if (now - lastProgressUpdate.get() >= 5000) {
+                    lastProgressUpdate.set(now);
+                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
+                            "\uD83D\uDCE8 Gathering messages from " + displayName + "... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                }
+            };
+
+            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
+                    null, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
+
+            if (history.logs.isEmpty()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        "No chat logs found in " + exportRoomId + ".");
+                return;
+            }
+
+            // Filter to only messages from the target user
+            history = new RoomHistoryManager.ChatLogsResult(
+                    filterOnlyUserMessages(history.logs, targetUser), history.firstEventId, history.errorMessage, history.antispamApplied);
+
+            if (history.logs.isEmpty()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        "No messages found from " + displayName + " in " + exportRoomId + ".");
+                return;
+            }
+
+            matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                    "\uD83D\uDCE8 Found " + history.logs.size() + " messages from " + displayName + ". Querying AI...");
+
+            performAIQuery(responseRoomId, exportRoomId, history, question, Prompts.ASK_PREFIX, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            matrixClient.sendMarkdownNotice(responseRoomId, "Error querying user messages: " + e.getMessage());
+        }
+    }
+
 }

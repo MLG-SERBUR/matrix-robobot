@@ -212,6 +212,9 @@ public class CommandDispatcher {
         } else if (trimmed.matches("!qask(?:\\s+.*)?")) {
             handleAskFiltered(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
+        } else if (trimmed.matches("!userask\\s+.+")) {
+            handleUserAsk(trimmed, roomId, sender, responseRoomId, exportRoomId);
+            return true;
         } else if (trimmed.matches("!debugai(?:\\s+.*)?") || trimmed.matches("!debugai-ts(?:\\s+.*)?")) {
             handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!debugai",
                     AIService.Backend.AUTO, AIService.Prompts.DEBUGAI_PREFIX);
@@ -577,6 +580,77 @@ public class CommandDispatcher {
         new Thread(() -> {
             try {
                 aiService.queryAskFiltered(responseRoomId, exportRoomId, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
+            } finally {
+                runningOperations.remove(sender);
+            }
+        }).start();
+    }
+
+    private void handleUserAsk(String trimmed, String roomId, String sender, String responseRoomId, String exportRoomId) {
+        String args = trimmed.replaceFirst("^!userask\\s*", "").trim();
+        if (args.isEmpty()) {
+            matrixClient.sendText(responseRoomId, "Usage: !userask <@user:server or username> [question]\n" +
+                    "Example: !userask @alice:example.com What does alice talk about?\n" +
+                    "Example: !userask alice What are alice's interests?");
+            return;
+        }
+
+        String targetUser = null;
+        String question = null;
+
+        // Check if first token is a full MXID
+        String[] parts = args.split("\\s+", 2);
+        String firstToken = parts[0];
+
+        if (firstToken.startsWith("@") && firstToken.contains(":")) {
+            targetUser = firstToken;
+            question = parts.length > 1 ? parts[1].trim() : null;
+        } else {
+            // Try fuzzy matching against room members
+            java.util.List<String> memberIds = matrixClient.getRoomMemberIds(roomId);
+            String lowerFirst = firstToken.toLowerCase();
+            for (String memberId : memberIds) {
+                if (memberId == null || !memberId.startsWith("@") || memberId.indexOf(':', 1) < 0) continue;
+                String localpart = memberId.substring(1, memberId.indexOf(':', 1));
+                if (localpart.equalsIgnoreCase(lowerFirst) || localpart.toLowerCase().contains(lowerFirst)) {
+                    targetUser = memberId;
+                    break;
+                }
+            }
+
+            if (targetUser != null) {
+                question = parts.length > 1 ? parts[1].trim() : null;
+            } else {
+                // No member match, treat entire args as: first token was a name, but not found
+                matrixClient.sendText(responseRoomId, "No matching room member found for: " + firstToken + "\n" +
+                        "Use full MXID like @alice:example.com or check the username spelling.");
+                return;
+            }
+        }
+
+        if (targetUser == null) {
+            matrixClient.sendText(responseRoomId, "Usage: !userask <@user:server or username> [question]");
+            return;
+        }
+
+        // Check self-query
+        if (targetUser.equals(sender)) {
+            matrixClient.sendText(responseRoomId, "You can't query yourself! Nice try though.");
+            return;
+        }
+
+        System.out.println("Received !userask command in " + roomId + " from " + sender + " (target: " + targetUser + ")");
+
+        AtomicBoolean abortFlag = new AtomicBoolean(false);
+        runningOperations.put(sender, abortFlag);
+
+        final String fTargetUser = targetUser;
+        final String fQuestion = question;
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+
+        new Thread(() -> {
+            try {
+                aiService.queryUserAsk(responseRoomId, exportRoomId, fTargetUser, fQuestion, abortFlag, zoneId);
             } finally {
                 runningOperations.remove(sender);
             }
@@ -1137,6 +1211,8 @@ public class CommandDispatcher {
                         "* `!arliai <model> <prompt>` - Query ArliAI with specific model (fuzzy matched)\n" +
                         "* `!debugarliai <model> [params...] <prompt>` - Query ArliAI with custom API parameters\n" +
                         "* `!aisearch <hours>h <query>` - AI-powered agentic search (files, images, videos, conversations)\n\n" +
+                        "**User-specific**:\n" +
+                        "* `!userask <@user or username> [question]` - Query AI using ONLY messages from a specific user\n\n" +
                         "**Quality-filtered variants** (ignores specific spammy user):\n" +
                         "* `!qtldr`, `!qsummary`, `!qoverview`, `!qask` - Same as above but with quality filtering\n\n" +
                         "Use `!help 1` for search commands, `!help 3` for other commands";
