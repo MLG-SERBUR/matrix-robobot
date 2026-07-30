@@ -633,12 +633,6 @@ public class CommandDispatcher {
             return;
         }
 
-        // Check self-query
-        if (targetUser.equals(sender)) {
-            matrixClient.sendText(responseRoomId, "You can't query yourself! Nice try though.");
-            return;
-        }
-
         System.out.println("Received !userask command in " + roomId + " from " + sender + " (target: " + targetUser + ")");
 
         AtomicBoolean abortFlag = new AtomicBoolean(false);
