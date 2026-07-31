@@ -106,6 +106,11 @@ public class PleadService {
         "Why?", "and?", "WATT"
     };
 
+    private static final String[] OTHER_POINTING_REACTIONS = {
+        "☝️👇", "👇☝️", "☝️☝️", "👇👇",
+        "👈👈", "👉👉", "👆👇", "👇👆", "👆👆"
+    };
+
     public PleadService(MatrixClient matrixClient) {
         this.matrixClient = matrixClient;
         this.persistenceFile = Paths.get("plead_enabled.txt");
@@ -159,33 +164,17 @@ public class PleadService {
             }
 
             String reaction;
-            int chance = random.nextInt(14);
+            int chance = random.nextInt(6);
             if (chance == 0) {
                 reaction = "🥺";
             } else if (chance == 1) {
                 reaction = "👉👈";
             } else if (chance == 2) {
-                reaction = "👈👉";
-            } else if (chance == 3) {
                 reaction = "👉😵👈";
+            } else if (chance == 3) {
+                reaction = "👈👉";
             } else if (chance == 4) {
-                reaction = "☝️👇";
-            } else if (chance == 5) {
-                reaction = "👇☝️";
-            } else if (chance == 6) {
-                reaction = "☝️☝️";
-            } else if (chance == 7) {
-                reaction = "👇👇";
-            } else if (chance == 8) {
-                reaction = "👈👈";
-            } else if (chance == 9) {
-                reaction = "👉👉";
-            } else if (chance == 10) {
-                reaction = "👆👇";
-            } else if (chance == 11) {
-                reaction = "👇👆";
-            } else if (chance == 12) {
-                reaction = "👆👆";
+                reaction = OTHER_POINTING_REACTIONS[random.nextInt(OTHER_POINTING_REACTIONS.length)];
             } else {
                 reaction = THIRD_CHANCE_REACTIONS[random.nextInt(THIRD_CHANCE_REACTIONS.length)];
             }
