@@ -1,15 +1,15 @@
 package com.robomwm.ai.matrixrobobot;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Random;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class LifeReactService {
     private final MatrixClient matrixClient;
     private final Random random = new Random();
-    private static final Pattern WORD_PATTERN = Pattern.compile("\\b\\w+\\b");
+
+    private static final String[] OTHER_FIST_REACTIONS = {
+        "✊👊", "👊✊", "✊✊", "👊👊",
+        "🤛🤛", "🤜🤜", "✊👊", "👊✊", "✊✊"
+    };
 
     public LifeReactService(MatrixClient matrixClient) {
         this.matrixClient = matrixClient;
@@ -21,23 +21,20 @@ public class LifeReactService {
         }
 
         String reaction;
-        if (random.nextInt(2) == 0) {
-            reaction = PleadService.THIRD_CHANCE_REACTIONS[random.nextInt(PleadService.THIRD_CHANCE_REACTIONS.length)];
+        int chance = random.nextInt(6);
+        if (chance == 0) {
+            reaction = "🥺";
+        } else if (chance == 1) {
+            reaction = "🤜🤛";
+        } else if (chance == 2) {
+            reaction = "🤜😵🤛";
+        } else if (chance == 3) {
+            reaction = "🤛🤜";
+        } else if (chance == 4) {
+            reaction = OTHER_FIST_REACTIONS[random.nextInt(OTHER_FIST_REACTIONS.length)];
         } else {
-            reaction = getRandomWord(body);
+            reaction = PleadService.THIRD_CHANCE_REACTIONS[random.nextInt(PleadService.THIRD_CHANCE_REACTIONS.length)];
         }
         matrixClient.sendReaction(roomId, eventId, reaction);
-    }
-
-    private String getRandomWord(String body) {
-        Matcher matcher = WORD_PATTERN.matcher(body);
-        List<String> words = new ArrayList<>();
-        while (matcher.find()) {
-            words.add(matcher.group());
-        }
-        if (words.isEmpty()) {
-            return PleadService.THIRD_CHANCE_REACTIONS[random.nextInt(PleadService.THIRD_CHANCE_REACTIONS.length)];
-        }
-        return words.get(random.nextInt(words.size()));
     }
 }

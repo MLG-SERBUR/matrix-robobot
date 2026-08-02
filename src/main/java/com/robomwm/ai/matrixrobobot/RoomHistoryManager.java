@@ -474,11 +474,12 @@ public class RoomHistoryManager {
             String url = homeserverUrl + "/_matrix/client/v3/rooms/"
                     + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
                     + "/context/" + URLEncoder.encode(eventId, StandardCharsets.UTF_8) + "?limit=0";
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .GET()
-                    .build();
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .timeout(Duration.ofMinutes(30))
+                        .GET()
+                        .build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() == 200) {
                 JsonNode root = mapper.readTree(resp.body());
