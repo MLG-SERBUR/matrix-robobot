@@ -1295,7 +1295,6 @@ public class AIService {
             payload.put("messages", buildMessages(prompt, skipSystem, isAsk));
             payload.put("stream", stream);
             payload.putAll(provider.extraPayload);
-            payload.put("provider", Map.of("zdr", true));
         } else {
             payload.put("model", model);
             payload.put("messages", buildMessages(prompt, skipSystem, isAsk));
