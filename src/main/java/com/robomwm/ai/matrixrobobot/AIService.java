@@ -115,6 +115,8 @@ public class AIService {
         payload.putIfAbsent("min_p", 0.0);
         payload.putIfAbsent("presence_penalty", 1.5);
         payload.putIfAbsent("repetition_penalty", 1.0);
+        payload.put("reasoning_effort", "none");
+        payload.put("thinking_token_budget", 0);
         payload.put("chat_template_kwargs", Map.of("enable_thinking", false));
     }
 
@@ -353,7 +355,7 @@ public class AIService {
                 }
                 // Success - flush any batched status immediately
                 if (batching && batchStatus.length() > 0) {
-                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), true);
+                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                     batchStatus.setLength(0);
                 }
                 return;
@@ -377,7 +379,7 @@ public class AIService {
                     if (i == attempts.size() - 1 || 
                         (lastUpdateTime != null && Duration.between(lastUpdateTime, now).toMillis() >= STATUS_UPDATE_INTERVAL_MS) ||
                         batchStatus.length() >= 500) { // Reasonable max length
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                         lastUpdateTime = now;
                     }
                 } else {
@@ -411,7 +413,7 @@ public class AIService {
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     // Flush any remaining batched status on final error
                     if (batching && batchStatus.length() > 0) {
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                         batchStatus.setLength(0);
                     }
                     return;
@@ -470,7 +472,7 @@ public class AIService {
                 }
                 // Success - flush any batched status immediately
                 if (batching && batchStatus.length() > 0) {
-                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), true);
+                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                     batchStatus.setLength(0);
                 }
                 return;
@@ -494,7 +496,7 @@ public class AIService {
                     if (i == attempts.size() - 1 || 
                         (lastUpdateTime != null && Duration.between(lastUpdateTime, now).toMillis() >= STATUS_UPDATE_INTERVAL_MS) ||
                         batchStatus.length() >= 500) { // Reasonable max length
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                         lastUpdateTime = now;
                     }
                 } else {
@@ -528,7 +530,7 @@ public class AIService {
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     // Flush any remaining batched status on final error
                     if (batching && batchStatus.length() > 0) {
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                         batchStatus.setLength(0);
                     }
                     return;
@@ -598,7 +600,7 @@ public class AIService {
                 }
                 // Success - flush any batched status immediately
                 if (batching && batchStatus.length() > 0) {
-                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), true);
+                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                     batchStatus.setLength(0);
                 }
                 return;
@@ -622,7 +624,7 @@ public class AIService {
                     if (i == attempts.size() - 1 || 
                         (lastUpdateTime != null && Duration.between(lastUpdateTime, now).toMillis() >= STATUS_UPDATE_INTERVAL_MS) ||
                         batchStatus.length() >= 500) { // Reasonable max length
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                         lastUpdateTime = now;
                     }
                 } else {
@@ -639,7 +641,7 @@ public class AIService {
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     // Flush any remaining batched status on final error
                     if (batching && batchStatus.length() > 0) {
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                         batchStatus.setLength(0);
                     }
                     return;
@@ -652,7 +654,7 @@ public class AIService {
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     // Flush any remaining batched status on final error
                     if (batching && batchStatus.length() > 0) {
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString(), false);
+                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
                         batchStatus.setLength(0);
                     }
                     return;
@@ -672,12 +674,8 @@ public class AIService {
         return existingStatus + "\n" + newLine;
     }
 
-    private void sendBatchedUpdate(MatrixClient matrixClient, String roomId, String eventId, String status, boolean success) {
+    private void sendBatchedUpdate(MatrixClient matrixClient, String roomId, String eventId, String status) {
         if (eventId == null || eventId.isEmpty()) return;
-        if (success) {
-            // On success, we already updated with the answer, just ensure batch is cleared
-            return;
-        }
         matrixClient.updateNoticeMessage(roomId, eventId, status);
     }
 
