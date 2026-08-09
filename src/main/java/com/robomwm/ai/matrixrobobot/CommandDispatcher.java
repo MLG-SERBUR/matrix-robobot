@@ -16,6 +16,10 @@ import java.util.regex.Pattern;
  * Keeps only non-!last commands here. !last is handled in the main bot.
  */
 public class CommandDispatcher {
+    static boolean isAskCommand(String command) {
+        return command.matches("!ask(?:\\s+[\\s\\S]*)?");
+    }
+
     private final MatrixClient matrixClient;
     private final RoomHistoryManager historyManager;
     private final Map<String, AtomicBoolean> runningOperations;
@@ -239,7 +243,7 @@ public class CommandDispatcher {
             handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummary",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
-        } else if (trimmed.matches("!ask(?:\\s+.*)?")) {
+        } else if (isAskCommand(trimmed)) {
             handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO);
             return true;
         } else if (trimmed.matches("!debugarliai(?:\\s+.*)?")) {

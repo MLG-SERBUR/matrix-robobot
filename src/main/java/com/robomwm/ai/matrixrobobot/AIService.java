@@ -1128,10 +1128,11 @@ public class AIService {
             // We reserve ~4000 tokens for the generated response to be safe.
             int targetPromptTokens = 12000;
 
-            // Calculate base tokens consumed by prompts and the user's question
+            // Account for both messages sent to the provider: the ask system prompt
+            // and the complete user prompt, including the question.
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20; // Special tokens: BOS/EOS, role markers (im_start/im_end), separators
-            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) +
+            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_ASK) +
                              RoomHistoryManager.estimateTokens(emptyPrompt) +
                              chatFormatOverhead;
 
@@ -1182,7 +1183,7 @@ public class AIService {
             int targetPromptTokens = 12000;
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20;
-            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) +
+            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_ASK) +
                              RoomHistoryManager.estimateTokens(emptyPrompt) +
                              chatFormatOverhead;
 
@@ -1498,7 +1499,7 @@ public class AIService {
             int targetPromptTokens = 12000;
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), Prompts.ASK_PREFIX);
             int chatFormatOverhead = 20;
-            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_OVERVIEW) +
+            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_ASK) +
                              RoomHistoryManager.estimateTokens(emptyPrompt) +
                              chatFormatOverhead;
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
