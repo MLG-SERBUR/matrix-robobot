@@ -167,9 +167,21 @@ public class AIService {
         public static final String DEBUGAI_PREFIX = "\n\n";
     }
 
+    public static final ThreadLocal<Map<String, Object>> threadExtraContent = new ThreadLocal<>();
+
     public void queryAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
             String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
+        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
+        botContext.put("hours", hours);
+        botContext.put("maxMessages", maxMessages);
+        botContext.put("startEventId", startEventId);
+        botContext.put("forward", forward);
+        botContext.put("exportRoomId", exportRoomId);
+        java.util.Map<String, Object> extra = new java.util.HashMap<>();
+        extra.put("ai.matrixrobobot.context", botContext);
+        threadExtraContent.set(extra);
+
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             final String timeInfo;
@@ -231,6 +243,16 @@ public class AIService {
     public void queryAIFiltered(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
             String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
+        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
+        botContext.put("hours", hours);
+        botContext.put("maxMessages", maxMessages);
+        botContext.put("startEventId", startEventId);
+        botContext.put("forward", forward);
+        botContext.put("exportRoomId", exportRoomId);
+        java.util.Map<String, Object> extra = new java.util.HashMap<>();
+        extra.put("ai.matrixrobobot.context", botContext);
+        threadExtraContent.set(extra);
+
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             final String timeInfo;
@@ -351,7 +373,7 @@ public class AIService {
                     String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
                     matrixClient.sendMarkdownWithEventId(responseRoomId,
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
-                                    attempt.model));
+                                    attempt.model), threadExtraContent.get());
                 }
                 // Success - flush any batched status immediately
                 if (batching && batchStatus.length() > 0) {
@@ -468,7 +490,7 @@ public class AIService {
                     String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
                     matrixClient.sendMarkdownWithEventId(responseRoomId,
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
-                                    attempt.model));
+                                    attempt.model), threadExtraContent.get());
                 }
                 // Success - flush any batched status immediately
                 if (batching && batchStatus.length() > 0) {
@@ -940,11 +962,12 @@ public class AIService {
                             boolean isThinkingOnly = reasoning.length() > 0 && responseContent.length() == 0;
                             if (eventIdHolder[0] == null) {
                                 sentAsNotice = !isThinkingOnly && useNotice;
+                                Map<String, Object> extra = threadExtraContent.get();
                                 eventIdHolder[0] = isThinkingOnly
-                                        ? matrixClient.sendMarkdownWithEventId(responseRoomId, rendered)
+                                        ? matrixClient.sendMarkdownWithEventId(responseRoomId, rendered, extra)
                                         : (useNotice
                                         ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, rendered)
-                                        : matrixClient.sendMarkdownWithEventId(responseRoomId, rendered));
+                                        : matrixClient.sendMarkdownWithEventId(responseRoomId, rendered, extra));
                             } else {
                                 if (sentAsNotice) {
                                     matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], rendered);
@@ -997,13 +1020,10 @@ public class AIService {
         finalOutput = appendMessageLink(finalOutput, exportRoomId, firstEventId, aiName, actualModel);
 
         if (eventIdHolder[0] == null) {
-            boolean isThinkingOnly = responseContent.toString().trim().isEmpty() && reasoning.length() > 0;
-            sentAsNotice = !isThinkingOnly && useNotice;
-            eventIdHolder[0] = isThinkingOnly
-                    ? matrixClient.sendMarkdownWithEventId(responseRoomId, finalOutput)
-                    : (useNotice
-                    ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, finalOutput)
-                    : matrixClient.sendMarkdownWithEventId(responseRoomId, finalOutput));
+            Map<String, Object> extra = threadExtraContent.get();
+            eventIdHolder[0] = useNotice
+                ? matrixClient.sendMarkdownNoticeWithEventId(responseRoomId, finalOutput)
+                : matrixClient.sendMarkdownWithEventId(responseRoomId, finalOutput, extra);
         } else {
             if (sentAsNotice) {
                 matrixClient.updateMarkdownNoticeMessage(responseRoomId, eventIdHolder[0], finalOutput);
@@ -1122,6 +1142,16 @@ public class AIService {
     public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question, String promptPrefix,
                          java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, 
                          Backend preferredBackend, ZoneId zoneId) {
+        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
+        botContext.put("hours", -1);
+        botContext.put("maxMessages", -1);
+        botContext.put("startEventId", fromToken);
+        botContext.put("forward", false);
+        botContext.put("exportRoomId", exportRoomId);
+        java.util.Map<String, Object> extra = new java.util.HashMap<>();
+        extra.put("ai.matrixrobobot.context", botContext);
+        threadExtraContent.set(extra);
+
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             // Target context window for Arli AI is 16k tokens.

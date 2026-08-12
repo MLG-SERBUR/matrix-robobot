@@ -47,17 +47,19 @@ public class MatrixMessageQueue {
         final boolean useMarkdown;
         final String originalEventId; // For updates, the event ID to replace
         final boolean isUpdate; // Whether this is an update to existing message
+        final Map<String, Object> extraContent; // Custom context
         int retryCount;
         final long createdTime;
         
         QueuedMessage(String roomId, String message, String msgType, boolean useMarkdown, 
-                     String originalEventId, boolean isUpdate) {
+                     String originalEventId, boolean isUpdate, Map<String, Object> extraContent) {
             this.roomId = roomId;
             this.message = message;
             this.msgType = msgType;
             this.useMarkdown = useMarkdown;
             this.originalEventId = originalEventId;
             this.isUpdate = isUpdate;
+            this.extraContent = extraContent;
             this.retryCount = 0;
             this.createdTime = System.currentTimeMillis();
         }
@@ -117,72 +119,79 @@ public class MatrixMessageQueue {
      * Send a new notice message, queuing if necessary
      */
     public String sendNoticeWithEventId(String roomId, String message) {
-        return sendMessage(roomId, message, "m.notice", false, null, false);
+        return sendMessage(roomId, message, "m.notice", false, null, false, null);
     }
     
     /**
      * Send a new text message, queuing if necessary
      */
     public String sendTextWithEventId(String roomId, String message) {
-        return sendMessage(roomId, message, "m.text", false, null, false);
+        return sendMessage(roomId, message, "m.text", false, null, false, null);
     }
     
     /**
      * Send a new markdown message, queuing if necessary
      */
     public String sendMarkdownWithEventId(String roomId, String message) {
-        return sendMessage(roomId, message, "m.text", true, null, false);
+        return sendMessage(roomId, message, "m.text", true, null, false, null);
+    }
+
+    /**
+     * Send a new markdown message with extra content, queuing if necessary
+     */
+    public String sendMarkdownWithEventId(String roomId, String message, Map<String, Object> extraContent) {
+        return sendMessage(roomId, message, "m.text", true, null, false, extraContent);
     }
     
     /**
      * Send a new markdown notice message, queuing if necessary
      */
     public String sendMarkdownNoticeWithEventId(String roomId, String message) {
-        return sendMessage(roomId, message, "m.notice", true, null, false);
+        return sendMessage(roomId, message, "m.notice", true, null, false, null);
     }
     
     /**
      * Update an existing notice message, queuing if necessary
      */
     public String updateNoticeMessage(String roomId, String eventId, String message) {
-        return sendMessage(roomId, message, "m.notice", false, eventId, true);
+        return sendMessage(roomId, message, "m.notice", false, eventId, true, null);
     }
     
     /**
      * Update an existing text message, queuing if necessary
      */
     public String updateTextMessage(String roomId, String eventId, String message) {
-        return sendMessage(roomId, message, "m.text", false, eventId, true);
+        return sendMessage(roomId, message, "m.text", false, eventId, true, null);
     }
     
     /**
      * Update an existing markdown message, queuing if necessary
      */
     public String updateMarkdownMessage(String roomId, String eventId, String message) {
-        return sendMessage(roomId, message, "m.text", true, eventId, true);
+        return sendMessage(roomId, message, "m.text", true, eventId, true, null);
     }
     
     /**
      * Update an existing markdown notice message, queuing if necessary
      */
     public String updateMarkdownNoticeMessage(String roomId, String eventId, String message) {
-        return sendMessage(roomId, message, "m.notice", true, eventId, true);
+        return sendMessage(roomId, message, "m.notice", true, eventId, true, null);
     }
     
     /**
      * Generic method to send or queue a message
      */
     private String sendMessage(String roomId, String message, String msgType, 
-                               boolean useMarkdown, String originalEventId, boolean isUpdate) {
+                               boolean useMarkdown, String originalEventId, boolean isUpdate, Map<String, Object> extraContent) {
         // Try to send immediately first
-        String result = trySendImmediately(roomId, message, msgType, useMarkdown, originalEventId, isUpdate);
+        String result = trySendImmediately(roomId, message, msgType, useMarkdown, originalEventId, isUpdate, extraContent);
         
         if (result != null && !result.isEmpty()) {
             return result; // Success
         }
         
         // If immediate send failed, queue the message
-        QueuedMessage queuedMsg = new QueuedMessage(roomId, message, msgType, useMarkdown, originalEventId, isUpdate);
+        QueuedMessage queuedMsg = new QueuedMessage(roomId, message, msgType, useMarkdown, originalEventId, isUpdate, extraContent);
         queueMessage(queuedMsg);
         
         return null; // Indicate queued (not immediately sent)
@@ -213,12 +222,12 @@ public class MatrixMessageQueue {
      * Try to send a message immediately to Matrix
      */
     private String trySendImmediately(String roomId, String message, String msgType, 
-                                     boolean useMarkdown, String originalEventId, boolean isUpdate) {
+                                     boolean useMarkdown, String originalEventId, boolean isUpdate, Map<String, Object> extraContent) {
         try {
             if (isUpdate && originalEventId != null && !originalEventId.isEmpty()) {
-                return sendUpdateRequest(roomId, message, msgType, useMarkdown, originalEventId);
+                return sendUpdateRequest(roomId, message, msgType, useMarkdown, originalEventId, extraContent);
             } else {
-                return sendNewMessageRequest(roomId, message, msgType, useMarkdown);
+                return sendNewMessageRequest(roomId, message, msgType, useMarkdown, extraContent);
             }
         } catch (Exception e) {
             System.out.println("Matrix message send failed, queuing for retry: " + e.getMessage());
@@ -229,7 +238,7 @@ public class MatrixMessageQueue {
     /**
      * Send a new message request to Matrix
      */
-    private String sendNewMessageRequest(String roomId, String message, String msgType, boolean useMarkdown) {
+    private String sendNewMessageRequest(String roomId, String message, String msgType, boolean useMarkdown, Map<String, Object> extraContent) {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = java.net.URLEncoder.encode(roomId, java.nio.charset.StandardCharsets.UTF_8);
@@ -245,6 +254,9 @@ public class MatrixMessageQueue {
                 payload.put("formatted_body", convertMarkdownToHtml(sanitizedMessage));
             }
             payload.put("m.mentions", java.util.Map.of());
+            if (extraContent != null) {
+                payload.putAll(extraContent);
+            }
             String json = mapper.writeValueAsString(payload);
 
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
@@ -272,7 +284,7 @@ public class MatrixMessageQueue {
      * Send an update message request to Matrix
      */
     private String sendUpdateRequest(String roomId, String message, String msgType, 
-                                    boolean useMarkdown, String originalEventId) {
+                                    boolean useMarkdown, String originalEventId, Map<String, Object> extraContent) {
         try {
             String txnId = "m" + Instant.now().toEpochMilli();
             String encodedRoom = java.net.URLEncoder.encode(roomId, java.nio.charset.StandardCharsets.UTF_8);
@@ -290,12 +302,18 @@ public class MatrixMessageQueue {
                 newContent.put("format", "org.matrix.custom.html");
                 newContent.put("formatted_body", htmlBody);
             }
+            if (extraContent != null) {
+                newContent.putAll(extraContent);
+            }
 
             java.util.Map<String, Object> payload = new java.util.HashMap<>();
             payload.put("msgtype", msgType);
             payload.put("body", "* " + sanitizedMessage);
             payload.put("m.mentions", java.util.Map.of());
             payload.put("m.new_content", newContent);
+            if (extraContent != null) {
+                payload.putAll(extraContent); // Also put in top level for backward compat, though new_content is what replaces
+            }
 
             java.util.Map<String, Object> relatesTo = new java.util.HashMap<>();
             relatesTo.put("event_id", originalEventId);
@@ -390,7 +408,7 @@ public class MatrixMessageQueue {
         // Always retry - no limit
         String result = trySendImmediately(
             message.roomId, message.message, message.msgType, 
-            message.useMarkdown, message.originalEventId, message.isUpdate
+            message.useMarkdown, message.originalEventId, message.isUpdate, message.extraContent
         );
         
         if (result != null && !result.isEmpty()) {

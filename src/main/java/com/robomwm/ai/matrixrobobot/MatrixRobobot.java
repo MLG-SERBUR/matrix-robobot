@@ -249,8 +249,77 @@ public class MatrixRobobot {
                             }
                             // All other commands
                             else {
-                                dispatcher.dispatchCommand(trimmed, roomId, sender, prevBatch, responseRoomId,
+                                boolean handled = dispatcher.dispatchCommand(trimmed, roomId, sender, prevBatch, responseRoomId,
                                         config.exportRoomId);
+                                if (!handled) {
+                                    // Check if it's a contextual reply
+                                    JsonNode relatesTo = ev.path("content").path("m.relates_to");
+                                    JsonNode inReplyTo = relatesTo.path("m.in_reply_to");
+                                    String replyToEventId = inReplyTo.path("event_id").asText(null);
+                                    
+                                    if (replyToEventId != null) {
+                                        JsonNode originalEvent = matrixClient.getEvent(roomId, replyToEventId);
+                                        if (originalEvent != null) {
+                                            String origSender = originalEvent.path("sender").asText(null);
+                                            if (userId != null && userId.equals(origSender)) {
+                                                JsonNode context = originalEvent.path("content").path("ai.matrixrobobot.context");
+                                                if (!context.isMissingNode()) {
+                                                    int ctxHours = context.path("hours").asInt(-1);
+                                                    int ctxMax = context.path("maxMessages").asInt(-1);
+                                                    String ctxStart = context.path("startEventId").asText(null);
+                                                    if ("null".equals(ctxStart)) ctxStart = null;
+                                                    boolean ctxFwd = context.path("forward").asBoolean(false);
+                                                    String ctxRoom = context.path("exportRoomId").asText(config.exportRoomId);
+                                                    
+                                                    System.out.println("Contextual reply detected! Executing query...");
+                                                    AtomicBoolean abortFlag = new AtomicBoolean(false);
+                                                    runningOperations.put(sender, abortFlag);
+                                                    
+                                                    final int fHours = ctxHours;
+                                                    final int fMax = ctxMax;
+                                                    final String fStart = ctxStart;
+                                                    final boolean fFwd = ctxFwd;
+                                                    final String fRoom = ctxRoom;
+                                                    
+                                                    // Strip Matrix reply fallback
+                                                    String actualReply = trimmed;
+                                                    if (actualReply.startsWith("> ")) {
+                                                        int fallbackEnd = actualReply.indexOf("\n\n");
+                                                        if (fallbackEnd != -1) {
+                                                            actualReply = actualReply.substring(fallbackEnd + 2).trim();
+                                                        } else {
+                                                            // fallback didn't have \n\n, try to strip all lines starting with >
+                                                            String[] lines = actualReply.split("\n");
+                                                            StringBuilder sb = new StringBuilder();
+                                                            for (String line : lines) {
+                                                                if (!line.startsWith("> ")) {
+                                                                    sb.append(line).append("\n");
+                                                                }
+                                                            }
+                                                            actualReply = sb.toString().trim();
+                                                        }
+                                                    }
+                                                    final String fQuestion = actualReply;
+                                                    
+                                                    new Thread(() -> {
+                                                        try {
+                                                            java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(sender);
+                                                            if (zoneId == null) zoneId = java.time.ZoneId.of("UTC");
+                                                            
+                                                            if (fHours == -1 && fMax == -1 && fStart == null) {
+                                                                aiService.queryAsk(responseRoomId, fRoom, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
+                                                            } else {
+                                                                aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                            }
+                                                        } finally {
+                                                            runningOperations.remove(sender);
+                                                        }
+                                                    }).start();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

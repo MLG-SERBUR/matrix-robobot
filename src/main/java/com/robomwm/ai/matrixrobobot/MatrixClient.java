@@ -101,20 +101,29 @@ public class MatrixClient {
     }
 
     private void sendMessage(String roomId, String message, boolean useMarkdown, String msgType) {
-        sendMessageWithEventId(roomId, message, useMarkdown, msgType);
+        sendMessageWithEventId(roomId, message, useMarkdown, msgType, null);
     }
 
     private String sendMessageWithEventId(String roomId, String message, boolean useMarkdown, String msgType) {
+        return sendMessageWithEventId(roomId, message, useMarkdown, msgType, null);
+    }
+
+    private String sendMessageWithEventId(String roomId, String message, boolean useMarkdown, String msgType, Map<String, Object> extraContent) {
         // Use the message queue for all sends
         if ("m.notice".equals(msgType)) {
             if (useMarkdown) {
+                // extraContent for notices not implemented since not needed for this feature, but could be added
                 return getMessageQueue().sendMarkdownNoticeWithEventId(roomId, message);
             } else {
                 return getMessageQueue().sendNoticeWithEventId(roomId, message);
             }
         } else {
             if (useMarkdown) {
-                return getMessageQueue().sendMarkdownWithEventId(roomId, message);
+                if (extraContent != null) {
+                    return getMessageQueue().sendMarkdownWithEventId(roomId, message, extraContent);
+                } else {
+                    return getMessageQueue().sendMarkdownWithEventId(roomId, message);
+                }
             } else {
                 return getMessageQueue().sendTextWithEventId(roomId, message);
             }
@@ -161,7 +170,14 @@ public class MatrixClient {
      * Send a markdown formatted message and return the event ID
      */
     public String sendMarkdownWithEventId(String roomId, String message) {
-        return sendMessageWithEventId(roomId, message, true, "m.text");
+        return sendMessageWithEventId(roomId, message, true, "m.text", null);
+    }
+
+    /**
+     * Send a markdown formatted message with extra content and return the event ID
+     */
+    public String sendMarkdownWithEventId(String roomId, String message, Map<String, Object> extraContent) {
+        return sendMessageWithEventId(roomId, message, true, "m.text", extraContent);
     }
 
     public String sendMarkdownNoticeWithEventId(String roomId, String message) {
@@ -244,6 +260,35 @@ public class MatrixClient {
         } catch (Exception e) {
             System.out.println("Error joining room: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Get a specific event by ID
+     */
+    public JsonNode getEvent(String roomId, String eventId) {
+        try {
+            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+            String encodedEvent = URLEncoder.encode(eventId, StandardCharsets.UTF_8);
+            String eventUrl = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/event/" + encodedEvent;
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(eventUrl))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .timeout(Duration.ofSeconds(30))
+                    .GET()
+                    .build();
+                    
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                return mapper.readTree(response.body());
+            } else {
+                System.out.println("Failed to get event " + eventId + ": " + response.statusCode());
+                return null;
+            }
+        } catch (Exception e) {
+            System.out.println("Error getting event " + eventId + ": " + e.getMessage());
+            return null;
         }
     }
 
