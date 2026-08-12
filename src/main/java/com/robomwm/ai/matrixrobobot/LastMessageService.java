@@ -1,5 +1,8 @@
 package com.robomwm.ai.matrixrobobot;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Handles the !last command: shows user's last message and read receipt status.
  */
@@ -86,7 +89,17 @@ public class LastMessageService {
                 response.append("No read receipt found.\n");
             }
 
-            matrixClient.sendMarkdown(responseRoomId, response.toString());
+            Map<String, Object> botContext = new HashMap<>();
+            botContext.put("hours", -1);
+            botContext.put("maxMessages", -1);
+            botContext.put("startEventId", null);
+            botContext.put("forward", false);
+            botContext.put("exportRoomId", exportRoomId);
+            botContext.put("filtered", false);
+            Map<String, Object> extra = new HashMap<>();
+            extra.put("ai.matrixrobobot.context", botContext);
+
+            matrixClient.sendMarkdownWithEventId(responseRoomId, response.toString(), extra);
 
         } catch (Exception e) {
             System.out.println("Failed to get last message info: " + e.getMessage());
