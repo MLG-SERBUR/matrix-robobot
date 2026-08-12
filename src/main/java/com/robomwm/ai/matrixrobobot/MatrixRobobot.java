@@ -270,8 +270,9 @@ public class MatrixRobobot {
                                                     if ("null".equals(ctxStart)) ctxStart = null;
                                                     boolean ctxFwd = context.path("forward").asBoolean(false);
                                                     String ctxRoom = context.path("exportRoomId").asText(config.exportRoomId);
+                                                    boolean ctxFiltered = context.path("filtered").asBoolean(false);
                                                     
-                                                    System.out.println("Contextual reply detected! Executing query...");
+                                                    System.out.println("Contextual reply detected (filtered=" + ctxFiltered + ")! Executing query...");
                                                     AtomicBoolean abortFlag = new AtomicBoolean(false);
                                                     runningOperations.put(sender, abortFlag);
                                                     
@@ -280,6 +281,7 @@ public class MatrixRobobot {
                                                     final String fStart = ctxStart;
                                                     final boolean fFwd = ctxFwd;
                                                     final String fRoom = ctxRoom;
+                                                    final boolean fFiltered = ctxFiltered;
                                                     
                                                     // Strip Matrix reply fallback
                                                     String actualReply = trimmed;
@@ -306,10 +308,18 @@ public class MatrixRobobot {
                                                             java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(sender);
                                                             if (zoneId == null) zoneId = java.time.ZoneId.of("UTC");
                                                             
-                                                            if (fHours == -1 && fMax == -1 && fStart == null) {
-                                                                aiService.queryAsk(responseRoomId, fRoom, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
+                                                            if (fFiltered) {
+                                                                if (fHours == -1 && fMax == -1 && fStart == null) {
+                                                                    aiService.queryAskFiltered(responseRoomId, fRoom, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
+                                                                } else {
+                                                                    aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                                }
                                                             } else {
-                                                                aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                                if (fHours == -1 && fMax == -1 && fStart == null) {
+                                                                    aiService.queryAsk(responseRoomId, fRoom, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
+                                                                } else {
+                                                                    aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                                }
                                                             }
                                                         } finally {
                                                             runningOperations.remove(sender);

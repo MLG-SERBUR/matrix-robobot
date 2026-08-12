@@ -178,6 +178,7 @@ public class AIService {
         botContext.put("startEventId", startEventId);
         botContext.put("forward", forward);
         botContext.put("exportRoomId", exportRoomId);
+        botContext.put("filtered", false);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -249,6 +250,7 @@ public class AIService {
         botContext.put("startEventId", startEventId);
         botContext.put("forward", forward);
         botContext.put("exportRoomId", exportRoomId);
+        botContext.put("filtered", true);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1037,6 +1039,17 @@ public class AIService {
     public void queryAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
             String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             String startEventId) {
+        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
+        botContext.put("hours", -1);
+        botContext.put("maxMessages", -1);
+        botContext.put("startEventId", startEventId);
+        botContext.put("forward", false);
+        botContext.put("exportRoomId", exportRoomId);
+        botContext.put("filtered", false);
+        java.util.Map<String, Object> extra = new java.util.HashMap<>();
+        extra.put("ai.matrixrobobot.context", botContext);
+        threadExtraContent.set(extra);
+
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             String lastReadEventId = startEventId;
@@ -1090,6 +1103,17 @@ public class AIService {
     public void queryAIUnreadFiltered(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
             String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             String startEventId) {
+        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
+        botContext.put("hours", -1);
+        botContext.put("maxMessages", -1);
+        botContext.put("startEventId", startEventId);
+        botContext.put("forward", false);
+        botContext.put("exportRoomId", exportRoomId);
+        botContext.put("filtered", true);
+        java.util.Map<String, Object> extra = new java.util.HashMap<>();
+        extra.put("ai.matrixrobobot.context", botContext);
+        threadExtraContent.set(extra);
+
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             String lastReadEventId = startEventId;
@@ -1148,6 +1172,7 @@ public class AIService {
         botContext.put("startEventId", fromToken);
         botContext.put("forward", false);
         botContext.put("exportRoomId", exportRoomId);
+        botContext.put("filtered", false);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1208,6 +1233,17 @@ public class AIService {
     public void queryAskFiltered(String responseRoomId, String exportRoomId, String fromToken, String question, String promptPrefix,
                          java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, 
                          Backend preferredBackend, ZoneId zoneId) {
+        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
+        botContext.put("hours", -1);
+        botContext.put("maxMessages", -1);
+        botContext.put("startEventId", fromToken);
+        botContext.put("forward", false);
+        botContext.put("exportRoomId", exportRoomId);
+        botContext.put("filtered", true);
+        java.util.Map<String, Object> extra = new java.util.HashMap<>();
+        extra.put("ai.matrixrobobot.context", botContext);
+        threadExtraContent.set(extra);
+
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             int targetPromptTokens = 12000;
