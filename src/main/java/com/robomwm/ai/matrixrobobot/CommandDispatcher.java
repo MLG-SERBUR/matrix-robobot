@@ -20,6 +20,14 @@ public class CommandDispatcher {
         return command.matches("!ask(?:\\s+[\\s\\S]*)?");
     }
 
+    static long[] resolveHistoryWindowForCountRequest(int hours, int maxMessages) {
+        if (maxMessages > 0 && hours <= 0) {
+            long nowMs = System.currentTimeMillis();
+            return new long[] { 0L, nowMs };
+        }
+        return new long[] { -1L, -1L };
+    }
+
     private final MatrixClient matrixClient;
     private final RoomHistoryManager historyManager;
     private final Map<String, AtomicBoolean> runningOperations;
@@ -362,9 +370,12 @@ public class CommandDispatcher {
                             fExportRoomId, fHours, fPrevBatch, fStartEventId, fForward, zoneId, fMaxMessages, abortFlag);
                     lines = result.logs;
                 } else {
-                    // Use detailed fetching for count or duration
+                    // Use detailed fetching for count or duration. Count-only commands use an epoch-based
+                    // window so the original no-duration semantics remain intact without reintroducing
+                    // the -1 / "all history" special cases in the fetch layer.
+                    long[] window = resolveHistoryWindowForCountRequest(fHours, fMaxMessages);
                     RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(
-                            fExportRoomId, fHours, fPrevBatch, -1, -1, zoneId, fMaxMessages, abortFlag);
+                            fExportRoomId, fHours, fPrevBatch, window[0], window[1], zoneId, fMaxMessages, abortFlag);
                     lines = result.logs;
                 }
 
@@ -1084,8 +1095,9 @@ public class CommandDispatcher {
                         // Fetch messages with TTS-friendly formatting
                         // Use default timezone (UTC) when no timezone is specified for TTS export
                         ZoneId defaultZoneId = ZoneId.of("UTC");
+                        long[] window = resolveHistoryWindowForCountRequest(-1, messageCount);
                         RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryDetailed(
-                            exportRoomId, -1, prevBatch, -1, -1, defaultZoneId, messageCount, abortFlag);
+                            exportRoomId, -1, prevBatch, window[0], window[1], defaultZoneId, messageCount, abortFlag);
                         
                         if (result.logs.isEmpty()) {
                             if (abortFlag.get()) {
