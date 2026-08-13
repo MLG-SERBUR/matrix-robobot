@@ -284,9 +284,10 @@ public class RoomHistoryManager {
                     }
                 }
 
-                // Report progress after each batch
+                // Report progress after each batch - skip token estimation to avoid O(n^2) CPU usage
+                // Token estimation is expensive and was being recalculated for all messages after each batch
                 if (progressCallback != null && !rawLines.isEmpty()) {
-                    progressCallback.onProgress(rawLines.size(), estimateFormattedTokens(rawLines, zoneId, aiFriendlyTimestamps));
+                    progressCallback.onProgress(rawLines.size(), 0);
                 }
 
                 if (reachedStart) {
@@ -433,9 +434,10 @@ public class RoomHistoryManager {
                     }
                 }
 
-                // Report progress after each batch
+                // Report progress after each batch - skip token estimation to avoid O(n^2) CPU usage
+                // Token estimation is expensive and was being recalculated for all messages after each batch
                 if (progressCallback != null && !rawLines.isEmpty()) {
-                    progressCallback.onProgress(rawLines.size(), estimateFormattedTokens(rawLines, zoneId, aiFriendlyTimestamps));
+                    progressCallback.onProgress(rawLines.size(), 0);
                 }
 
                 if (stop) {
@@ -599,9 +601,10 @@ public class RoomHistoryManager {
                     }
                 }
 
-                // Report progress after each batch
+                // Report progress after each batch - skip token estimation to avoid O(n^2) CPU usage
+                // Token estimation is expensive and was being recalculated for all messages after each batch
                 if (progressCallback != null && !rawLines.isEmpty()) {
-                    progressCallback.onProgress(rawLines.size(), estimateFormattedTokens(rawLines, zoneId, aiFriendlyTimestamps));
+                    progressCallback.onProgress(rawLines.size(), 0);
                 }
 
                 if (reachedStart) {
