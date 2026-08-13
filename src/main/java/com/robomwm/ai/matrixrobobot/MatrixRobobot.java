@@ -309,17 +309,9 @@ public class MatrixRobobot {
                                                             if (zoneId == null) zoneId = java.time.ZoneId.of("UTC");
                                                             
                                                             if (fFiltered) {
-                                                                if (fHours == -1 && fMax == -1 && fStart == null) {
-                                                                    aiService.queryAskFiltered(responseRoomId, fRoom, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
-                                                                } else {
-                                                                    aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
-                                                                }
+                                                                aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
                                                             } else {
-                                                                if (fHours == -1 && fMax == -1 && fStart == null) {
-                                                                    aiService.queryAsk(responseRoomId, fRoom, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
-                                                                } else {
-                                                                    aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
-                                                                }
+                                                                aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
                                                             }
                                                         } finally {
                                                             runningOperations.remove(sender);

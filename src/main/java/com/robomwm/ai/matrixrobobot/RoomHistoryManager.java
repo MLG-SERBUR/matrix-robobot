@@ -353,16 +353,8 @@ public class RoomHistoryManager {
 
         // If forward: end time = eventTs + hours
         // If backward: start time = eventTs - hours
-        long searchFloor = -1;
-        long searchCeiling = -1;
-
-        if (hours > 0) {
-            if (forward) {
-                searchCeiling = eventTs + (long) hours * 3600L * 1000L;
-            } else {
-                searchFloor = eventTs - (long) hours * 3600L * 1000L;
-            }
-        }
+        long searchFloor = eventTs - (long) hours * 3600L * 1000L;
+        long searchCeiling = eventTs + (long) hours * 3600L * 1000L;
 
         String dir = forward ? "f" : "b";
 
@@ -398,11 +390,11 @@ public class RoomHistoryManager {
                         continue;
                     long originServerTs = ev.path("origin_server_ts").asLong(0);
 
-                    if (!forward && searchFloor > 0 && originServerTs < searchFloor) {
+                    if (!forward && originServerTs < searchFloor) {
                         stop = true;
                         break;
                     }
-                    if (forward && searchCeiling > 0 && originServerTs > searchCeiling) {
+                    if (forward && originServerTs > searchCeiling) {
                         stop = true;
                         break;
                     }
@@ -529,7 +521,7 @@ public class RoomHistoryManager {
         String firstEventId = null;
 
         long startTime = (startTimestamp > 0) ? startTimestamp
-                : (hours > 0 ? System.currentTimeMillis() - (long) hours * 3600L * 1000L : -1);
+                : (System.currentTimeMillis() - (long) hours * 3600L * 1000L);
         long calculatedEndTime = (endTime > 0) ? endTime : System.currentTimeMillis();
 
         String token = getPaginationToken(roomId, fromToken);
@@ -568,7 +560,7 @@ public class RoomHistoryManager {
                     if (originServerTs > calculatedEndTime) {
                         continue;
                     }
-                    if (startTime > 0 && originServerTs < startTime) {
+                    if (originServerTs < startTime) {
                         reachedStart = true;
                         break;
                     }
