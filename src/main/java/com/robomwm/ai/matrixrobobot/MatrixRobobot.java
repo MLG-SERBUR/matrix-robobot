@@ -264,10 +264,13 @@ public class MatrixRobobot {
                                             if (userId != null && userId.equals(origSender)) {
                                                 JsonNode context = originalEvent.path("content").path("ai.matrixrobobot.context");
                                                 if (!context.isMissingNode()) {
-                                                    int ctxHours = context.path("hours").asInt(-1);
-                                                    int ctxMax = context.path("maxMessages").asInt(-1);
                                                     String ctxStart = context.path("startEventId").asText(null);
+                                                    String ctxEnd = context.path("endEventId").asText(null);
                                                     if ("null".equals(ctxStart)) ctxStart = null;
+                                                    if ("null".equals(ctxEnd)) ctxEnd = null;
+                                                    if (ctxEnd == null && ctxStart != null) {
+                                                        ctxEnd = ctxStart;
+                                                    }
                                                     boolean ctxFwd = context.path("forward").asBoolean(false);
                                                     String ctxRoom = context.path("exportRoomId").asText(config.exportRoomId);
                                                     boolean ctxFiltered = context.path("filtered").asBoolean(false);
@@ -276,8 +279,8 @@ public class MatrixRobobot {
                                                     AtomicBoolean abortFlag = new AtomicBoolean(false);
                                                     runningOperations.put(sender, abortFlag);
                                                     
-                                                    final int fHours = ctxHours;
-                                                    final int fMax = ctxMax;
+                                                    final int fHours = -1;
+                                                    final int fMax = -1;
                                                     final String fStart = ctxStart;
                                                     final boolean fFwd = ctxFwd;
                                                     final String fRoom = ctxRoom;

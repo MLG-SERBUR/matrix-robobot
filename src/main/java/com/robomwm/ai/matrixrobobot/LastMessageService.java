@@ -90,9 +90,8 @@ public class LastMessageService {
             }
 
             Map<String, Object> botContext = new HashMap<>();
-            botContext.put("hours", -1);
-            botContext.put("maxMessages", -1);
             botContext.put("startEventId", null);
+            botContext.put("endEventId", null);
             botContext.put("forward", false);
             botContext.put("exportRoomId", exportRoomId);
             botContext.put("filtered", false);

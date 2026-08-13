@@ -169,16 +169,22 @@ public class AIService {
 
     public static final ThreadLocal<Map<String, Object>> threadExtraContent = new ThreadLocal<>();
 
+    static Map<String, Object> buildHistoryContext(String exportRoomId, String startEventId, String endEventId,
+            boolean forward, boolean filtered) {
+        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
+        botContext.put("startEventId", startEventId);
+        botContext.put("endEventId", endEventId != null ? endEventId : startEventId);
+        botContext.put("forward", forward);
+        botContext.put("exportRoomId", exportRoomId);
+        botContext.put("filtered", filtered);
+        return botContext;
+    }
+
     public void queryAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
             String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
-        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
-        botContext.put("hours", hours);
-        botContext.put("maxMessages", maxMessages);
-        botContext.put("startEventId", startEventId);
-        botContext.put("forward", forward);
-        botContext.put("exportRoomId", exportRoomId);
-        botContext.put("filtered", false);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId, startEventId,
+                forward, false);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -244,13 +250,8 @@ public class AIService {
     public void queryAIFiltered(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
             String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
-        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
-        botContext.put("hours", hours);
-        botContext.put("maxMessages", maxMessages);
-        botContext.put("startEventId", startEventId);
-        botContext.put("forward", forward);
-        botContext.put("exportRoomId", exportRoomId);
-        botContext.put("filtered", true);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId, startEventId,
+                forward, true);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1039,13 +1040,8 @@ public class AIService {
     public void queryAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
             String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             String startEventId) {
-        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
-        botContext.put("hours", -1);
-        botContext.put("maxMessages", -1);
-        botContext.put("startEventId", startEventId);
-        botContext.put("forward", false);
-        botContext.put("exportRoomId", exportRoomId);
-        botContext.put("filtered", false);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId, startEventId,
+                false, false);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1103,13 +1099,8 @@ public class AIService {
     public void queryAIUnreadFiltered(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
             String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             String startEventId) {
-        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
-        botContext.put("hours", -1);
-        botContext.put("maxMessages", -1);
-        botContext.put("startEventId", startEventId);
-        botContext.put("forward", false);
-        botContext.put("exportRoomId", exportRoomId);
-        botContext.put("filtered", true);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId, startEventId,
+                false, true);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1166,13 +1157,8 @@ public class AIService {
     public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question, String promptPrefix,
                          java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, 
                          Backend preferredBackend, ZoneId zoneId) {
-        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
-        botContext.put("hours", -1);
-        botContext.put("maxMessages", -1);
-        botContext.put("startEventId", fromToken);
-        botContext.put("forward", false);
-        botContext.put("exportRoomId", exportRoomId);
-        botContext.put("filtered", false);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, fromToken, fromToken,
+                false, false);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1233,13 +1219,8 @@ public class AIService {
     public void queryAskFiltered(String responseRoomId, String exportRoomId, String fromToken, String question, String promptPrefix,
                          java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, 
                          Backend preferredBackend, ZoneId zoneId) {
-        java.util.Map<String, Object> botContext = new java.util.HashMap<>();
-        botContext.put("hours", -1);
-        botContext.put("maxMessages", -1);
-        botContext.put("startEventId", fromToken);
-        botContext.put("forward", false);
-        botContext.put("exportRoomId", exportRoomId);
-        botContext.put("filtered", true);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, fromToken, fromToken,
+                false, true);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
