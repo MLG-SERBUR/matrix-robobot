@@ -661,7 +661,7 @@ public class RoomHistoryManager {
                 if (!"m.room.message".equals(ev.path("type").asText(null)))
                     continue;
                 String msgSender = ev.path("sender").asText(null);
-                if (sender.equals(msgSender)) {
+                if (sender == null || sender.equals(msgSender)) {
                     return new EventInfo(ev.path("event_id").asText(null), ev.path("origin_server_ts").asLong(0));
                 }
             }
@@ -688,7 +688,7 @@ public class RoomHistoryManager {
                             if (!"m.room.message".equals(ev.path("type").asText(null)))
                                 continue;
                             String msgSender = ev.path("sender").asText(null);
-                            if (sender.equals(msgSender)) {
+                            if (sender == null || sender.equals(msgSender)) {
                                 return new EventInfo(ev.path("event_id").asText(null),
                                         ev.path("origin_server_ts").asLong(0));
                             }
@@ -703,6 +703,13 @@ public class RoomHistoryManager {
             System.out.println("Error getting last message from sender: " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Get the most recent message in a room.
+     */
+    public EventInfo getLatestMessage(String roomId) {
+        return getLastMessageFromSender(roomId, null);
     }
 
     /**

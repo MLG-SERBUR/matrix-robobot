@@ -1,6 +1,5 @@
 package com.robomwm.ai.matrixrobobot;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -41,6 +40,7 @@ public class LastMessageService {
             RoomHistoryManager.EventInfo lastReadInfo = cachedPreviousReadInfo != null
                     ? cachedPreviousReadInfo
                     : historyManager.getReadReceipt(exportRoomId, sender);
+            RoomHistoryManager.EventInfo latestMessageInfo = historyManager.getLatestMessage(exportRoomId);
 
             StringBuilder response = new StringBuilder();
 
@@ -89,13 +89,15 @@ public class LastMessageService {
                 response.append("No read receipt found.\n");
             }
 
-            Map<String, Object> botContext = new HashMap<>();
-            botContext.put("startEventId", null);
-            botContext.put("endEventId", null);
-            botContext.put("forward", false);
-            botContext.put("exportRoomId", exportRoomId);
-            botContext.put("filtered", false);
-            Map<String, Object> extra = new HashMap<>();
+            // This response represents the unread window: immediately after the
+            // user's last read receipt through the room's current latest message.
+            Map<String, Object> botContext = AIService.buildHistoryContext(
+                    exportRoomId,
+                    lastReadInfo != null ? lastReadInfo.eventId : null,
+                    latestMessageInfo != null ? latestMessageInfo.eventId : null,
+                    true,
+                    false);
+            Map<String, Object> extra = new java.util.HashMap<>();
             extra.put("ai.matrixrobobot.context", botContext);
 
             matrixClient.sendMarkdownWithEventId(responseRoomId, response.toString(), extra);
