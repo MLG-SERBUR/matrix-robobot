@@ -629,8 +629,12 @@ public class TextSearchService {
             sb.append(")\n\n");
 
             for (TextSearchHit hit : pageHits) {
+                String formattedLog = hit.formattedLog();
+                int timestampEndIndex = formattedLog.indexOf(']');
+                String timestampPart = timestampEndIndex >= 0 ? formattedLog.substring(0, timestampEndIndex + 1) : "";
+                String remainderPart = timestampEndIndex >= 0 ? formattedLog.substring(timestampEndIndex + 1) : formattedLog;
                 String messageLink = "https://matrix.to/#/" + exportRoomId + "/" + hit.eventId();
-                sb.append(hit.formattedLog()).append(" ").append(messageLink).append("\n");
+                sb.append("**").append(timestampPart).append("(").append(messageLink).append(")**").append(remainderPart).append("\n");
             }
 
             sb.append("\n");
