@@ -267,12 +267,13 @@ public class CommandDispatcher {
             handleSemanticSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!grep\\s+(\\d+)([dh])\\s+(.+)")) {
-            return handleTextSearchCommand(trimmed, "!grep\\s+(\\d+)([dh])\\s+(.+)", "grep", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrep);
-        } else if (trimmed.matches("!searchtext\\s*")) {
-            matrixClient.sendText(responseRoomId, "Usage: !searchtext <hours>h <pattern>\nSearches message text for the given pattern.");
+            return handleTextSearchCommand(trimmed, "!grep", "grep", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performGrep);
+        } else if (trimmed.matches("!searchtext\\s*") || trimmed.matches("!textsearch\\s*")) {
+            matrixClient.sendText(responseRoomId, "Usage: !searchtext <hours>h [user:<username>] <pattern>\nSearches message text for the given pattern.");
             return true;
-        } else if (trimmed.matches("!searchtext\\s+(\\d+)([dh])\\s+(.+)")) {
-            return handleTextSearchCommand(trimmed, "!searchtext\\s+(\\d+)([dh])\\s+(.+)", "searchtext", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performSearch);
+        } else if (trimmed.matches("!searchtext\\s+(\\d+)([dh])\\s+(.+)") || trimmed.matches("!textsearch\\s+(\\d+)([dh])\\s+(.+)")) {
+            String commandPrefix = trimmed.startsWith("!textsearch") ? "!textsearch" : "!searchtext";
+            return handleTextSearchCommand(trimmed, commandPrefix, "searchtext", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performSearch);
         } else if (trimmed.matches("!search\\s+(.+)")) {
             handleMatrixSearch(trimmed, roomId, sender, responseRoomId, exportRoomId);
             return true;
@@ -280,7 +281,7 @@ public class CommandDispatcher {
             handlePage(trimmed, sender, responseRoomId);
             return true;
         } else if (trimmed.matches("!media\\s+(\\d+)([dh])\\s+(.+)")) {
-            return handleTextSearchCommand(trimmed, "!media\\s+(\\d+)([dh])\\s+(.+)", "media search", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performMediaSearch);
+            return handleTextSearchCommand(trimmed, "!media", "media search", roomId, sender, prevBatch, responseRoomId, exportRoomId, textSearchService::performMediaSearch);
         } else if ("!abort".equals(trimmed)) {
             handleAbort(sender, responseRoomId);
             return true;
@@ -931,25 +932,76 @@ public class CommandDispatcher {
 
     @FunctionalInterface
     public interface TextSearchAction {
-        void execute(String roomId, String sender, String responseRoomId, String exportRoomId, int hours, String prevBatch, String pattern, ZoneId zoneId);
+        void execute(String roomId, String sender, String responseRoomId, String exportRoomId, int hours, String prevBatch, String pattern, ZoneId zoneId, java.util.List<String> filterSenders);
     }
 
-    private boolean handleTextSearchCommand(String trimmed, String regex, String commandName, String roomId, String sender, String prevBatch, String responseRoomId, String exportRoomId, TextSearchAction action) {
-        Matcher matcher = Pattern.compile(regex).matcher(trimmed);
-        if (matcher.matches()) {
+    static ParsedTextSearchCommand parseTextSearchCommand(String trimmed, String commandPrefix) {
+        String remaining = trimmed.substring(commandPrefix.length()).trim();
+        java.util.List<String> filterSenders = null;
+        Matcher userMatcher = Pattern.compile("(?i)(?:user|u):(\\S+)").matcher(remaining);
+        if (userMatcher.find()) {
+            String filterSender = userMatcher.group(1);
+            remaining = remaining.substring(0, userMatcher.start()) + remaining.substring(userMatcher.end());
+            remaining = remaining.trim().replaceAll("\\s{2,}", " ");
+            filterSenders = new ArrayList<>();
+            filterSenders.add(filterSender);
+        }
+
+        Matcher matcher = Pattern.compile("(?:(\\d+)([dh])\\s+)?(.+)").matcher(remaining);
+        if (!matcher.matches()) {
+            return null;
+        }
+
+        int hours = -1;
+        if (matcher.group(1) != null && matcher.group(2) != null) {
             int duration = Integer.parseInt(matcher.group(1));
             String unit = matcher.group(2);
-            String input = matcher.group(3).trim();
+            hours = unit.equals("d") ? duration * 24 : duration;
+        }
+        String query = matcher.group(3).trim();
+        return new ParsedTextSearchCommand(hours, query, filterSenders);
+    }
 
-            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+    static final class ParsedTextSearchCommand {
+        final int hours;
+        final String query;
+        final java.util.List<String> filterSenders;
 
-            int hours = unit.equals("d") ? duration * 24 : duration;
+        ParsedTextSearchCommand(int hours, String query, java.util.List<String> filterSenders) {
+            this.hours = hours;
+            this.query = query;
+            this.filterSenders = filterSenders;
+        }
+    }
 
-            System.out.println("Received " + commandName + " command in " + roomId + " from " + sender);
-            new Thread(() -> action.execute(roomId, sender, responseRoomId, exportRoomId, hours, null, input, zoneId)).start();
+    private boolean handleTextSearchCommand(String trimmed, String commandPrefix, String commandName, String roomId, String sender, String prevBatch, String responseRoomId, String exportRoomId, TextSearchAction action) {
+        ParsedTextSearchCommand parsed = parseTextSearchCommand(trimmed, commandPrefix);
+        if (parsed == null) {
+            return false;
+        }
+
+        if (parsed.hours < 0) {
+            matrixClient.sendText(responseRoomId, "Usage: !searchtext <hours>h [user:<username>] <pattern>\nSearches message text for the given pattern.");
             return true;
         }
-        return false;
+
+        final java.util.List<String> filterSenders;
+        if (parsed.filterSenders != null && !parsed.filterSenders.isEmpty()) {
+            java.util.List<String> resolved = resolveSearchSenders(roomId, parsed.filterSenders.get(0));
+            if (resolved.isEmpty()) {
+                matrixClient.sendNotice(responseRoomId,
+                        "No matching room member(s) found for user parameter: " + parsed.filterSenders.get(0));
+                return true;
+            }
+            filterSenders = resolved;
+        } else {
+            filterSenders = parsed.filterSenders;
+        }
+
+        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
+        System.out.println("Received " + commandName + " command in " + roomId + " from " + sender + (filterSenders != null ? " (filtering by user(s): " + String.join(", ", filterSenders) + ")" : ""));
+        new Thread(() -> action.execute(roomId, sender, responseRoomId, exportRoomId, parsed.hours, null, parsed.query, zoneId, filterSenders)).start();
+        return true;
     }
 
     private void handleAbort(String sender, String responseRoomId) {

@@ -29,4 +29,21 @@ class CommandDispatcherTest {
         assertFalse(context.containsKey("hours"));
         assertFalse(context.containsKey("maxMessages"));
     }
+
+    @Test
+    void textSearchCommandParsesUserFilterAndAlias() {
+        CommandDispatcher.ParsedTextSearchCommand parsed = CommandDispatcher.parseTextSearchCommand("!textsearch 24h user:alice hello world", "!textsearch");
+
+        assertEquals(24, parsed.hours);
+        assertEquals("hello world", parsed.query);
+        assertEquals(1, parsed.filterSenders.size());
+        assertEquals("alice", parsed.filterSenders.get(0));
+    }
+
+    @Test
+    void textSearchOnlyMatchesMessageBodyNotSenderMetadata() {
+        assertTrue(TextSearchService.matchesSearch("hello world", new String[] {"world"}));
+        assertFalse(TextSearchService.matchesSearch("hello world", new String[] {"up"}));
+        assertFalse(TextSearchService.matchesSearch("matrix.org", new String[] {"up"}));
+    }
 }

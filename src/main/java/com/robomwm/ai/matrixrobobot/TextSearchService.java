@@ -14,6 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -46,7 +47,7 @@ public class TextSearchService {
     }
 
     public void performGrep(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
-            String fromToken, String pattern, ZoneId zoneId) {
+            String fromToken, String pattern, ZoneId zoneId, List<String> filterSenders) {
         try {
             String timeInfo = "last " + hours + "h";
 
@@ -60,7 +61,7 @@ public class TextSearchService {
 
             TextSearchPaginationState state = new TextSearchPaginationState(sender, pattern, null,
                     pattern.toLowerCase(), true, "Grep", exportRoomId,
-                    responseRoomId, originalEventId, zoneId, startTime, endTime);
+                    responseRoomId, originalEventId, zoneId, startTime, endTime, filterSenders);
 
             fetchMoreResults(state);
 
@@ -87,7 +88,7 @@ public class TextSearchService {
     }
 
     public void performSearch(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
-            String fromToken, String query, ZoneId zoneId) {
+            String fromToken, String query, ZoneId zoneId, List<String> filterSenders) {
         try {
             String timeInfo = "last " + hours + "h";
 
@@ -102,7 +103,7 @@ public class TextSearchService {
             long endTime = System.currentTimeMillis();
 
             TextSearchPaginationState state = new TextSearchPaginationState(sender, query, searchTerms,
-                    exportRoomId, responseRoomId, originalEventId, zoneId, startTime, endTime);
+                    exportRoomId, responseRoomId, originalEventId, zoneId, startTime, endTime, filterSenders);
 
             fetchMoreResults(state);
 
@@ -233,7 +234,7 @@ public class TextSearchService {
             String senderMsg = ev.path("sender").asText(null);
             String eventId = ev.path("event_id").asText(null);
             if (body == null || senderMsg == null || eventId == null) continue;
-
+            if (!state.filterSenders.isEmpty() && !state.filterSenders.contains(senderMsg)) continue;
             if (!state.seenEventIds.add(eventId)) continue;
 
             String timestamp = java.time.Instant.ofEpochMilli(originServerTs)
@@ -241,18 +242,11 @@ public class TextSearchService {
                     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
             String formattedLog = "[" + timestamp + "] <" + senderMsg + "> " + body;
 
-            String lowerLog = formattedLog.toLowerCase();
             boolean matches;
             if (state.isGrep) {
-                matches = lowerLog.contains(state.lowerPattern);
+                matches = matchesGrep(body, state.lowerPattern);
             } else {
-                matches = true;
-                for (String term : state.searchTerms) {
-                    if (!lowerLog.contains(term)) {
-                        matches = false;
-                        break;
-                    }
-                }
+                matches = matchesSearch(body, state.searchTerms);
             }
 
             if (matches) {
@@ -266,8 +260,22 @@ public class TextSearchService {
         }
     }
 
+    static boolean matchesSearch(String body, String[] searchTerms) {
+        String lowerBody = body.toLowerCase(Locale.ROOT);
+        for (String term : searchTerms) {
+            if (!lowerBody.contains(term)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean matchesGrep(String body, String lowerPattern) {
+        return body.toLowerCase(Locale.ROOT).contains(lowerPattern);
+    }
+
     public void performMediaSearch(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
-            String fromToken, String query, ZoneId zoneId) {
+            String fromToken, String query, ZoneId zoneId, List<String> filterSenders) {
         try {
             // Register this operation for abort capability
             AtomicBoolean abortFlag = new AtomicBoolean(false);
@@ -395,7 +403,10 @@ public class TextSearchService {
                         String body = ev.path("content").path("body").asText(null);
                         String senderMsg = ev.path("sender").asText(null);
                         String eventId = ev.path("event_id").asText(null);
-                        
+                        if (!filterSenders.isEmpty() && !filterSenders.contains(senderMsg)) {
+                            continue;
+                        }
+
                         // Extract filename for media messages
                         String filename = null;
                         if ("m.room.message".equals(eventType)) {
@@ -547,6 +558,7 @@ public class TextSearchService {
         final String responseRoomId;
         final String eventMessageId;
         final ZoneId zoneId;
+        final java.util.List<String> filterSenders;
         final long startTime;
         final long endTime;
 
@@ -556,14 +568,14 @@ public class TextSearchService {
 
         TextSearchPaginationState(String sender, String query, String[] searchTerms,
                 String exportRoomId, String responseRoomId, String eventMessageId,
-                ZoneId zoneId, long startTime, long endTime) {
+                ZoneId zoneId, long startTime, long endTime, List<String> filterSenders) {
             this(sender, query, searchTerms, null, false, "Search", exportRoomId,
-                    responseRoomId, eventMessageId, zoneId, startTime, endTime);
+                    responseRoomId, eventMessageId, zoneId, startTime, endTime, filterSenders);
         }
 
         TextSearchPaginationState(String sender, String query, String[] searchTerms, String lowerPattern, boolean isGrep, String label,
                 String exportRoomId, String responseRoomId, String eventMessageId,
-                ZoneId zoneId, long startTime, long endTime) {
+                ZoneId zoneId, long startTime, long endTime, List<String> filterSenders) {
             this.sender = sender;
             this.query = query;
             this.searchTerms = searchTerms;
@@ -574,6 +586,7 @@ public class TextSearchService {
             this.responseRoomId = responseRoomId;
             this.eventMessageId = eventMessageId;
             this.zoneId = zoneId;
+            this.filterSenders = filterSenders == null ? List.of() : List.copyOf(filterSenders);
             this.startTime = startTime;
             this.endTime = endTime;
             this.currentPage = 0;
