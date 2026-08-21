@@ -183,8 +183,9 @@ public class AIService {
     public void queryAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
             String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
-        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId, startEventId,
-                forward, false);
+        RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId,
+                latestMsg.eventId, forward, false);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -250,8 +251,9 @@ public class AIService {
     public void queryAIFiltered(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
             String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
-        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId, startEventId,
-                forward, true);
+        RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId,
+                latestMsg.eventId, forward, true);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1099,8 +1101,9 @@ public class AIService {
     public void queryAIUnreadFiltered(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
             String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             String startEventId) {
-        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId, startEventId,
-                false, true);
+        RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId,
+                latestMsg.eventId, false, true);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1157,8 +1160,9 @@ public class AIService {
     public void queryAsk(String responseRoomId, String exportRoomId, String fromToken, String question, String promptPrefix,
                          java.util.concurrent.atomic.AtomicBoolean abortFlag, String forcedModel, int timeoutSeconds, 
                          Backend preferredBackend, ZoneId zoneId) {
-        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, fromToken, fromToken,
-                false, false);
+        RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
+        java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, fromToken,
+                latestMsg.eventId, false, false);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);

@@ -280,7 +280,7 @@ public class MatrixRobobot {
                                                     runningOperations.put(sender, abortFlag);
                                                     
                                                     final int fHours = -1;
-                                                    final int fMax = -1;
+                                                    final int fMax = Integer.MAX_VALUE;
                                                     final String fStart = ctxStart;
                                                     final boolean fFwd = ctxFwd;
                                                     final String fRoom = ctxRoom;
