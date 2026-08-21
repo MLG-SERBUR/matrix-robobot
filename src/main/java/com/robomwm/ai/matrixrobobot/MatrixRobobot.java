@@ -279,7 +279,7 @@ public class MatrixRobobot {
                                                     AtomicBoolean abortFlag = new AtomicBoolean(false);
                                                     runningOperations.put(sender, abortFlag);
                                                     
-                                                    final int fHours = -1;
+                                                    final int fHours = Integer.MAX_VALUE;
                                                     final int fMax = Integer.MAX_VALUE;
                                                     final String fStart = ctxStart;
                                                     final boolean fFwd = ctxFwd;
