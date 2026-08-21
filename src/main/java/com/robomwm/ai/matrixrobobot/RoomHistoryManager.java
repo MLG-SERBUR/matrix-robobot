@@ -311,23 +311,29 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages) {
-        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, false, null, null);
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, null, forward, zoneId, maxMessages, false, false, null, null);
     }
 
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
-        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, false, abortFlag, null);
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, null, forward, zoneId, maxMessages, false, false, abortFlag, null);
     }
 
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
             boolean forward, ZoneId zoneId, int maxMessages, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             ProgressCallback progressCallback) {
-        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, false, false, abortFlag, progressCallback);
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, null, forward, zoneId, maxMessages, false, false, abortFlag, progressCallback);
+    }
+
+    public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
+            String endEventId, boolean forward, ZoneId zoneId, int maxMessages,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
+        return fetchRoomHistoryRelative(roomId, hours, fromToken, startEventId, endEventId, forward, zoneId, maxMessages, false, false, abortFlag, progressCallback);
     }
 
     // New method with image collection
     public ChatLogsResult fetchRoomHistoryRelative(String roomId, int hours, String fromToken, String startEventId,
-            boolean forward, ZoneId zoneId, int maxMessages, boolean collectImages, boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            String endEventId, boolean forward, ZoneId zoneId, int maxMessages, boolean collectImages, boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             ProgressCallback progressCallback) {
         if (startEventId == null) {
             return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages, collectImages, aiFriendlyTimestamps, abortFlag, progressCallback);
@@ -386,6 +392,11 @@ public class RoomHistoryManager {
 
                 boolean stop = false;
                 for (JsonNode ev : chunk) {
+                    String eventId = ev.path("event_id").asText(null);
+                    if (endEventId != null && eventId != null && eventId.equals(endEventId)) {
+                        stop = true;
+                        break;
+                    }
                     if (!"m.room.message".equals(ev.path("type").asText(null)))
                         continue;
                     long originServerTs = ev.path("origin_server_ts").asLong(0);
@@ -401,7 +412,6 @@ public class RoomHistoryManager {
 
                     String body = ev.path("content").path("body").asText(null);
                     String sender = ev.path("sender").asText(null);
-                    String eventId = ev.path("event_id").asText(null);
                     String msgtype = ev.path("content").path("msgtype").asText(null);
                     if (body != null && sender != null) {
                         rawLines.add(new RawLogLine(originServerTs, sender, body, eventId));

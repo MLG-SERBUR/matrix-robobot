@@ -499,7 +499,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                service.queryAI(responseRoomId, exportRoomId, fHours, null, fQuestion, fEventId, fForward,
+                service.queryAI(responseRoomId, exportRoomId, fHours, null, fQuestion, fEventId, null, fForward,
                         zoneId, fMax, promptPrefix, abortFlag, backend);
             } finally {
                 runningOperations.remove(sender);
@@ -550,7 +550,7 @@ public class CommandDispatcher {
 
         new Thread(() -> {
             try {
-                service.queryAIFiltered(responseRoomId, exportRoomId, fHours, null, fQuestion, fEventId, fForward,
+                service.queryAIFiltered(responseRoomId, exportRoomId, fHours, null, fQuestion, fEventId, null, fForward,
                         zoneId, fMax, promptPrefix, abortFlag, backend);
             } finally {
                 runningOperations.remove(sender);

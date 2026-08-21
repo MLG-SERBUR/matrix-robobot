@@ -282,6 +282,7 @@ public class MatrixRobobot {
                                                     final int fHours = Integer.MAX_VALUE;
                                                     final int fMax = Integer.MAX_VALUE;
                                                     final String fStart = ctxStart;
+                                                    final String fEnd = ctxEnd;
                                                     final boolean fFwd = ctxFwd;
                                                     final String fRoom = ctxRoom;
                                                     final boolean fFiltered = ctxFiltered;
@@ -312,9 +313,9 @@ public class MatrixRobobot {
                                                             if (zoneId == null) zoneId = java.time.ZoneId.of("UTC");
                                                             
                                                             if (fFiltered) {
-                                                                aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                                aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
                                                             } else {
-                                                                aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                                aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, fFwd, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
                                                             }
                                                         } finally {
                                                             runningOperations.remove(sender);

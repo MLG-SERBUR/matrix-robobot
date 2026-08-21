@@ -181,7 +181,7 @@ public class AIService {
     }
 
     public void queryAI(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
-            String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
+            String startEventId, String endEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
         RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
         java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId,
@@ -220,7 +220,7 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult history = fetchHistoryForQuery(exportRoomId, hours, fromToken,
-                    startEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
+                    startEventId, endEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
 
             if (history.errorMessage != null) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, history.errorMessage);
@@ -249,7 +249,7 @@ public class AIService {
      * Quality-filtered variant of queryAI that removes messages from QUALITY_FILTER_USER.
      */
     public void queryAIFiltered(String responseRoomId, String exportRoomId, int hours, String fromToken, String question,
-            String startEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
+            String startEventId, String endEventId, boolean forward, ZoneId zoneId, int maxMessages, String promptPrefix,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
         RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
         java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId,
@@ -286,7 +286,7 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult history = fetchHistoryForQuery(exportRoomId, hours, fromToken,
-                    startEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
+                    startEventId, endEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
 
             if (history.errorMessage != null) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, history.errorMessage);
@@ -317,9 +317,9 @@ public class AIService {
     }
 
     protected RoomHistoryManager.ChatLogsResult fetchHistoryForQuery(String exportRoomId, int hours, String fromToken,
-            String startEventId, boolean forward, ZoneId zoneId, int maxMessages,
+            String startEventId, String endEventId, boolean forward, ZoneId zoneId, int maxMessages,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, RoomHistoryManager.ProgressCallback progressCallback) {
-        return historyManager.fetchRoomHistoryRelative(exportRoomId, hours, fromToken, startEventId, forward, zoneId,
+        return historyManager.fetchRoomHistoryRelative(exportRoomId, hours, fromToken, startEventId, endEventId, forward, zoneId,
                 maxMessages, false, true, abortFlag, progressCallback);
     }
 

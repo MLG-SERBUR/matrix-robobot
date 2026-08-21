@@ -41,10 +41,10 @@ public class VisionAIService extends AIService {
 
     @Override
     protected RoomHistoryManager.ChatLogsResult fetchHistoryForQuery(String exportRoomId, int hours, String fromToken,
-            String startEventId, boolean forward, java.time.ZoneId zoneId, int maxMessages,
+            String startEventId, String endEventId, boolean forward, java.time.ZoneId zoneId, int maxMessages,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, RoomHistoryManager.ProgressCallback progressCallback) {
         return historyManager.fetchRoomHistoryRelative(
-                exportRoomId, hours, fromToken, startEventId, forward, zoneId, maxMessages, true, true, abortFlag,
+                exportRoomId, hours, fromToken, startEventId, endEventId, forward, zoneId, maxMessages, true, true, abortFlag,
                 progressCallback);
     }
 
