@@ -340,8 +340,8 @@ public class AIService {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
-        boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         boolean isAsk = Prompts.ASK_PREFIX.equals(promptPrefix);
+        boolean skipSystem = isAsk || Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         String prompt = buildPrompt(question, history.logs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
@@ -456,8 +456,8 @@ public class AIService {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
-        boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         boolean isAsk = Prompts.ASK_PREFIX.equals(promptPrefix);
+        boolean skipSystem = isAsk || Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         
         String prompt = buildPrompt(question, history.logs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
@@ -573,8 +573,8 @@ public class AIService {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
-        boolean skipSystem = Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         boolean isAsk = Prompts.ASK_PREFIX.equals(promptPrefix);
+        boolean skipSystem = isAsk || Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         
         // Apply antispam filtering to logs if not already applied
         List<String> filteredLogs;
@@ -1173,12 +1173,10 @@ public class AIService {
             // We reserve ~4000 tokens for the generated response to be safe.
             int targetPromptTokens = 12000;
 
-            // Account for both messages sent to the provider: the ask system prompt
-            // and the complete user prompt, including the question.
+            // Account for the user prompt, including the question. No system prompt for ask.
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20; // Special tokens: BOS/EOS, role markers (im_start/im_end), separators
-            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_ASK) +
-                             RoomHistoryManager.estimateTokens(emptyPrompt) +
+            int baseTokens = RoomHistoryManager.estimateTokens(emptyPrompt) +
                              chatFormatOverhead;
 
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
@@ -1235,8 +1233,7 @@ public class AIService {
             int targetPromptTokens = 12000;
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20;
-            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_ASK) +
-                             RoomHistoryManager.estimateTokens(emptyPrompt) +
+            int baseTokens = RoomHistoryManager.estimateTokens(emptyPrompt) +
                              chatFormatOverhead;
 
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
@@ -1551,8 +1548,7 @@ public class AIService {
             int targetPromptTokens = 12000;
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), Prompts.ASK_PREFIX);
             int chatFormatOverhead = 20;
-            int baseTokens = RoomHistoryManager.estimateTokens(Prompts.SYSTEM_ASK) +
-                             RoomHistoryManager.estimateTokens(emptyPrompt) +
+            int baseTokens = RoomHistoryManager.estimateTokens(emptyPrompt) +
                              chatFormatOverhead;
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
 
