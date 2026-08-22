@@ -345,6 +345,11 @@ public class RoomHistoryManager {
         List<String> imageEventIds = collectImages ? new ArrayList<>() : null;
         String firstEventId = null;
 
+        // When endEventId is set, direction is implicit: always go forward from start to end
+        if (endEventId != null) {
+            forward = true;
+        }
+
         TokenResult tokenRes = getTokenForEvent(roomId, startEventId, forward);
         if (tokenRes == null || tokenRes.errorMessage != null) {
             return new ChatLogsResult(
