@@ -26,7 +26,7 @@ class CommandDispatcherTest {
 
     @Test
     void historyContextUsesEventWindowOnly() {
-        Map<String, Object> context = AIService.buildHistoryContext("!room:example.org", "$start", "$end", true, false);
+        Map<String, Object> context = AIService.buildHistoryContext("!room:example.org", "$start", "$end", false);
 
         assertEquals("$start", context.get("startEventId"));
         assertEquals("$end", context.get("endEventId"));

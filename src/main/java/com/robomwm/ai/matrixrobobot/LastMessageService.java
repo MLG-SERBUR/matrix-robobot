@@ -95,7 +95,6 @@ public class LastMessageService {
                     exportRoomId,
                     lastReadInfo != null ? lastReadInfo.eventId : null,
                     latestMessageInfo != null ? latestMessageInfo.eventId : null,
-                    true,
                     false);
             Map<String, Object> extra = new java.util.HashMap<>();
             extra.put("ai.matrixrobobot.context", botContext);
