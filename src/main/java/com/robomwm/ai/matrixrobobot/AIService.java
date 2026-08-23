@@ -59,7 +59,7 @@ public class AIService {
         this.ollamaProxyUrl = ollamaProxyUrl != null ? ollamaProxyUrl : "http://localhost:8000/api/chat";
         this.arliModels = arliModels != null && !arliModels.isEmpty() ? arliModels : Arrays.asList("Qwen3.5-27B-Derestricted");
         this.cerebrasModels = cerebrasModels != null && !cerebrasModels.isEmpty() ? cerebrasModels : Arrays.asList("qwen-3-235b-a22b-instruct-2507");
-        this.groqModels = groqModels != null && !groqModels.isEmpty() ? groqModels : Arrays.asList("meta-llama/llama-4-scout-17b-16e-instruct");
+        this.groqModels = groqModels != null && !groqModels.isEmpty() ? groqModels : Arrays.asList("openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b");
         this.openrouterModels = openrouterModels != null && !openrouterModels.isEmpty() ? openrouterModels : Arrays.asList("openrouter/free");
         this.freeLlmModels = freeLlmModels != null && !freeLlmModels.isEmpty() ? freeLlmModels : Arrays.asList("auto");
         this.ollamaProxyModels = ollamaProxyModels != null && !ollamaProxyModels.isEmpty() ? ollamaProxyModels : Arrays.asList("llama3.2:3b");
@@ -707,7 +707,7 @@ public class AIService {
 
     private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
         List<ProviderAttempt> attempts = new ArrayList<>();
-        Backend[] order = {Backend.ARLIAI, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS, Backend.GROQ, Backend.OPENROUTER};
+        Backend[] order = {Backend.GROQ, Backend.ARLIAI, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS, Backend.OPENROUTER};
         for (Backend backend : order) {
             if (preferredBackend != Backend.AUTO && preferredBackend != backend) {
                 continue;
