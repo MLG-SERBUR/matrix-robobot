@@ -58,7 +58,8 @@ public class AIService {
         this.ollamaProxyApiKey = ollamaProxyApiKey;
         this.ollamaProxyUrl = ollamaProxyUrl != null ? ollamaProxyUrl : "http://localhost:8000/api/chat";
         this.arliModels = arliModels != null && !arliModels.isEmpty() ? arliModels : Arrays.asList("Qwen3.5-27B-Derestricted");
-        this.cerebrasModels = cerebrasModels != null && !cerebrasModels.isEmpty() ? cerebrasModels : Arrays.asList("qwen-3-235b-a22b-instruct-2507");
+        // Empty list is allowed and disables Cerebras entirely; only null (missing config key) falls back to a default model.
+        this.cerebrasModels = cerebrasModels == null ? Arrays.asList("qwen-3-235b-a22b-instruct-2507") : cerebrasModels;
         this.groqModels = groqModels != null && !groqModels.isEmpty() ? groqModels : Arrays.asList("openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b");
         this.openrouterModels = openrouterModels != null && !openrouterModels.isEmpty() ? openrouterModels : Arrays.asList("openrouter/free");
         this.freeLlmModels = freeLlmModels != null && !freeLlmModels.isEmpty() ? freeLlmModels : Arrays.asList("auto");
@@ -707,7 +708,7 @@ public class AIService {
 
     private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
         List<ProviderAttempt> attempts = new ArrayList<>();
-        Backend[] order = {Backend.GROQ, Backend.ARLIAI, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS, Backend.OPENROUTER};
+        Backend[] order = {Backend.ARLIAI, Backend.GROQ, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS, Backend.OPENROUTER};
         for (Backend backend : order) {
             if (preferredBackend != Backend.AUTO && preferredBackend != backend) {
                 continue;
@@ -715,6 +716,11 @@ public class AIService {
 
             ProviderConfig provider = getProviderConfig(backend);
             if (provider == null || provider.apiKey == null || provider.apiKey.isEmpty()) {
+                continue;
+            }
+
+            // Skip Cerebras entirely if no models are configured.
+            if (backend == Backend.CEREBRAS && cerebrasModels.isEmpty()) {
                 continue;
             }
 
@@ -789,7 +795,7 @@ public class AIService {
 
         switch (backend) {
             case CEREBRAS:
-                return cerebrasModels.get(0);
+                return cerebrasModels.isEmpty() ? "unknown-model" : cerebrasModels.get(0);
             case GROQ:
                 return groqModels.get(0);
             case OPENROUTER:
