@@ -393,12 +393,18 @@ public class AIService {
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer) {
-        performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, false);
+        performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, false, false);
     }
 
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer, boolean skipUserFilterRetry) {
+        performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, skipUserFilterRetry, false);
+    }
+
+    protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
+                                String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+                                Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer, boolean skipUserFilterRetry, boolean calibrationRetryDone) {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
@@ -477,6 +483,26 @@ public class AIService {
                     }
                 }
                 
+                // Self-calibration: aggressive estimator hit context limit -> update factor and retry with less
+                if (!calibrationRetryDone && TokenCalibrationManager.isContextLengthError(errorMsg)) {
+                    TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg);
+                    Integer actual = TokenCalibrationManager.extractActualTokens(errorMsg);
+                    if (actual != null && history.logs.size() > 10) {
+                        double targetRatio = 12288.0 * 0.85 / actual;
+                        targetRatio = Math.max(0.3, Math.min(0.85, targetRatio));
+                        int newSize = Math.max(10, (int) (history.logs.size() * targetRatio));
+                        if (newSize < history.logs.size()) {
+                            java.util.List<String> truncated = new java.util.ArrayList<>(history.logs.subList(history.logs.size() - newSize, history.logs.size()));
+                            RoomHistoryManager.ChatLogsResult truncatedHistory = new RoomHistoryManager.ChatLogsResult(truncated, history.firstEventId, null, history.antispamApplied);
+                            String calMsg = "Context exceeded (" + actual + "/12288). Calibrated factor to " + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor()) + " and retrying with " + newSize + " messages (" + (int)(targetRatio*100) + "%)...";
+                            System.out.println(calMsg);
+                            if (batchEventId != null) matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString() + "\n" + calMsg);
+                            performAIQuery(responseRoomId, exportRoomId, truncatedHistory, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, batchEventId != null ? batchEventId : statusEventId, footer, skipUserFilterRetry, true);
+                            return;
+                        }
+                    }
+                }
+
 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 // Otherwise only fallback in AUTO mode and if not the last attempt
                 if ((preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) || i == attempts.size() - 1) {

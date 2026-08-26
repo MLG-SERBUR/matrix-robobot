@@ -32,7 +32,7 @@ public class RoomHistoryManager {
     private static final DateTimeFormatter AI_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter AI_TIME_FORMATTER = DateTimeFormatter.ofPattern("H:mm");
     private static final String ARLIAI_TOKENIZER_RESOURCE = "/tokenizers/arliai-tokenizer.json";
-    private static final double TOKEN_SAFETY_MARGIN = 1.50;
+    private static final double TOKEN_SAFETY_MARGIN = 1.0; // calibration manager handles margin
     private static final HuggingFaceTokenizer AI_TOKENIZER = loadTokenizer();
 
     @FunctionalInterface
@@ -872,13 +872,21 @@ public class RoomHistoryManager {
     }
 
     /**
-     * Estimates prompt tokens using the vendored HuggingFace tokenizer.
-     * A small margin covers chat-template and provider-specific framing differences.
+     * Estimates prompt tokens using heuristic + self-calibration.
+     * Keeps vendored tokenizer as fallback but primary is aggressive heuristic.
      */
     public static int estimateTokens(String text) {
         if (text == null || text.isEmpty()) return 0;
-        int tokenCount = AI_TOKENIZER.encode(text, false, false).getIds().length;
-        return (int) Math.ceil(tokenCount * TOKEN_SAFETY_MARGIN);
+        // Use calibrated heuristic (aggressive). If calibration not yet converged, still better than
+        // Java tokenizer mismatch. Keep tokenizer as sanity floor: take max of both.
+        int heuristic = TokenCalibrationManager.getInstance().estimateTokens(text);
+        try {
+            int tokenCount = AI_TOKENIZER.encode(text, false, false).getIds().length;
+            int tokenizerEst = (int) Math.ceil(tokenCount * TOKEN_SAFETY_MARGIN);
+            return Math.max(heuristic, tokenizerEst);
+        } catch (Exception e) {
+            return heuristic;
+        }
     }
 
     private static int estimateLogLineTokens(String line) {
