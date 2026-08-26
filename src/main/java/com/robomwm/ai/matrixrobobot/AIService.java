@@ -483,24 +483,28 @@ public class AIService {
                     }
                 }
                 
-                // Self-calibration: aggressive estimator hit context limit -> update factor and retry with less
+                // Self-calibration: only !ask should truncate/retry with less; duration/count/autotldr must fail over to next provider to keep all messages.
                 if (!calibrationRetryDone && TokenCalibrationManager.isContextLengthError(errorMsg)) {
+                    // Always update factor for future !ask estimates
                     TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg);
-                    Integer actual = TokenCalibrationManager.extractActualTokens(errorMsg);
-                    if (actual != null && history.logs.size() > 10) {
-                        double targetRatio = 12288.0 * 0.85 / actual;
-                        targetRatio = Math.max(0.3, Math.min(0.85, targetRatio));
-                        int newSize = Math.max(10, (int) (history.logs.size() * targetRatio));
-                        if (newSize < history.logs.size()) {
-                            java.util.List<String> truncated = new java.util.ArrayList<>(history.logs.subList(history.logs.size() - newSize, history.logs.size()));
-                            RoomHistoryManager.ChatLogsResult truncatedHistory = new RoomHistoryManager.ChatLogsResult(truncated, history.firstEventId, null, history.antispamApplied);
-                            String calMsg = "Context exceeded (" + actual + "/12288). Calibrated factor to " + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor()) + " and retrying with " + newSize + " messages (" + (int)(targetRatio*100) + "%)...";
-                            System.out.println(calMsg);
-                            if (batchEventId != null) matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString() + "\n" + calMsg);
-                            performAIQuery(responseRoomId, exportRoomId, truncatedHistory, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, batchEventId != null ? batchEventId : statusEventId, footer, skipUserFilterRetry, true);
-                            return;
+                    if (isAsk) {
+                        Integer actual = TokenCalibrationManager.extractActualTokens(errorMsg);
+                        if (actual != null && history.logs.size() > 10) {
+                            double targetRatio = 12288.0 * 0.85 / actual;
+                            targetRatio = Math.max(0.3, Math.min(0.85, targetRatio));
+                            int newSize = Math.max(10, (int) (history.logs.size() * targetRatio));
+                            if (newSize < history.logs.size()) {
+                                java.util.List<String> truncated = new java.util.ArrayList<>(history.logs.subList(history.logs.size() - newSize, history.logs.size()));
+                                RoomHistoryManager.ChatLogsResult truncatedHistory = new RoomHistoryManager.ChatLogsResult(truncated, history.firstEventId, null, history.antispamApplied);
+                                String calMsg = "Context exceeded (" + actual + "/12288). Calibrated factor to " + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor()) + " and retrying with " + newSize + " messages (" + (int)(targetRatio*100) + "%)...";
+                                System.out.println(calMsg);
+                                if (batchEventId != null) matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString() + "\n" + calMsg);
+                                performAIQuery(responseRoomId, exportRoomId, truncatedHistory, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, batchEventId != null ? batchEventId : statusEventId, footer, skipUserFilterRetry, true);
+                                return;
+                            }
                         }
                     }
+                    // Non-ask: still calibrated, but now fall through to normal provider fallback (no truncate)
                 }
 
 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
