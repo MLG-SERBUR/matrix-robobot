@@ -40,10 +40,18 @@ Create a `config.json` file in the same directory as the JAR:
 - `cerebrasApiKey`: API key for Cerebras (optional)
 - `groqApiKey`: API key for Groq (optional)
 - `openrouterApiKey`: API key for OpenRouter (optional)
+- `geminiApiKey`: API key for Google Gemini (optional)
+- `mistralApiKey`: API key for Mistral (optional)
+- `zaiApiKey`: API key for Z.AI (optional)
+- `cloudflareApiKey`: API token for Cloudflare Workers AI (optional; requires `cloudflareAccountId`)
+- `cloudflareAccountId`: Cloudflare account ID (required for Workers AI)
+- `ollamaApiKey`: API key for Ollama Cloud (ollama.com) (optional)
+- `sambaNovaApiKey`: API key for SambaNova (optional)
 - `arliModels`: List of Arli AI models to use (randomly selected for each query)
 - `cerebrasModels`: List of Cerebras models to try in sequence on fallback
 - `groqModels`: List of Groq models to try in sequence on fallback
 - `openrouterModels`: List of OpenRouter models (first model used)
+- `geminiModels`/`mistralModels`/`zaiModels`/`cloudflareModels`/`ollamaModels`/`sambaNovaModels`: Model lists for the new providers. New providers are tried after all others, before OpenRouter. For Cloudflare and Ollama Cloud the model order is randomized per query since usage is tracked for the whole account rather than per model.
 
 ## Commands
 

@@ -47,6 +47,19 @@ public class MatrixRobobot {
         public java.util.List<String> openrouterModels;
         public java.util.List<String> freeLlmModels;
         public java.util.List<String> ollamaProxyModels;
+        public String geminiApiKey;
+        public String mistralApiKey;
+        public String zaiApiKey;
+        public String cloudflareApiKey;
+        public String cloudflareAccountId;
+        public String ollamaApiKey;
+        public String sambaNovaApiKey;
+        public java.util.List<String> geminiModels;
+        public java.util.List<String> mistralModels;
+        public java.util.List<String> zaiModels;
+        public java.util.List<String> cloudflareModels;
+        public java.util.List<String> ollamaModels;
+        public java.util.List<String> sambaNovaModels;
         public String imageCaptionBackend;
         public String imageCaptionModel;
     }
@@ -72,6 +85,12 @@ public class MatrixRobobot {
                 .build();
         ObjectMapper mapper = new ObjectMapper();
 
+        AIService.ExtraProviders extraProviders = new AIService.ExtraProviders(
+                config.geminiApiKey, config.mistralApiKey, config.zaiApiKey,
+                config.cloudflareApiKey, config.cloudflareAccountId, config.ollamaApiKey, config.sambaNovaApiKey,
+                config.geminiModels, config.mistralModels, config.zaiModels,
+                config.cloudflareModels, config.ollamaModels, config.sambaNovaModels);
+
         // Initialize services
         MatrixClient matrixClient = new MatrixClient(client, mapper, url, config.accessToken);
         RoomHistoryManager historyManager = new RoomHistoryManager(client, mapper, url, config.accessToken);
@@ -84,7 +103,7 @@ public class MatrixRobobot {
                 config.cerebrasApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
                 config.ollamaProxyApiKey, config.ollamaProxyUrl,
                 config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels, 
-                config.freeLlmModels, config.ollamaProxyModels);
+                config.freeLlmModels, config.ollamaProxyModels, extraProviders);
         ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
         VisionAIService visionAIService;
         if ("OLLAMA".equalsIgnoreCase(config.imageCaptionBackend) || "OLLAMA_PROXY".equalsIgnoreCase(config.imageCaptionBackend)) {
@@ -92,13 +111,13 @@ public class MatrixRobobot {
                     config.arliApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
                     config.ollamaProxyApiKey, config.ollamaProxyUrl, imageFetcher, config.imageCaptionModel,
                     config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels,
-                    config.freeLlmModels, config.ollamaProxyModels);
+                    config.freeLlmModels, config.ollamaProxyModels, extraProviders);
         } else {
             visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
                     config.arliApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
                     config.ollamaProxyApiKey, config.ollamaProxyUrl, imageFetcher,
                     config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels,
-                    config.freeLlmModels, config.ollamaProxyModels);
+                    config.freeLlmModels, config.ollamaProxyModels, extraProviders);
         }
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);

@@ -40,12 +40,23 @@ public class AIService {
     protected final List<String> openrouterModels;
     protected final List<String> freeLlmModels;
     protected final List<String> ollamaProxyModels;
+    protected final ExtraProviders extra;
 
     public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
             String cerebrasApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
             String ollamaProxyApiKey, String ollamaProxyUrl,
             List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, 
             List<String> freeLlmModels, List<String> ollamaProxyModels) {
+        this(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey, groqApiKey, openrouterApiKey,
+                freeLlmApiKey, ollamaProxyApiKey, ollamaProxyUrl, arliModels, cerebrasModels, groqModels,
+                openrouterModels, freeLlmModels, ollamaProxyModels, null);
+    }
+
+    public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
+            String cerebrasApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
+            String ollamaProxyApiKey, String ollamaProxyUrl,
+            List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, 
+            List<String> freeLlmModels, List<String> ollamaProxyModels, ExtraProviders extra) {
         this.client = client;
         this.mapper = mapper;
         this.homeserver = homeserver;
@@ -64,6 +75,8 @@ public class AIService {
         this.openrouterModels = openrouterModels != null && !openrouterModels.isEmpty() ? openrouterModels : Arrays.asList("openrouter/free");
         this.freeLlmModels = freeLlmModels != null && !freeLlmModels.isEmpty() ? freeLlmModels : Arrays.asList("auto");
         this.ollamaProxyModels = ollamaProxyModels != null && !ollamaProxyModels.isEmpty() ? ollamaProxyModels : Arrays.asList("llama3.2:3b");
+        this.extra = extra != null ? extra : new ExtraProviders(
+                null, null, null, null, null, null, null, null, null, null, null, null, null);
         this.historyManager = new RoomHistoryManager(client, mapper, homeserver, accessToken);
         this.random = new Random();
     }
@@ -106,7 +119,55 @@ public class AIService {
     }
 
     public enum Backend {
-        AUTO, ARLIAI, OLLAMA_PROXY, FREELLM, CEREBRAS, GROQ, OPENROUTER
+        AUTO, ARLIAI, OLLAMA_PROXY, FREELLM, CEREBRAS, GROQ,
+        GEMINI, MISTRAL, ZAI, CLOUDFLARE, OLLAMA_CLOUD, SAMBANOVA,
+        OPENROUTER
+    }
+
+    /**
+     * Configuration for the additional free-tier providers. Each provider is skipped entirely
+     * when its API key is blank. Model lists fall back to these defaults when the config key is
+     * missing (null); an explicitly empty list disables that provider.
+     */
+    public static class ExtraProviders {
+        public final String geminiApiKey;
+        public final String mistralApiKey;
+        public final String zaiApiKey;
+        public final String cloudflareApiKey;
+        public final String cloudflareAccountId;
+        public final String ollamaApiKey;
+        public final String sambaNovaApiKey;
+        public final List<String> geminiModels;
+        public final List<String> mistralModels;
+        public final List<String> zaiModels;
+        public final List<String> cloudflareModels;
+        public final List<String> ollamaModels;
+        public final List<String> sambaNovaModels;
+
+        public ExtraProviders(String geminiApiKey, String mistralApiKey, String zaiApiKey,
+                String cloudflareApiKey, String cloudflareAccountId, String ollamaApiKey, String sambaNovaApiKey,
+                List<String> geminiModels, List<String> mistralModels, List<String> zaiModels,
+                List<String> cloudflareModels, List<String> ollamaModels, List<String> sambaNovaModels) {
+            this.geminiApiKey = geminiApiKey;
+            this.mistralApiKey = mistralApiKey;
+            this.zaiApiKey = zaiApiKey;
+            this.cloudflareApiKey = cloudflareApiKey;
+            this.cloudflareAccountId = cloudflareAccountId;
+            this.ollamaApiKey = ollamaApiKey;
+            this.sambaNovaApiKey = sambaNovaApiKey;
+            this.geminiModels = geminiModels != null ? geminiModels : Arrays.asList(
+                    "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash",
+                    "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemma-4-31b-it");
+            this.mistralModels = mistralModels != null ? mistralModels : Arrays.asList(
+                    "mistral-large-latest", "mistral-medium-latest", "magistral-small-latest",
+                    "mistral-small-latest", "codestral-latest", "open-mistral-nemo", "ministral-8b-latest");
+            this.zaiModels = zaiModels != null ? zaiModels : Arrays.asList("glm-4.7-flash", "glm-4.5-flash");
+            this.cloudflareModels = cloudflareModels != null ? cloudflareModels : Arrays.asList("@cf/openai/gpt-oss-120b");
+            this.ollamaModels = ollamaModels != null ? ollamaModels : Arrays.asList(
+                    "minimax-m3", "nemotron-3-ultra", "gpt-oss:120b", "gemma4:31b");
+            this.sambaNovaModels = sambaNovaModels != null ? sambaNovaModels : Arrays.asList(
+                    "DeepSeek-V3.1", "gpt-oss-120b", "Meta-Llama-3.3-70B-Instruct");
+        }
     }
 
     public static void applyArliAiNonThinkingDefaults(Map<String, Object> payload) {
@@ -708,7 +769,9 @@ public class AIService {
 
     private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
         List<ProviderAttempt> attempts = new ArrayList<>();
-        Backend[] order = {Backend.ARLIAI, Backend.GROQ, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS, Backend.OPENROUTER};
+        Backend[] order = {Backend.ARLIAI, Backend.GROQ, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS,
+                Backend.GEMINI, Backend.MISTRAL, Backend.CLOUDFLARE, Backend.OLLAMA_CLOUD, Backend.ZAI,
+                Backend.SAMBANOVA, Backend.OPENROUTER};
         for (Backend backend : order) {
             if (preferredBackend != Backend.AUTO && preferredBackend != backend) {
                 continue;
@@ -752,6 +815,31 @@ public class AIService {
                 for (String model : ollamaProxyModels) {
                     attempts.add(new ProviderAttempt(provider, model));
                 }
+            } else if (backend == Backend.GEMINI) {
+                for (String model : extra.geminiModels) {
+                    attempts.add(new ProviderAttempt(provider, model));
+                }
+            } else if (backend == Backend.MISTRAL) {
+                for (String model : extra.mistralModels) {
+                    attempts.add(new ProviderAttempt(provider, model));
+                }
+            } else if (backend == Backend.ZAI) {
+                for (String model : extra.zaiModels) {
+                    attempts.add(new ProviderAttempt(provider, model));
+                }
+            } else if (backend == Backend.CLOUDFLARE || backend == Backend.OLLAMA_CLOUD) {
+                // Cloudflare Workers AI and Ollama Cloud track usage across the whole account rather
+                // than per model, so shuffle the model order on every query to spread the load.
+                List<String> models = backend == Backend.CLOUDFLARE ? extra.cloudflareModels : extra.ollamaModels;
+                List<String> shuffled = new ArrayList<>(models);
+                java.util.Collections.shuffle(shuffled, random);
+                for (String model : shuffled) {
+                    attempts.add(new ProviderAttempt(provider, model));
+                }
+            } else if (backend == Backend.SAMBANOVA) {
+                for (String model : extra.sambaNovaModels) {
+                    attempts.add(new ProviderAttempt(provider, model));
+                }
             }
         }
         return attempts;
@@ -782,6 +870,32 @@ public class AIService {
             case OLLAMA_PROXY:
                 return new ProviderConfig(Backend.OLLAMA_PROXY, "OllamaProxy", "Ollama Proxy", "OLLAMA_PROXY_API_KEY",
                         ollamaProxyApiKey, ollamaProxyUrl, true, Map.of(), Map.of());
+            case GEMINI:
+                return new ProviderConfig(Backend.GEMINI, "Gemini", "Gemini", "GEMINI_API_KEY", extra.geminiApiKey,
+                        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", false,
+                        Map.of(), Map.of());
+            case MISTRAL:
+                return new ProviderConfig(Backend.MISTRAL, "Mistral", "Mistral", "MISTRAL_API_KEY", extra.mistralApiKey,
+                        "https://api.mistral.ai/v1/chat/completions", false, Map.of(), Map.of());
+            case ZAI:
+                return new ProviderConfig(Backend.ZAI, "ZAI", "Z.AI", "ZAI_API_KEY", extra.zaiApiKey,
+                        "https://api.z.ai/api/paas/v4/chat/completions", false, Map.of(), Map.of());
+            case CLOUDFLARE:
+                if (extra.cloudflareAccountId == null || extra.cloudflareAccountId.isEmpty()) {
+                    return null;
+                }
+                return new ProviderConfig(Backend.CLOUDFLARE, "Cloudflare", "Cloudflare", "CLOUDFLARE_API_KEY",
+                        extra.cloudflareApiKey,
+                        "https://api.cloudflare.com/client/v4/accounts/" + extra.cloudflareAccountId
+                                + "/ai/v1/chat/completions",
+                        false, Map.of(), Map.of());
+            case OLLAMA_CLOUD:
+                return new ProviderConfig(Backend.OLLAMA_CLOUD, "OllamaCloud", "Ollama Cloud", "OLLAMA_API_KEY",
+                        extra.ollamaApiKey, "https://ollama.com/v1/chat/completions", false, Map.of(), Map.of());
+            case SAMBANOVA:
+                return new ProviderConfig(Backend.SAMBANOVA, "SambaNova", "SambaNova", "SAMBANOVA_API_KEY",
+                        extra.sambaNovaApiKey, "https://api.sambanova.ai/v1/chat/completions", false,
+                        Map.of(), Map.of());
             default:
                 return null;
         }
@@ -806,6 +920,18 @@ public class AIService {
                 return freeLlmModels.get(0);
             case OLLAMA_PROXY:
                 return ollamaProxyModels.get(0);
+            case GEMINI:
+                return extra.geminiModels.get(0);
+            case MISTRAL:
+                return extra.mistralModels.get(0);
+            case ZAI:
+                return extra.zaiModels.get(0);
+            case CLOUDFLARE:
+                return getRandomModel(extra.cloudflareModels);
+            case OLLAMA_CLOUD:
+                return getRandomModel(extra.ollamaModels);
+            case SAMBANOVA:
+                return extra.sambaNovaModels.get(0);
             default:
                 return "unknown-model";
         }

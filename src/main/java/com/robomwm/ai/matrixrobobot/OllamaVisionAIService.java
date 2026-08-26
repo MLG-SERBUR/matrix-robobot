@@ -30,6 +30,19 @@ public class OllamaVisionAIService extends VisionAIService {
         this.model = model != null ? model : (ollamaProxyModels != null && !ollamaProxyModels.isEmpty() ? ollamaProxyModels.get(0) : "llava");
     }
 
+    public OllamaVisionAIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
+                                 String arliApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
+                                 String ollamaProxyApiKey, String ollamaProxyUrl,
+                                 ImageFetcher imageFetcher, String model,
+                                 List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, 
+                                 List<String> freeLlmModels, List<String> ollamaProxyModels,
+                                 AIService.ExtraProviders extra) {
+        super(client, mapper, homeserver, accessToken, arliApiKey, groqApiKey, openrouterApiKey, freeLlmApiKey,
+              ollamaProxyApiKey, ollamaProxyUrl, imageFetcher,
+              arliModels, cerebrasModels, groqModels, openrouterModels, freeLlmModels, ollamaProxyModels, extra);
+        this.model = model != null ? model : (ollamaProxyModels != null && !ollamaProxyModels.isEmpty() ? ollamaProxyModels.get(0) : "llava");
+    }
+
     @Override
     protected String describeImage(String mxcUrl) throws Exception {
         return AIRequestQueue.run("Ollama vision image description", () -> describeImageUnqueued(mxcUrl));
