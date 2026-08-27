@@ -263,25 +263,32 @@ public class AIService {
                 timeInfo = "last " + (hours > 0 ? hours + "h" : "all history");
             }
 
-            // Send immediate status message
+            // Send immediate status message - no interim updates, abort if gathering >15s
             String gatherMsg = "\uD83D\uDCE8 Gathering " + timeInfo + "...";
             String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
-
-            // Create progress callback that updates every 5 seconds
-            final String fStatusEventId = statusEventId;
-            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            long gatherStart = System.currentTimeMillis();
+            java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                long now = System.currentTimeMillis();
-                if (now - lastProgressUpdate.get() >= 5000) {
-                    lastProgressUpdate.set(now);
-                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
-                            "\uD83D\uDCE8 Gathering " + timeInfo + "... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                if (System.currentTimeMillis() - gatherStart > 15000) {
+                    gatherTimedOut.set(true);
+                    if (abortFlag != null) abortFlag.set(true);
                 }
             };
 
             RoomHistoryManager.ChatLogsResult history = fetchHistoryForQuery(exportRoomId, hours, fromToken,
                     startEventId, endEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
+
+            long gatherElapsed = System.currentTimeMillis() - gatherStart;
+            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+                String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                return;
+            }
+            if (abortFlag != null && abortFlag.get()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, "Gathering aborted.");
+                return;
+            }
 
             if (history.errorMessage != null) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, history.errorMessage);
@@ -296,6 +303,14 @@ public class AIService {
             history = prepareHistoryForQuery(responseRoomId, exportRoomId, history, abortFlag, statusEventId);
             if (history == null || history.logs.isEmpty()) {
                 return;
+            }
+
+            {
+                int gatheredCount = history.logs.size();
+                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
+                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
             performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, AI_TIMEOUT_SECONDS, statusEventId, null);
@@ -333,21 +348,29 @@ public class AIService {
 
             String gatherMsg = "\uD83D\uDCE8 Gathering " + timeInfo + " (quality filtered)...";
             String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
-
-            final String fStatusEventId = statusEventId;
-            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            long gatherStart = System.currentTimeMillis();
+            java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                long now = System.currentTimeMillis();
-                if (now - lastProgressUpdate.get() >= 5000) {
-                    lastProgressUpdate.set(now);
-                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
-                            "\uD83D\uDCE8 Gathering " + timeInfo + " (quality filtered)... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                if (System.currentTimeMillis() - gatherStart > 15000) {
+                    gatherTimedOut.set(true);
+                    if (abortFlag != null) abortFlag.set(true);
                 }
             };
 
             RoomHistoryManager.ChatLogsResult history = fetchHistoryForQuery(exportRoomId, hours, fromToken,
                     startEventId, endEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
+
+            long gatherElapsed = System.currentTimeMillis() - gatherStart;
+            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+                String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                return;
+            }
+            if (abortFlag != null && abortFlag.get()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, "Gathering aborted.");
+                return;
+            }
 
             if (history.errorMessage != null) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, history.errorMessage);
@@ -367,6 +390,14 @@ public class AIService {
             history = prepareHistoryForQuery(responseRoomId, exportRoomId, history, abortFlag, statusEventId);
             if (history == null || history.logs.isEmpty()) {
                 return;
+            }
+
+            {
+                int gatheredCount = history.logs.size();
+                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
+                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
             performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, null, AI_TIMEOUT_SECONDS, statusEventId, null, true);
@@ -428,12 +459,9 @@ public class AIService {
         String prompt = buildPrompt(question, history.logs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
-        // Track batched status updates to reduce Matrix message spam
+        // Lazy error handling: only send status message if at least one provider fails
         String batchEventId = null;
-        StringBuilder batchStatus = new StringBuilder();
         StringBuilder accumulatedStatus = new StringBuilder();
-        Instant lastUpdateTime = null;
-        boolean batching = attempts.size() > 1; // Only batch if multiple attempts possible
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -442,16 +470,6 @@ public class AIService {
             ProviderConfig provider = attempt.provider;
             
             try {
-                // For first attempt or non-batching mode, send immediate status
-                if (i == 0 || !batching) {
-                    String initialStatus = "Querying " + provider.noticeName + " (" + attempt.model + ")...";
-                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, initialStatus);
-                    lastUpdateTime = Instant.now();
-                    batchStatus.setLength(0);
-                    accumulatedStatus.setLength(0);
-                    accumulatedStatus.append(initialStatus);
-                }
-                
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
                             new String[]{null}, footer, timeoutSeconds, abortFlag, false, exportRoomId,
@@ -462,10 +480,13 @@ public class AIService {
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model), threadExtraContent.get());
                 }
-                // Success - flush any batched status immediately
-                if (batching && batchStatus.length() > 0) {
-                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                    batchStatus.setLength(0);
+                // Success - if we had previous failures, send them now as second message
+                if (accumulatedStatus.length() > 0) {
+                    if (batchEventId == null) {
+                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                    } else {
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                    }
                 }
                 return;
             } catch (Exception e) {
@@ -477,26 +498,6 @@ public class AIService {
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
-                
-                // Batch failures for grouped updates
-                if (batching) {
-                    batchStatus.setLength(0);
-                    batchStatus.append(statusUpdate);
-                    
-                    // Flush batch if: last attempt, or enough time passed, or enough failures
-                    Instant now = Instant.now();
-                    if (i == attempts.size() - 1 || 
-                        (lastUpdateTime != null && Duration.between(lastUpdateTime, now).toMillis() >= STATUS_UPDATE_INTERVAL_MS) ||
-                        batchStatus.length() >= 500) { // Reasonable max length
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                        lastUpdateTime = now;
-                    }
-                } else {
-                    // Non-batching mode: update immediately
-                    if (batchEventId != null) {
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, statusUpdate);
-                    }
-                }
                 
                 // Self-calibration: only unbounded !ask should truncate/retry and calibrate; bounded replies/duration/count/autotldr must fail over to next provider to keep all messages and not pollute factor.
                 if (!calibrationRetryDone && TokenCalibrationManager.isContextLengthError(errorMsg)) {
@@ -512,7 +513,12 @@ public class AIService {
                                 RoomHistoryManager.ChatLogsResult truncatedHistory = new RoomHistoryManager.ChatLogsResult(truncated, history.firstEventId, null, history.antispamApplied);
                                 String calMsg = "Context exceeded (" + actual + "/12288). Calibrated factor to " + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor()) + " and retrying with " + newSize + " messages (" + (int)(targetRatio*100) + "%)...";
                                 System.out.println(calMsg);
-                                if (batchEventId != null) matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString() + "\n" + calMsg);
+                                String fullStatus = accumulatedStatus.toString() + "\n" + calMsg;
+                                if (batchEventId == null) {
+                                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, fullStatus);
+                                } else {
+                                    matrixClient.updateNoticeMessage(responseRoomId, batchEventId, fullStatus);
+                                }
                                 performAIQuery(responseRoomId, exportRoomId, truncatedHistory, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, batchEventId != null ? batchEventId : statusEventId, footer, skipUserFilterRetry, true);
                                 return;
                             }
@@ -521,14 +527,19 @@ public class AIService {
                     // Non-ask: still calibrated, but now fall through to normal provider fallback (no truncate)
                 }
 
-// Always allow fallback for OLLAMA_PROXY since it's not 24/7
+                // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 // Otherwise only fallback in AUTO mode and if not the last attempt
                 if ((preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) || i == attempts.size() - 1) {
                     if (i == attempts.size() - 1 && !history.antispamApplied && !skipUserFilterRetry) {
                         // All providers failed, try removing messages from specific spammy user first
                         System.out.println("All providers failed, retrying with specific user filtering...");
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, 
-                                "All providers failed. Removing spammer messages from specific spammy user and retrying...");
+                        if (batchEventId == null) {
+                            batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                        } else {
+                            matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                        }
+                        String retryMsg = accumulatedStatus.toString() + "\nAll providers failed. Removing spammer messages from specific spammy user and retrying...";
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, retryMsg);
                         
                         // Create filtered history removing messages from the specific user
                         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
@@ -540,16 +551,17 @@ public class AIService {
                         return;
                     }
                     
+                    if (batchEventId == null) {
+                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                    } else {
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                    }
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
                             preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                    // Flush any remaining batched status on final error
-                    if (batching && batchStatus.length() > 0) {
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                        batchStatus.setLength(0);
-                    }
                     return;
                 }
+                // otherwise fallback to next provider silently (no message yet)
             }
         }
 
@@ -568,12 +580,9 @@ public class AIService {
         String prompt = buildPrompt(question, history.logs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
-        // Track batched status updates to reduce Matrix message spam
+        // Lazy error handling: only send status if failures occur
         String batchEventId = null;
-        StringBuilder batchStatus = new StringBuilder();
         StringBuilder accumulatedStatus = new StringBuilder();
-        Instant lastUpdateTime = null;
-        boolean batching = attempts.size() > 1; // Only batch if multiple attempts possible
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -582,16 +591,6 @@ public class AIService {
             ProviderConfig provider = attempt.provider;
             
             try {
-                // For first attempt or non-batching mode, send immediate status
-                if (i == 0 || !batching) {
-                    String initialStatus = "Querying " + provider.noticeName + " (" + attempt.model + ")... (filtered user)";
-                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, initialStatus);
-                    lastUpdateTime = Instant.now();
-                    batchStatus.setLength(0);
-                    accumulatedStatus.setLength(0);
-                    accumulatedStatus.append(initialStatus);
-                }
-                
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
                             new String[]{null}, footer, timeoutSeconds, abortFlag, false, exportRoomId,
@@ -602,10 +601,12 @@ public class AIService {
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model), threadExtraContent.get());
                 }
-                // Success - flush any batched status immediately
-                if (batching && batchStatus.length() > 0) {
-                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                    batchStatus.setLength(0);
+                if (accumulatedStatus.length() > 0) {
+                    if (batchEventId == null) {
+                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                    } else {
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                    }
                 }
                 return;
             } catch (Exception e) {
@@ -618,34 +619,19 @@ public class AIService {
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
                 
-                // Batch failures for grouped updates
-                if (batching) {
-                    batchStatus.setLength(0);
-                    batchStatus.append(statusUpdate);
-                    
-                    // Flush batch if: last attempt, or enough time passed, or enough failures
-                    Instant now = Instant.now();
-                    if (i == attempts.size() - 1 || 
-                        (lastUpdateTime != null && Duration.between(lastUpdateTime, now).toMillis() >= STATUS_UPDATE_INTERVAL_MS) ||
-                        batchStatus.length() >= 500) { // Reasonable max length
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                        lastUpdateTime = now;
-                    }
-                } else {
-                    // Non-batching mode: update immediately
-                    if (batchEventId != null) {
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, statusUpdate);
-                    }
-                }
-                
                 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 // Otherwise only fallback in AUTO mode and if not the last attempt
                 if ((preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) || i == attempts.size() - 1) {
                     if (i == attempts.size() - 1) {
                         // All providers failed after user filtering, try with antispam filtering
                         System.out.println("All providers failed after user filtering, retrying with antispam filtering...");
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, 
-                                "All providers failed. Applying antispam filtering and retrying...");
+                        if (batchEventId == null) {
+                            batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                        } else {
+                            matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                        }
+                        String retryMsg = accumulatedStatus.toString() + "\nAll providers failed. Applying antispam filtering and retrying...";
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, retryMsg);
                         
                         // Create filtered history - antispam will be applied by performAIQueryWithAntispam
                         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
@@ -657,14 +643,14 @@ public class AIService {
                         return;
                     }
                     
+                    if (batchEventId == null) {
+                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                    } else {
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                    }
                     handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
                             preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                    // Flush any remaining batched status on final error
-                    if (batching && batchStatus.length() > 0) {
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                        batchStatus.setLength(0);
-                    }
                     return;
                 }
             }
@@ -695,12 +681,9 @@ public class AIService {
         String prompt = buildPrompt(question, filteredLogs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
-        // Track batched status updates to reduce Matrix message spam
+        // Lazy error handling: only send status if failures occur
         String batchEventId = null;
-        StringBuilder batchStatus = new StringBuilder();
         StringBuilder accumulatedStatus = new StringBuilder();
-        Instant lastUpdateTime = null;
-        boolean batching = attempts.size() > 1; // Only batch if multiple attempts possible
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -709,16 +692,6 @@ public class AIService {
             ProviderConfig provider = attempt.provider;
             
             try {
-                // For first attempt or non-batching mode, send immediate status
-                if (i == 0 || !batching) {
-                    String initialStatus = "Querying " + provider.noticeName + " (" + attempt.model + ")... (with antispam filtering)";
-                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, initialStatus);
-                    lastUpdateTime = Instant.now();
-                    batchStatus.setLength(0);
-                    accumulatedStatus.setLength(0);
-                    accumulatedStatus.append(initialStatus);
-                }
-                
                 String[] outputEventIdHolder = new String[]{null};
                 if (provider.stream) {
                     callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
@@ -730,10 +703,12 @@ public class AIService {
                             provider.displayName, attempt.model);
                     matrixClient.sendMarkdownWithEventId(responseRoomId, renderedAnswer);
                 }
-                // Success - flush any batched status immediately
-                if (batching && batchStatus.length() > 0) {
-                    sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                    batchStatus.setLength(0);
+                if (accumulatedStatus.length() > 0) {
+                    if (batchEventId == null) {
+                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                    } else {
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                    }
                 }
                 return;
             } catch (Exception e) {
@@ -746,49 +721,29 @@ public class AIService {
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
                 
-                // Batch failures for grouped updates
-                if (batching) {
-                    batchStatus.setLength(0);
-                    batchStatus.append(statusUpdate);
-                    
-                    // Flush batch if: last attempt, or enough time passed, or enough failures
-                    Instant now = Instant.now();
-                    if (i == attempts.size() - 1 || 
-                        (lastUpdateTime != null && Duration.between(lastUpdateTime, now).toMillis() >= STATUS_UPDATE_INTERVAL_MS) ||
-                        batchStatus.length() >= 500) { // Reasonable max length
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                        lastUpdateTime = now;
-                    }
-                } else {
-                    // Non-batching mode: update immediately
-                    if (batchEventId != null) {
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, statusUpdate);
-                    }
-                }
-                
                 // For antispam retry, if any provider fails, we consider it final since we already applied filtering
                 if (i == attempts.size() - 1) {
+                    if (batchEventId == null) {
+                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                    } else {
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                    }
                     handleFinalError(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, abortFlag,
                             preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                    // Flush any remaining batched status on final error
-                    if (batching && batchStatus.length() > 0) {
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                        batchStatus.setLength(0);
-                    }
                     return;
                 }
                 
                 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 if (preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) {
+                    if (batchEventId == null) {
+                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                    } else {
+                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                    }
                     handleFinalError(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, abortFlag,
                             preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                    // Flush any remaining batched status on final error
-                    if (batching && batchStatus.length() > 0) {
-                        sendBatchedUpdate(matrixClient, responseRoomId, batchEventId, batchStatus.toString());
-                        batchStatus.setLength(0);
-                    }
                     return;
                 }
             }
@@ -1236,20 +1191,14 @@ public class AIService {
                 lastReadEventId = lastRead.eventId;
             }
 
-            // Send immediate status message
             String gatherMsg = "\uD83D\uDCE8 Gathering unread messages...";
             String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
-
-            // Create progress callback that updates every 5 seconds
-            final String fStatusEventId = statusEventId;
-            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            long gatherStart = System.currentTimeMillis();
+            java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                long now = System.currentTimeMillis();
-                if (now - lastProgressUpdate.get() >= 5000) {
-                    lastProgressUpdate.set(now);
-                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
-                            "\uD83D\uDCE8 Gathering unread messages... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                if (System.currentTimeMillis() - gatherStart > 15000) {
+                    gatherTimedOut.set(true);
+                    if (abortFlag != null) abortFlag.set(true);
                 }
             };
 
@@ -1257,10 +1206,30 @@ public class AIService {
                     lastReadEventId,
                     zoneId, true, abortFlag, progressCallback);
 
+            long gatherElapsed = System.currentTimeMillis() - gatherStart;
+            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+                String gatheredStr = result != null && result.logs != null ? String.valueOf(result.logs.size()) : "0";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                return;
+            }
+            if (abortFlag != null && abortFlag.get()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, "Gathering aborted.");
+                return;
+            }
+
             if (result.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "No unread messages found for you in " + exportRoomId + ".");
                 return;
+            }
+
+            {
+                int gatheredCount = result.logs.size();
+                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", result.logs));
+                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
             performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null);
@@ -1298,22 +1267,30 @@ public class AIService {
 
             String gatherMsg = "\uD83D\uDCE8 Gathering unread messages (quality filtered)...";
             String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
-
-            final String fStatusEventId = statusEventId;
-            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            long gatherStart = System.currentTimeMillis();
+            java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                long now = System.currentTimeMillis();
-                if (now - lastProgressUpdate.get() >= 5000) {
-                    lastProgressUpdate.set(now);
-                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
-                            "\uD83D\uDCE8 Gathering unread messages (quality filtered)... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                if (System.currentTimeMillis() - gatherStart > 15000) {
+                    gatherTimedOut.set(true);
+                    if (abortFlag != null) abortFlag.set(true);
                 }
             };
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
                     lastReadEventId,
                     zoneId, true, abortFlag, progressCallback);
+
+            long gatherElapsed = System.currentTimeMillis() - gatherStart;
+            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+                String gatheredStr = result != null && result.logs != null ? String.valueOf(result.logs.size()) : "0";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                return;
+            }
+            if (abortFlag != null && abortFlag.get()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, "Gathering aborted.");
+                return;
+            }
 
             // Apply quality filter
             result = new RoomHistoryManager.ChatLogsResult(
@@ -1323,6 +1300,14 @@ public class AIService {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "No unread messages found for you in " + exportRoomId + " (after quality filtering).");
                 return;
+            }
+
+            {
+                int gatheredCount = result.logs.size();
+                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", result.logs));
+                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
             performAIQuery(responseRoomId, exportRoomId, result, question, promptPrefix, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null, true);
@@ -1357,30 +1342,44 @@ public class AIService {
 
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
 
-            // Send immediate status message
             String gatherMsg = "\uD83D\uDCE8 Gathering messages (up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
             String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
-
-            // Create progress callback that updates every 5 seconds
-            final String fStatusEventId = statusEventId;
-            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            long gatherStart = System.currentTimeMillis();
+            java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                long now = System.currentTimeMillis();
-                if (now - lastProgressUpdate.get() >= 5000) {
-                    lastProgressUpdate.set(now);
-                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
-                            "\uD83D\uDCE8 Gathering messages... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                if (System.currentTimeMillis() - gatherStart > 15000) {
+                    gatherTimedOut.set(true);
+                    if (abortFlag != null) abortFlag.set(true);
                 }
             };
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
                     fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
 
+            long gatherElapsed = System.currentTimeMillis() - gatherStart;
+            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+                String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                return;
+            }
+            if (abortFlag != null && abortFlag.get()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, "Gathering aborted.");
+                return;
+            }
+
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "No chat logs found in " + exportRoomId + ".");
                 return;
+            }
+
+            {
+                int gatheredCount = history.logs.size();
+                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
+                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
             performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null);
@@ -1416,21 +1415,29 @@ public class AIService {
 
             String gatherMsg = "\uD83D\uDCE8 Gathering messages (quality filtered, up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
             String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
-
-            final String fStatusEventId = statusEventId;
-            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            long gatherStart = System.currentTimeMillis();
+            java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                long now = System.currentTimeMillis();
-                if (now - lastProgressUpdate.get() >= 5000) {
-                    lastProgressUpdate.set(now);
-                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
-                            "\uD83D\uDCE8 Gathering messages (quality filtered)... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                if (System.currentTimeMillis() - gatherStart > 15000) {
+                    gatherTimedOut.set(true);
+                    if (abortFlag != null) abortFlag.set(true);
                 }
             };
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
                     fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
+
+            long gatherElapsed = System.currentTimeMillis() - gatherStart;
+            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+                String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                return;
+            }
+            if (abortFlag != null && abortFlag.get()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, "Gathering aborted.");
+                return;
+            }
 
             // Apply quality filter
             history = new RoomHistoryManager.ChatLogsResult(
@@ -1440,6 +1447,14 @@ public class AIService {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
                         "No chat logs found in " + exportRoomId + " (after quality filtering).");
                 return;
+            }
+
+            {
+                int gatheredCount = history.logs.size();
+                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
+                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
             performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null, true);
@@ -1731,21 +1746,29 @@ public class AIService {
             String displayName = targetUser.contains(":") ? targetUser.substring(1, targetUser.indexOf(":")) : targetUser.substring(1);
             String gatherMsg = "\uD83D\uDCE8 Gathering messages from " + displayName + " (up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
             String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
-
-            final String fStatusEventId = statusEventId;
-            final AtomicLong lastProgressUpdate = new AtomicLong(System.currentTimeMillis());
+            long gatherStart = System.currentTimeMillis();
+            java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                long now = System.currentTimeMillis();
-                if (now - lastProgressUpdate.get() >= 5000) {
-                    lastProgressUpdate.set(now);
-                    String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                    matrixClient.updateNoticeMessage(responseRoomId, fStatusEventId,
-                            "\uD83D\uDCE8 Gathering messages from " + displayName + "... (" + msgCount + " gathered, ~" + tokenStr + " tokens)");
+                if (System.currentTimeMillis() - gatherStart > 15000) {
+                    gatherTimedOut.set(true);
+                    if (abortFlag != null) abortFlag.set(true);
                 }
             };
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
                     null, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
+
+            long gatherElapsed = System.currentTimeMillis() - gatherStart;
+            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+                String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
+                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                return;
+            }
+            if (abortFlag != null && abortFlag.get()) {
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, "Gathering aborted.");
+                return;
+            }
 
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
@@ -1763,8 +1786,13 @@ public class AIService {
                 return;
             }
 
-            matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                    "\uD83D\uDCE8 Found " + history.logs.size() + " messages from " + displayName + ". Querying AI...");
+            {
+                int gatheredCount = history.logs.size();
+                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
+                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages from " + displayName + " (~" + tokenStr + " tokens). Now querying AI provider...";
+                matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
+            }
 
             performAIQuery(responseRoomId, exportRoomId, history, question, Prompts.ASK_PREFIX, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null);
 
