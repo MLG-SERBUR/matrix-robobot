@@ -233,11 +233,19 @@ public class AIService {
 
     static Map<String, Object> buildHistoryContext(String exportRoomId, String startEventId, String endEventId,
             boolean filtered) {
+        return buildHistoryContext(exportRoomId, startEventId, endEventId, filtered, null);
+    }
+
+    static Map<String, Object> buildHistoryContext(String exportRoomId, String startEventId, String endEventId,
+            boolean filtered, ZoneId zoneId) {
         java.util.Map<String, Object> botContext = new java.util.HashMap<>();
         botContext.put("startEventId", startEventId);
         botContext.put("endEventId", endEventId != null ? endEventId : startEventId);
         botContext.put("exportRoomId", exportRoomId);
         botContext.put("filtered", filtered);
+        if (zoneId != null) {
+            botContext.put("timezone", zoneId.getId());
+        }
         return botContext;
     }
 
@@ -246,7 +254,7 @@ public class AIService {
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
         RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
         java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId,
-                latestMsg.eventId, false);
+                latestMsg.eventId, false, zoneId);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -329,7 +337,7 @@ public class AIService {
             java.util.concurrent.atomic.AtomicBoolean abortFlag, Backend preferredBackend) {
         RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
         java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId,
-                latestMsg.eventId, true);
+                latestMsg.eventId, true, zoneId);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1174,7 +1182,7 @@ public class AIService {
             String startEventId) {
         RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
         java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId,
-                latestMsg.eventId, false);
+                latestMsg.eventId, false, zoneId);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1248,7 +1256,7 @@ public class AIService {
             String startEventId) {
         RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
         java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, startEventId,
-                latestMsg.eventId, true);
+                latestMsg.eventId, true, zoneId);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1323,7 +1331,7 @@ public class AIService {
                          Backend preferredBackend, ZoneId zoneId) {
         RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
         java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, fromToken,
-                latestMsg.eventId, false);
+                latestMsg.eventId, false, zoneId);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);
@@ -1398,7 +1406,7 @@ public class AIService {
                          Backend preferredBackend, ZoneId zoneId) {
         RoomHistoryManager.EventInfo latestMsg = historyManager.getLatestMessage(exportRoomId);
         java.util.Map<String, Object> botContext = buildHistoryContext(exportRoomId, fromToken,
-                latestMsg.eventId, true);
+                latestMsg.eventId, true, zoneId);
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("ai.matrixrobobot.context", botContext);
         threadExtraContent.set(extra);

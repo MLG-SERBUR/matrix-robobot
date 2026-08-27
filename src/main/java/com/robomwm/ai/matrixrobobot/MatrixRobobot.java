@@ -307,7 +307,9 @@ public class MatrixRobobot {
                                                     if (ctxStart != null && !ctxStart.isEmpty() && ctxEnd != null && !ctxEnd.isEmpty()) {
                                                         String ctxRoom = context.path("exportRoomId").asText(config.exportRoomId);
                                                         boolean ctxFiltered = context.path("filtered").asBoolean(false);
-                                                        System.out.println("!ask reply to bot detected (filtered=" + ctxFiltered + ")! Using bounded context...");
+                                                        String ctxTimezone = context.path("timezone").asText(null);
+                                                        if ("null".equals(ctxTimezone)) ctxTimezone = null;
+                                                        System.out.println("!ask reply to bot detected (filtered=" + ctxFiltered + ", timezone=" + ctxTimezone + ")! Using bounded context...");
                                                         AtomicBoolean abortFlag = new AtomicBoolean(false);
                                                         runningOperations.put(sender, abortFlag);
                                                         final int fHours = Integer.MAX_VALUE;
@@ -316,12 +318,23 @@ public class MatrixRobobot {
                                                         final String fEnd = ctxEnd;
                                                         final String fRoom = ctxRoom;
                                                         final boolean fFiltered = ctxFiltered;
+                                                        final String fTimezone = ctxTimezone;
                                                         String question = actualBodyForAsk.replaceFirst("^!ask\\s*", "").trim();
                                                         if (question.isEmpty()) question = null;
                                                         final String fQuestion = question;
                                                         new Thread(() -> {
                                                             try {
-                                                                java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(sender);
+                                                                java.time.ZoneId zoneId = null;
+                                                                if (fTimezone != null && !fTimezone.isEmpty()) {
+                                                                    try {
+                                                                        zoneId = java.time.ZoneId.of(fTimezone);
+                                                                    } catch (Exception e) {
+                                                                        System.out.println("Invalid timezone in context: " + fTimezone + ", falling back to sender timezone");
+                                                                    }
+                                                                }
+                                                                if (zoneId == null) {
+                                                                    zoneId = timezoneService.getZoneIdForUser(sender);
+                                                                }
                                                                 if (zoneId == null) zoneId = java.time.ZoneId.of("UTC");
                                                                 if (fFiltered) {
                                                                     aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, true, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
