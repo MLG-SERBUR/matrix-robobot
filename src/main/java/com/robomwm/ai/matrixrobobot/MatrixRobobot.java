@@ -268,16 +268,30 @@ public class MatrixRobobot {
                             }
                             // All other commands
                             else {
-                                boolean handled = dispatcher.dispatchCommand(trimmed, roomId, sender, prevBatch, responseRoomId,
-                                        config.exportRoomId);
-                                if (!handled) {
-                                    // Check if it's a contextual reply
-                                    JsonNode relatesTo = ev.path("content").path("m.relates_to");
-                                    JsonNode inReplyTo = relatesTo.path("m.in_reply_to");
-                                    String replyToEventId = inReplyTo.path("event_id").asText(null);
-                                    
-                                    if (replyToEventId != null) {
-                                        JsonNode originalEvent = matrixClient.getEvent(roomId, replyToEventId);
+                                // Strip Matrix reply fallback for !ask reply detection
+                                String actualBodyForAsk = trimmed;
+                                if (actualBodyForAsk.startsWith("> ")) {
+                                    int fallbackEnd = actualBodyForAsk.indexOf("\n\n");
+                                    if (fallbackEnd != -1) {
+                                        actualBodyForAsk = actualBodyForAsk.substring(fallbackEnd + 2).trim();
+                                    } else {
+                                        String[] lines = actualBodyForAsk.split("\n");
+                                        StringBuilder sb = new StringBuilder();
+                                        for (String line : lines) {
+                                            if (!line.startsWith("> ")) {
+                                                sb.append(line).append("\n");
+                                            }
+                                        }
+                                        actualBodyForAsk = sb.toString().trim();
+                                    }
+                                }
+                                boolean isAskReplyHandled = false;
+                                if (CommandDispatcher.isAskCommand(actualBodyForAsk)) {
+                                    JsonNode relatesToForAsk = ev.path("content").path("m.relates_to");
+                                    JsonNode inReplyToForAsk = relatesToForAsk.path("m.in_reply_to");
+                                    String replyToEventIdForAsk = inReplyToForAsk.path("event_id").asText(null);
+                                    if (replyToEventIdForAsk != null) {
+                                        JsonNode originalEvent = matrixClient.getEvent(roomId, replyToEventIdForAsk);
                                         if (originalEvent != null) {
                                             String origSender = originalEvent.path("sender").asText(null);
                                             if (userId != null && userId.equals(origSender)) {
@@ -290,49 +304,25 @@ public class MatrixRobobot {
                                                     if (ctxEnd == null && ctxStart != null) {
                                                         ctxEnd = ctxStart;
                                                     }
-                                                    // Ignore replies to bot messages without bounded history (both start and end required, non-null)
-                                                    if (ctxStart == null || ctxStart.isEmpty() || ctxEnd == null || ctxEnd.isEmpty()) {
-                                                        System.out.println("Ignoring contextual reply without start/end event (start=" + ctxStart + ", end=" + ctxEnd + ")");
-                                                    } else {
+                                                    if (ctxStart != null && !ctxStart.isEmpty() && ctxEnd != null && !ctxEnd.isEmpty()) {
                                                         String ctxRoom = context.path("exportRoomId").asText(config.exportRoomId);
                                                         boolean ctxFiltered = context.path("filtered").asBoolean(false);
-                                                        
-                                                        System.out.println("Contextual reply detected (filtered=" + ctxFiltered + ")! Executing query...");
+                                                        System.out.println("!ask reply to bot detected (filtered=" + ctxFiltered + ")! Using bounded context...");
                                                         AtomicBoolean abortFlag = new AtomicBoolean(false);
                                                         runningOperations.put(sender, abortFlag);
-                                                        
                                                         final int fHours = Integer.MAX_VALUE;
                                                         final int fMax = Integer.MAX_VALUE;
                                                         final String fStart = ctxStart;
                                                         final String fEnd = ctxEnd;
                                                         final String fRoom = ctxRoom;
                                                         final boolean fFiltered = ctxFiltered;
-                                                        
-                                                        // Strip Matrix reply fallback
-                                                        String actualReply = trimmed;
-                                                        if (actualReply.startsWith("> ")) {
-                                                            int fallbackEnd = actualReply.indexOf("\n\n");
-                                                            if (fallbackEnd != -1) {
-                                                                actualReply = actualReply.substring(fallbackEnd + 2).trim();
-                                                            } else {
-                                                                // fallback didn't have \n\n, try to strip all lines starting with >
-                                                                String[] lines = actualReply.split("\n");
-                                                                StringBuilder sb = new StringBuilder();
-                                                                for (String line : lines) {
-                                                                    if (!line.startsWith("> ")) {
-                                                                        sb.append(line).append("\n");
-                                                                    }
-                                                                }
-                                                                actualReply = sb.toString().trim();
-                                                            }
-                                                        }
-                                                        final String fQuestion = actualReply;
-                                                        
+                                                        String question = actualBodyForAsk.replaceFirst("^!ask\\s*", "").trim();
+                                                        if (question.isEmpty()) question = null;
+                                                        final String fQuestion = question;
                                                         new Thread(() -> {
                                                             try {
                                                                 java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(sender);
                                                                 if (zoneId == null) zoneId = java.time.ZoneId.of("UTC");
-                                                                
                                                                 if (fFiltered) {
                                                                     aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, true, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
                                                                 } else {
@@ -342,11 +332,18 @@ public class MatrixRobobot {
                                                                 runningOperations.remove(sender);
                                                             }
                                                         }).start();
+                                                        isAskReplyHandled = true;
                                                     }
                                                 }
                                             }
                                         }
                                     }
+                                }
+                                if (!isAskReplyHandled) {
+                                    // For !ask replies that were not bounded, use stripped body so fallback is removed
+                                    String dispatchBody = CommandDispatcher.isAskCommand(actualBodyForAsk) ? actualBodyForAsk : trimmed;
+                                    dispatcher.dispatchCommand(dispatchBody, roomId, sender, prevBatch, responseRoomId,
+                                            config.exportRoomId);
                                 }
                             }
                         }
