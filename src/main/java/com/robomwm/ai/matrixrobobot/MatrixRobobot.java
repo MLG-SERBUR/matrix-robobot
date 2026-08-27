@@ -282,7 +282,7 @@ public class MatrixRobobot {
                                             String origSender = originalEvent.path("sender").asText(null);
                                             if (userId != null && userId.equals(origSender)) {
                                                 JsonNode context = originalEvent.path("content").path("ai.matrixrobobot.context");
-                                                if (!context.isMissingNode()) {
+                                                if (!context.isMissingNode() && !context.isNull() && context.isObject()) {
                                                     String ctxStart = context.path("startEventId").asText(null);
                                                     String ctxEnd = context.path("endEventId").asText(null);
                                                     if ("null".equals(ctxStart)) ctxStart = null;
@@ -290,54 +290,59 @@ public class MatrixRobobot {
                                                     if (ctxEnd == null && ctxStart != null) {
                                                         ctxEnd = ctxStart;
                                                     }
-                                                    String ctxRoom = context.path("exportRoomId").asText(config.exportRoomId);
-                                                    boolean ctxFiltered = context.path("filtered").asBoolean(false);
-                                                    
-                                                    System.out.println("Contextual reply detected (filtered=" + ctxFiltered + ")! Executing query...");
-                                                    AtomicBoolean abortFlag = new AtomicBoolean(false);
-                                                    runningOperations.put(sender, abortFlag);
-                                                    
-                                                    final int fHours = Integer.MAX_VALUE;
-                                                    final int fMax = Integer.MAX_VALUE;
-                                                    final String fStart = ctxStart;
-                                                    final String fEnd = ctxEnd;
-                                                    final String fRoom = ctxRoom;
-                                                    final boolean fFiltered = ctxFiltered;
-                                                    
-                                                    // Strip Matrix reply fallback
-                                                    String actualReply = trimmed;
-                                                    if (actualReply.startsWith("> ")) {
-                                                        int fallbackEnd = actualReply.indexOf("\n\n");
-                                                        if (fallbackEnd != -1) {
-                                                            actualReply = actualReply.substring(fallbackEnd + 2).trim();
-                                                        } else {
-                                                            // fallback didn't have \n\n, try to strip all lines starting with >
-                                                            String[] lines = actualReply.split("\n");
-                                                            StringBuilder sb = new StringBuilder();
-                                                            for (String line : lines) {
-                                                                if (!line.startsWith("> ")) {
-                                                                    sb.append(line).append("\n");
-                                                                }
-                                                            }
-                                                            actualReply = sb.toString().trim();
-                                                        }
-                                                    }
-                                                    final String fQuestion = actualReply;
-                                                    
-                                                    new Thread(() -> {
-                                                        try {
-                                                            java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(sender);
-                                                            if (zoneId == null) zoneId = java.time.ZoneId.of("UTC");
-                                                            
-                                                            if (fFiltered) {
-                                                                aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, true, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                    // Ignore replies to bot messages without bounded history (both start and end required, non-null)
+                                                    if (ctxStart == null || ctxStart.isEmpty() || ctxEnd == null || ctxEnd.isEmpty()) {
+                                                        System.out.println("Ignoring contextual reply without start/end event (start=" + ctxStart + ", end=" + ctxEnd + ")");
+                                                    } else {
+                                                        String ctxRoom = context.path("exportRoomId").asText(config.exportRoomId);
+                                                        boolean ctxFiltered = context.path("filtered").asBoolean(false);
+                                                        
+                                                        System.out.println("Contextual reply detected (filtered=" + ctxFiltered + ")! Executing query...");
+                                                        AtomicBoolean abortFlag = new AtomicBoolean(false);
+                                                        runningOperations.put(sender, abortFlag);
+                                                        
+                                                        final int fHours = Integer.MAX_VALUE;
+                                                        final int fMax = Integer.MAX_VALUE;
+                                                        final String fStart = ctxStart;
+                                                        final String fEnd = ctxEnd;
+                                                        final String fRoom = ctxRoom;
+                                                        final boolean fFiltered = ctxFiltered;
+                                                        
+                                                        // Strip Matrix reply fallback
+                                                        String actualReply = trimmed;
+                                                        if (actualReply.startsWith("> ")) {
+                                                            int fallbackEnd = actualReply.indexOf("\n\n");
+                                                            if (fallbackEnd != -1) {
+                                                                actualReply = actualReply.substring(fallbackEnd + 2).trim();
                                                             } else {
-                                                                aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, true, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                                // fallback didn't have \n\n, try to strip all lines starting with >
+                                                                String[] lines = actualReply.split("\n");
+                                                                StringBuilder sb = new StringBuilder();
+                                                                for (String line : lines) {
+                                                                    if (!line.startsWith("> ")) {
+                                                                        sb.append(line).append("\n");
+                                                                    }
+                                                                }
+                                                                actualReply = sb.toString().trim();
                                                             }
-                                                        } finally {
-                                                            runningOperations.remove(sender);
                                                         }
-                                                    }).start();
+                                                        final String fQuestion = actualReply;
+                                                        
+                                                        new Thread(() -> {
+                                                            try {
+                                                                java.time.ZoneId zoneId = timezoneService.getZoneIdForUser(sender);
+                                                                if (zoneId == null) zoneId = java.time.ZoneId.of("UTC");
+                                                                
+                                                                if (fFiltered) {
+                                                                    aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, true, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                                } else {
+                                                                    aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, true, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                                }
+                                                            } finally {
+                                                                runningOperations.remove(sender);
+                                                            }
+                                                        }).start();
+                                                    }
                                                 }
                                             }
                                         }
