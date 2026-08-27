@@ -409,6 +409,21 @@ public class AIService {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
         boolean isAsk = Prompts.ASK_PREFIX.equals(promptPrefix);
+        // Replies to bot carry bounded start/end eventIds (count-like) -> should fail over, not truncate
+        boolean isBoundedReply = false;
+        Map<String, Object> ctxExtra = threadExtraContent.get();
+        if (ctxExtra != null) {
+            Object ctxObj = ctxExtra.get("ai.matrixrobobot.context");
+            if (ctxObj instanceof Map) {
+                Map<?,?> ctxMap = (Map<?,?>) ctxObj;
+                Object s = ctxMap.get("startEventId");
+                Object e = ctxMap.get("endEventId");
+                if (s instanceof String && e instanceof String) {
+                    String ss = (String)s; String ee = (String)e;
+                    if (ss != null && ss.startsWith("$") && ee != null && ee.startsWith("$")) isBoundedReply = true;
+                }
+            }
+        }
         boolean skipSystem = isAsk || Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         String prompt = buildPrompt(question, history.logs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
@@ -483,11 +498,10 @@ public class AIService {
                     }
                 }
                 
-                // Self-calibration: only !ask should truncate/retry with less; duration/count/autotldr must fail over to next provider to keep all messages.
+                // Self-calibration: only unbounded !ask should truncate/retry and calibrate; bounded replies/duration/count/autotldr must fail over to next provider to keep all messages and not pollute factor.
                 if (!calibrationRetryDone && TokenCalibrationManager.isContextLengthError(errorMsg)) {
-                    // Always update factor for future !ask estimates
-                    TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg);
-                    if (isAsk) {
+                    if (isAsk && !isBoundedReply) {
+                        TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg);
                         Integer actual = TokenCalibrationManager.extractActualTokens(errorMsg);
                         if (actual != null && history.logs.size() > 10) {
                             double targetRatio = 12288.0 * 0.85 / actual;
