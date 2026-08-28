@@ -508,18 +508,20 @@ public class AIService {
                 accumulatedStatus.append(statusUpdate);
                 
                 // Self-calibration: only unbounded !ask should truncate/retry and calibrate; bounded replies/duration/count/autotldr must fail over to next provider to keep all messages and not pollute factor.
-                if (!calibrationRetryDone && TokenCalibrationManager.isContextLengthError(errorMsg)) {
+                // Handles both ArliAI 403 context length and Groq 413 TPM (Limit 8000, Requested N) — TPM is prompt-size driven.
+                if (!calibrationRetryDone && TokenCalibrationManager.isCalibrationError(errorMsg)) {
                     if (isAsk && !isBoundedReply) {
                         TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg);
-                        Integer actual = TokenCalibrationManager.extractActualTokens(errorMsg);
-                        if (actual != null && history.logs.size() > 10) {
-                            double targetRatio = 12288.0 * 0.85 / actual;
+                        Integer actual = TokenCalibrationManager.extractActualTokensForCalibration(errorMsg);
+                        Integer limit = TokenCalibrationManager.extractLimitForCalibration(errorMsg);
+                        if (actual != null && limit != null && history.logs.size() > 10) {
+                            double targetRatio = limit * 0.85 / (double) actual;
                             targetRatio = Math.max(0.3, Math.min(0.85, targetRatio));
                             int newSize = Math.max(10, (int) (history.logs.size() * targetRatio));
                             if (newSize < history.logs.size()) {
                                 java.util.List<String> truncated = new java.util.ArrayList<>(history.logs.subList(history.logs.size() - newSize, history.logs.size()));
                                 RoomHistoryManager.ChatLogsResult truncatedHistory = new RoomHistoryManager.ChatLogsResult(truncated, history.firstEventId, null, history.antispamApplied);
-                                String calMsg = "Context exceeded (" + actual + "/12288). Calibrated factor to " + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor()) + " and retrying with " + newSize + " messages (" + (int)(targetRatio*100) + "%)...";
+                                String calMsg = "Context exceeded (" + actual + "/" + limit + "). Calibrated factor to " + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor()) + " and retrying with " + newSize + " messages (" + (int)(targetRatio*100) + "%)...";
                                 System.out.println(calMsg);
                                 String fullStatus = accumulatedStatus.toString() + "\n" + calMsg;
                                 if (batchEventId == null) {
@@ -776,7 +778,7 @@ public class AIService {
 
     private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
         List<ProviderAttempt> attempts = new ArrayList<>();
-        Backend[] order = {Backend.ARLIAI, Backend.GROQ, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS,
+        Backend[] order = {Backend.GROQ, Backend.ARLIAI, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS,
                 Backend.GEMINI, Backend.MISTRAL, Backend.CLOUDFLARE, Backend.OLLAMA_CLOUD, Backend.ZAI,
                 Backend.SAMBANOVA, Backend.OPENROUTER};
         for (Backend backend : order) {
@@ -1338,9 +1340,9 @@ public class AIService {
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            // Target context window for Arli AI is 16k tokens.
-            // We reserve ~4000 tokens for the generated response to be safe.
-            int targetPromptTokens = 12000;
+            // Target context window for Groq (primary) is 8k tokens (TPM limit).
+            // Reserve headroom for response; ArliAI 12k fallback handled via calibration retry.
+            int targetPromptTokens = 8000;
 
             // Account for the user prompt, including the question. No system prompt for ask.
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
@@ -1413,7 +1415,7 @@ public class AIService {
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            int targetPromptTokens = 12000;
+            int targetPromptTokens = 8000;
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20;
             int baseTokens = RoomHistoryManager.estimateTokens(emptyPrompt) +
@@ -1744,7 +1746,7 @@ public class AIService {
                              java.util.concurrent.atomic.AtomicBoolean abortFlag, ZoneId zoneId) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            int targetPromptTokens = 12000;
+            int targetPromptTokens = 8000;
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), Prompts.ASK_PREFIX);
             int chatFormatOverhead = 20;
             int baseTokens = RoomHistoryManager.estimateTokens(emptyPrompt) +

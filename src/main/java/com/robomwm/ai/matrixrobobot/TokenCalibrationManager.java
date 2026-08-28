@@ -22,6 +22,8 @@ public class TokenCalibrationManager {
 
     // Regex to extract actual prompt tokens from ArliAI 403: "exceeded ... (25487/12288)"
     private static final Pattern CONTEXT_PATTERN = Pattern.compile("\\((\\d+)\\s*/\\s*\\d+\\s*\\)");
+    private static final Pattern GROQ_REQUESTED_PATTERN = Pattern.compile("Requested\\s+(\\d+)");
+    private static final Pattern GROQ_LIMIT_PATTERN = Pattern.compile("Limit\\s+(\\d+)");
     private static final Pattern CJK_PATTERN = Pattern.compile(
             "[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef\uac00-\ud7af]");
     private static final Pattern URL_PATTERN = Pattern.compile("https?://\\S+");
@@ -122,6 +124,14 @@ public class TokenCalibrationManager {
         return errorMsg != null && errorMsg.contains("exceeded the maximum context length");
     }
 
+    public static boolean isGroqTpmError(String errorMsg) {
+        return errorMsg != null && errorMsg.contains("tokens per minute") && GROQ_REQUESTED_PATTERN.matcher(errorMsg).find();
+    }
+
+    public static boolean isCalibrationError(String errorMsg) {
+        return isContextLengthError(errorMsg) || isGroqTpmError(errorMsg);
+    }
+
     public static Integer extractActualTokens(String errorMsg) {
         if (errorMsg == null) return null;
         Matcher matcher = CONTEXT_PATTERN.matcher(errorMsg);
@@ -133,12 +143,56 @@ public class TokenCalibrationManager {
         return null;
     }
 
+    public static Integer extractGroqRequested(String errorMsg) {
+        if (errorMsg == null) return null;
+        Matcher m = GROQ_REQUESTED_PATTERN.matcher(errorMsg);
+        if (m.find()) {
+            try { return Integer.parseInt(m.group(1)); } catch (NumberFormatException ignored) {}
+        }
+        return null;
+    }
+
+    public static Integer extractGroqLimit(String errorMsg) {
+        if (errorMsg == null) return null;
+        Matcher m = GROQ_LIMIT_PATTERN.matcher(errorMsg);
+        if (m.find()) {
+            try { return Integer.parseInt(m.group(1)); } catch (NumberFormatException ignored) {}
+        }
+        return null;
+    }
+
+    public static Integer extractActualTokensForCalibration(String errorMsg) {
+        Integer ctx = extractActualTokens(errorMsg);
+        if (ctx != null) return ctx;
+        return extractGroqRequested(errorMsg);
+    }
+
+    public static Integer extractLimitForCalibration(String errorMsg) {
+        if (isContextLengthError(errorMsg)) {
+            Matcher m = CONTEXT_PATTERN.matcher(errorMsg);
+            if (m.find()) {
+                // denominator is inside parentheses e.g. (25487/12288) — extract second number
+                Pattern denom = Pattern.compile("\\(\\d+\\s*/\\s*(\\d+)\\s*\\)");
+                Matcher dm = denom.matcher(errorMsg);
+                if (dm.find()) {
+                    try { return Integer.parseInt(dm.group(1)); } catch (NumberFormatException ignored) {}
+                }
+            }
+            return 12288;
+        }
+        if (isGroqTpmError(errorMsg)) {
+            Integer lim = extractGroqLimit(errorMsg);
+            return lim != null ? lim : 8000;
+        }
+        return null;
+    }
+
     /**
      * Update calibration from a failed prompt and its actual token count.
      * Returns new factor.
      */
     public synchronized double recordFromError(String prompt, String errorMsg) {
-        Integer actual = extractActualTokens(errorMsg);
+        Integer actual = extractActualTokensForCalibration(errorMsg);
         if (actual == null) {
             System.out.println("Calibration: could not parse actual tokens from: " + errorMsg);
             return factor;
