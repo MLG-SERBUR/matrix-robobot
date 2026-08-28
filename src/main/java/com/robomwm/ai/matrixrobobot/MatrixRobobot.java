@@ -94,7 +94,8 @@ public class MatrixRobobot {
         // Initialize services
         MatrixClient matrixClient = new MatrixClient(client, mapper, url, config.accessToken);
         RoomHistoryManager historyManager = new RoomHistoryManager(client, mapper, url, config.accessToken);
-        LastMessageService lastMessageService = new LastMessageService(matrixClient, historyManager);
+        TimezoneService timezoneService = new TimezoneService(mapper);
+        LastMessageService lastMessageService = new LastMessageService(matrixClient, historyManager, timezoneService);
         RoomManagementService roomMgmt = new RoomManagementService(matrixClient, client, mapper, url,
                 config.accessToken);
         TextSearchService textSearchService = new TextSearchService(matrixClient, historyManager, client, mapper, url,
@@ -121,7 +122,6 @@ public class MatrixRobobot {
         }
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
-        TimezoneService timezoneService = new TimezoneService(mapper);
         CommandDispatcher dispatcher = new CommandDispatcher(client, mapper, url, config.accessToken,
                 config.commandRoomId, config.exportRoomId, historyManager, runningOperations, textSearchService,
                 aiService, visionAIService, semanticSearchService, timezoneService, config.arliApiKey);

@@ -728,6 +728,141 @@ public class RoomHistoryManager {
     }
 
     /**
+     * Find unread messages that mention the target user or are replies to the target user.
+     * Checks m.mentions.user_ids and body fallback for mentions, and m.relates_to.m.in_reply_to
+     * for replies (verifying parent sender via /event fetch). No room-mention handling.
+     * Returns list of EventInfo sorted oldest-first (chronological).
+     */
+    public List<EventInfo> findUnreadMentionsAndReplies(String roomId, String lastReadEventId, String targetUserId) {
+        List<EventInfo> result = new ArrayList<>();
+        if (lastReadEventId == null || targetUserId == null) return result;
+        try {
+            String token = getPaginationToken(roomId, null);
+            if (token == null) return result;
+
+            boolean foundLastRead = false;
+            Map<String, Boolean> replyCache = new HashMap<>();
+            int scanned = 0;
+
+            while (token != null && !foundLastRead) {
+                String url = homeserverUrl + "/_matrix/client/v3/rooms/"
+                        + URLEncoder.encode(roomId, StandardCharsets.UTF_8)
+                        + "/messages?from=" + URLEncoder.encode(token, StandardCharsets.UTF_8) + "&dir=b&limit=100";
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .GET()
+                        .build();
+                HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200) break;
+
+                JsonNode root = mapper.readTree(resp.body());
+                JsonNode chunk = root.path("chunk");
+                if (!chunk.isArray() || chunk.size() == 0) break;
+
+                for (JsonNode ev : chunk) {
+                    String eventId = ev.path("event_id").asText("");
+                    if (eventId.equals(lastReadEventId)) {
+                        foundLastRead = true;
+                        break;
+                    }
+                    if (!"m.room.message".equals(ev.path("type").asText(null))) continue;
+                    String sender = ev.path("sender").asText(null);
+                    // Skip self-messages
+                    if (targetUserId.equals(sender)) continue;
+
+                    long originServerTs = ev.path("origin_server_ts").asLong(0);
+                    JsonNode content = ev.path("content");
+                    boolean isMentionOrReply = false;
+
+                    // 1) Check intentional mentions: m.mentions.user_ids contains target
+                    JsonNode mentionsNode = content.path("m.mentions");
+                    JsonNode userIdsNode = mentionsNode.path("user_ids");
+                    if (userIdsNode.isArray()) {
+                        for (JsonNode uid : userIdsNode) {
+                            if (targetUserId.equals(uid.asText())) {
+                                isMentionOrReply = true;
+                                break;
+                            }
+                        }
+                    }
+                    // 2) Body fallback: legacy mentions or clients not setting m.mentions
+                    if (!isMentionOrReply) {
+                        String body = content.path("body").asText(null);
+                        if (body != null && body.contains(targetUserId)) {
+                            isMentionOrReply = true;
+                        } else {
+                            String formatted = content.path("formatted_body").asText(null);
+                            if (formatted != null && formatted.contains(targetUserId)) {
+                                isMentionOrReply = true;
+                            }
+                        }
+                    }
+
+                    // 3) Check reply: m.relates_to.m.in_reply_to.event_id -> fetch parent sender
+                    // Only fetch if not already a mention (mentions already cover most replies per MSC3952 SHOULD)
+                    if (!isMentionOrReply) {
+                        JsonNode inReplyTo = content.path("m.relates_to").path("m.in_reply_to").path("event_id");
+                        String replyToEventId = inReplyTo.isMissingNode() ? null : inReplyTo.asText(null);
+                        if (replyToEventId != null && !replyToEventId.isEmpty()) {
+                            Boolean cached = replyCache.get(replyToEventId);
+                            if (cached == null) {
+                                cached = isReplyToUser(roomId, replyToEventId, targetUserId);
+                                replyCache.put(replyToEventId, cached);
+                            }
+                            if (Boolean.TRUE.equals(cached)) {
+                                isMentionOrReply = true;
+                            }
+                        }
+                    }
+
+                    if (isMentionOrReply) {
+                        result.add(new EventInfo(eventId, originServerTs));
+                    }
+                    scanned++;
+                    // Safety limits: stop scanning after 5000 messages, or collecting >2000 (mirrors other methods)
+                    if (scanned > 5000 || result.size() > 2000) {
+                        foundLastRead = true; // break outer too
+                        break;
+                    }
+                }
+
+                if (foundLastRead) break;
+                token = root.path("end").asText(null);
+            }
+
+            Collections.reverse(result);
+            return result;
+        } catch (Exception e) {
+            System.err.println("Error finding unread mentions/replies: " + e.getMessage());
+            return result;
+        }
+    }
+
+    private boolean isReplyToUser(String roomId, String parentEventId, String targetUserId) {
+        try {
+            String encodedRoom = URLEncoder.encode(roomId, StandardCharsets.UTF_8);
+            String encodedEvent = URLEncoder.encode(parentEventId, StandardCharsets.UTF_8);
+            String eventUrl = homeserverUrl + "/_matrix/client/v3/rooms/" + encodedRoom + "/event/" + encodedEvent;
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(eventUrl))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                JsonNode root = mapper.readTree(response.body());
+                String parentSender = root.path("sender").asText(null);
+                return targetUserId.equals(parentSender);
+            }
+        } catch (Exception e) {
+            // ignore, treat as not a reply to user
+        }
+        return false;
+    }
+
+    /**
      * Count unread messages in a room from lastReadEventId to the latest message.
      */
     public int countUnreadMessages(String roomId, String lastReadEventId) {

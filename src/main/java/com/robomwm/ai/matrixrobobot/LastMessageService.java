@@ -1,17 +1,28 @@
 package com.robomwm.ai.matrixrobobot;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Handles the !last command: shows user's last message and read receipt status.
  */
 public class LastMessageService {
+    private static final DateTimeFormatter ABSOLUTE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private final MatrixClient matrixClient;
     private final RoomHistoryManager historyManager;
+    private final TimezoneService timezoneService;
 
     public LastMessageService(MatrixClient matrixClient, RoomHistoryManager historyManager) {
+        this(matrixClient, historyManager, null);
+    }
+
+    public LastMessageService(MatrixClient matrixClient, RoomHistoryManager historyManager, TimezoneService timezoneService) {
         this.matrixClient = matrixClient;
         this.historyManager = historyManager;
+        this.timezoneService = timezoneService;
     }
 
     /**
@@ -84,6 +95,38 @@ public class LastMessageService {
                         response.append(")");
                     }
                     response.append("\n");
+
+                    // Include unread mentions/replies as clickable timestamps (combined, no room mentions)
+                    try {
+                        List<RoomHistoryManager.EventInfo> mentions = historyManager.findUnreadMentionsAndReplies(
+                                exportRoomId, lastReadInfo.eventId, sender);
+                        if (!mentions.isEmpty()) {
+                            ZoneId zoneId = timezoneService != null ? timezoneService.getZoneIdForUser(sender) : null;
+                            response.append("mentions: ");
+                            int displayLimit = 50;
+                            int displayCount = Math.min(mentions.size(), displayLimit);
+                            for (int i = 0; i < displayCount; i++) {
+                                RoomHistoryManager.EventInfo info = mentions.get(i);
+                                String tsText;
+                                if (zoneId != null && info.timestamp > 0) {
+                                    tsText = Instant.ofEpochMilli(info.timestamp).atZone(zoneId).format(ABSOLUTE_FORMATTER);
+                                } else if (info.timestamp > 0) {
+                                    tsText = formatRelativeTime(info.timestamp);
+                                } else {
+                                    tsText = info.eventId;
+                                }
+                                String link = "https://matrix.to/#/" + exportRoomId + "/" + info.eventId;
+                                response.append("[").append(tsText).append("](").append(link).append(")");
+                                if (i < displayCount - 1) response.append(", ");
+                            }
+                            if (mentions.size() > displayLimit) {
+                                response.append(", and ").append(mentions.size() - displayLimit).append(" more");
+                            }
+                            response.append("\n");
+                        }
+                    } catch (Exception e) {
+                        System.out.println("Failed to fetch mentions/replies: " + e.getMessage());
+                    }
                 }
             } else {
                 response.append("No read receipt found.\n");
