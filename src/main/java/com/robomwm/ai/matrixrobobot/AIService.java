@@ -68,13 +68,13 @@ public class AIService {
         this.freeLlmApiKey = freeLlmApiKey;
         this.ollamaProxyApiKey = ollamaProxyApiKey;
         this.ollamaProxyUrl = ollamaProxyUrl != null ? ollamaProxyUrl : "http://localhost:8000/api/chat";
-        this.arliModels = arliModels != null && !arliModels.isEmpty() ? arliModels : Arrays.asList("Qwen3.5-27B-Derestricted");
-        // Empty list is allowed and disables Cerebras entirely; only null (missing config key) falls back to a default model.
-        this.cerebrasModels = cerebrasModels == null ? Arrays.asList("qwen-3-235b-a22b-instruct-2507") : cerebrasModels;
-        this.groqModels = groqModels != null && !groqModels.isEmpty() ? groqModels : Arrays.asList("openai/gpt-oss-120b", "qwen/qwen3.8-27b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b");
-        this.openrouterModels = openrouterModels != null && !openrouterModels.isEmpty() ? openrouterModels : Arrays.asList("openrouter/free");
-        this.freeLlmModels = freeLlmModels != null && !freeLlmModels.isEmpty() ? freeLlmModels : Arrays.asList("auto");
-        this.ollamaProxyModels = ollamaProxyModels != null && !ollamaProxyModels.isEmpty() ? ollamaProxyModels : Arrays.asList("llama3.2:3b");
+        // Defaults live in config.example.json only; no code fallback — missing/null or empty disables provider.
+        this.arliModels = arliModels == null ? java.util.Collections.emptyList() : arliModels;
+        this.cerebrasModels = cerebrasModels == null ? java.util.Collections.emptyList() : cerebrasModels;
+        this.groqModels = groqModels == null ? java.util.Collections.emptyList() : groqModels;
+        this.openrouterModels = openrouterModels == null ? java.util.Collections.emptyList() : openrouterModels;
+        this.freeLlmModels = freeLlmModels == null ? java.util.Collections.emptyList() : freeLlmModels;
+        this.ollamaProxyModels = ollamaProxyModels == null ? java.util.Collections.emptyList() : ollamaProxyModels;
         this.extra = extra != null ? extra : new ExtraProviders(
                 null, null, null, null, null, null, null, null, null, null, null, null, null);
         this.historyManager = new RoomHistoryManager(client, mapper, homeserver, accessToken);
@@ -126,8 +126,8 @@ public class AIService {
 
     /**
      * Configuration for the additional free-tier providers. Each provider is skipped entirely
-     * when its API key is blank. Model lists fall back to these defaults when the config key is
-     * missing (null); an explicitly empty list disables that provider.
+     * when its API key is blank. No model defaults in code; defaults live in config.example.json.
+     * Null or empty list disables that provider.
      */
     public static class ExtraProviders {
         public final String geminiApiKey;
@@ -155,18 +155,12 @@ public class AIService {
             this.cloudflareAccountId = cloudflareAccountId;
             this.ollamaApiKey = ollamaApiKey;
             this.sambaNovaApiKey = sambaNovaApiKey;
-            this.geminiModels = geminiModels != null ? geminiModels : Arrays.asList(
-                    "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash",
-                    "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemma-4-31b-it");
-            this.mistralModels = mistralModels != null ? mistralModels : Arrays.asList(
-                    "mistral-large-latest", "mistral-medium-latest", "magistral-small-latest",
-                    "mistral-small-latest", "codestral-latest", "open-mistral-nemo", "ministral-8b-latest");
-            this.zaiModels = zaiModels != null ? zaiModels : Arrays.asList("glm-4.7-flash", "glm-4.5-flash");
-            this.cloudflareModels = cloudflareModels != null ? cloudflareModels : Arrays.asList("@cf/openai/gpt-oss-120b");
-            this.ollamaModels = ollamaModels != null ? ollamaModels : Arrays.asList(
-                    "minimax-m3", "nemotron-3-ultra", "gpt-oss:120b", "gemma4:31b");
-            this.sambaNovaModels = sambaNovaModels != null ? sambaNovaModels : Arrays.asList(
-                    "DeepSeek-V3.1", "gpt-oss-120b", "Meta-Llama-3.3-70B-Instruct");
+            this.geminiModels = geminiModels != null ? geminiModels : java.util.Collections.emptyList();
+            this.mistralModels = mistralModels != null ? mistralModels : java.util.Collections.emptyList();
+            this.zaiModels = zaiModels != null ? zaiModels : java.util.Collections.emptyList();
+            this.cloudflareModels = cloudflareModels != null ? cloudflareModels : java.util.Collections.emptyList();
+            this.ollamaModels = ollamaModels != null ? ollamaModels : java.util.Collections.emptyList();
+            this.sambaNovaModels = sambaNovaModels != null ? sambaNovaModels : java.util.Collections.emptyList();
         }
     }
 
