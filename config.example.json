@@ -19,7 +19,7 @@
   "sambaNovaApiKey": "",
   "arliModels": ["Qwen3.5-27B-Derestricted"],
   "cerebrasModels": ["gpt-oss-120b", "gemma-4-31b"],
-  "groqModels": ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"],
+  "groqModels": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"],
   "openrouterModels": ["openrouter/free"],
   "freeLlmModels": ["auto"],
   "ollamaProxyModels": ["llama3.2:3b"],

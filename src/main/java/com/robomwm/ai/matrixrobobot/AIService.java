@@ -71,7 +71,7 @@ public class AIService {
         this.arliModels = arliModels != null && !arliModels.isEmpty() ? arliModels : Arrays.asList("Qwen3.5-27B-Derestricted");
         // Empty list is allowed and disables Cerebras entirely; only null (missing config key) falls back to a default model.
         this.cerebrasModels = cerebrasModels == null ? Arrays.asList("qwen-3-235b-a22b-instruct-2507") : cerebrasModels;
-        this.groqModels = groqModels != null && !groqModels.isEmpty() ? groqModels : Arrays.asList("openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b");
+        this.groqModels = groqModels != null && !groqModels.isEmpty() ? groqModels : Arrays.asList("openai/gpt-oss-120b", "qwen/qwen3.8-27b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b");
         this.openrouterModels = openrouterModels != null && !openrouterModels.isEmpty() ? openrouterModels : Arrays.asList("openrouter/free");
         this.freeLlmModels = freeLlmModels != null && !freeLlmModels.isEmpty() ? freeLlmModels : Arrays.asList("auto");
         this.ollamaProxyModels = ollamaProxyModels != null && !ollamaProxyModels.isEmpty() ? ollamaProxyModels : Arrays.asList("llama3.2:3b");
