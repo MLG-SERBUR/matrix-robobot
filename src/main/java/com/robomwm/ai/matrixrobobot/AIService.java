@@ -472,17 +472,20 @@ public class AIService {
             ProviderAttempt attempt = attempts.get(i);
             ProviderConfig provider = attempt.provider;
             
+            String answer;
             try {
                 if (provider.stream) {
-                    callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
-                            new String[]{null}, footer, timeoutSeconds, abortFlag, false, exportRoomId,
-                            history.firstEventId);
+                    answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, history.firstEventId, abortFlag);
                 } else {
-                    String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
-                    matrixClient.sendMarkdownWithEventId(responseRoomId,
-                            appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
-                                    attempt.model), threadExtraContent.get());
+                    String raw = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    answer = appendMessageLink(raw, exportRoomId, history.firstEventId, provider.displayName, attempt.model);
+                    if (footer != null && !footer.isEmpty()) answer = answer + "\n\n" + footer;
                 }
+                // Single error notice before AI output - no editing
+                if (accumulatedStatus.length() > 0) {
+                    matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                }
+                matrixClient.sendMarkdownWithEventId(responseRoomId, answer, threadExtraContent.get());
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -535,13 +538,8 @@ public class AIService {
                     if (i == attempts.size() - 1 && !history.antispamApplied && !skipUserFilterRetry) {
                         // All providers failed, try removing messages from specific spammy user first
                         System.out.println("All providers failed, retrying with specific user filtering...");
-                        if (batchEventId == null) {
-                            batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
-                        } else {
-                            matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
-                        }
-                        String retryMsg = accumulatedStatus.toString() + "\nAll providers failed. Removing spammer messages from specific spammy user and retrying...";
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, retryMsg);
+                        String retryNotice = accumulatedStatus.toString() + "\nAll providers failed. Removing spammer messages from specific spammy user and retrying...";
+                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, retryNotice);
                         
                         // Create filtered history removing messages from the specific user
                         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
@@ -563,12 +561,7 @@ public class AIService {
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     return;
                 }
-                // Fallback to next provider - ensure errors shown before next attempt's AI output
-                if (batchEventId == null) {
-                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
-                } else {
-                    matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
-                }
+                // Fallback to next provider - lazy: wait till AI ready, send errors once before output (no editing)
             }
         }
 
@@ -597,17 +590,20 @@ public class AIService {
             ProviderAttempt attempt = attempts.get(i);
             ProviderConfig provider = attempt.provider;
             
+            String answer;
             try {
                 if (provider.stream) {
-                    callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
-                            new String[]{null}, footer, timeoutSeconds, abortFlag, false, exportRoomId,
-                            history.firstEventId);
+                    answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, history.firstEventId, abortFlag);
                 } else {
-                    String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
-                    matrixClient.sendMarkdownWithEventId(responseRoomId,
-                            appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
-                                    attempt.model), threadExtraContent.get());
+                    String raw = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    answer = appendMessageLink(raw, exportRoomId, history.firstEventId, provider.displayName, attempt.model);
+                    if (footer != null && !footer.isEmpty()) answer = answer + "\n\n" + footer;
                 }
+                // Single error notice before AI output - no editing
+                if (accumulatedStatus.length() > 0) {
+                    matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                }
+                matrixClient.sendMarkdownWithEventId(responseRoomId, answer, threadExtraContent.get());
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -625,13 +621,8 @@ public class AIService {
                     if (i == attempts.size() - 1) {
                         // All providers failed after user filtering, try with antispam filtering
                         System.out.println("All providers failed after user filtering, retrying with antispam filtering...");
-                        if (batchEventId == null) {
-                            batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
-                        } else {
-                            matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
-                        }
-                        String retryMsg = accumulatedStatus.toString() + "\nAll providers failed. Applying antispam filtering and retrying...";
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, retryMsg);
+                        String retryNotice = accumulatedStatus.toString() + "\nAll providers failed. Applying antispam filtering and retrying...";
+                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, retryNotice);
                         
                         // Create filtered history - antispam will be applied by performAIQueryWithAntispam
                         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
@@ -653,12 +644,7 @@ public class AIService {
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     return;
                 }
-                // Fallback to next provider - ensure errors shown before next attempt's AI output
-                if (batchEventId == null) {
-                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
-                } else {
-                    matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
-                }
+                // Fallback to next provider - lazy: wait till AI ready, send errors once before output (no editing)
             }
         }
 
@@ -697,18 +683,19 @@ public class AIService {
             ProviderAttempt attempt = attempts.get(i);
             ProviderConfig provider = attempt.provider;
             
+            String answer;
             try {
-                String[] outputEventIdHolder = new String[]{null};
                 if (provider.stream) {
-                    callStreamingToEvent(provider, prompt, attempt.model, skipSystem, isAsk, responseRoomId,
-                            outputEventIdHolder, footer, timeoutSeconds, abortFlag, false, exportRoomId,
-                            filteredHistory.firstEventId);
+                    answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, filteredHistory.firstEventId, abortFlag);
                 } else {
-                    String answer = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
-                    String renderedAnswer = appendMessageLink(answer, exportRoomId, filteredHistory.firstEventId,
-                            provider.displayName, attempt.model);
-                    matrixClient.sendMarkdownWithEventId(responseRoomId, renderedAnswer);
+                    String raw = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    answer = appendMessageLink(raw, exportRoomId, filteredHistory.firstEventId, provider.displayName, attempt.model);
+                    if (footer != null && !footer.isEmpty()) answer = answer + "\n\n" + footer;
                 }
+                if (accumulatedStatus.length() > 0) {
+                    matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                }
+                matrixClient.sendMarkdownWithEventId(responseRoomId, answer);
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -745,12 +732,7 @@ public class AIService {
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     return;
                 }
-                // Fallback to next provider - ensure errors shown before next attempt's AI output
-                if (batchEventId == null) {
-                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
-                } else {
-                    matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
-                }
+                // Fallback to next provider - lazy: wait till AI ready, send errors once before output (no editing)
             }
         }
 
@@ -1172,6 +1154,118 @@ public class AIService {
             }
         }
         return finalOutput;
+    }
+
+    /**
+     * Fetch streaming AI response without sending/updating Matrix messages.
+     * Used so provider errors can be sent as a single notice *before* AI output,
+     * without per-failure editing.
+     */
+    private String fetchStreamingContent(ProviderConfig provider, String prompt, String model,
+            boolean skipSystem, boolean isAsk, int timeoutSeconds, String footer,
+            String exportRoomId, String firstEventId, java.util.concurrent.atomic.AtomicBoolean abortFlag) throws Exception {
+        HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, true, timeoutSeconds);
+        return AIRequestQueue.run(provider.displayName + " (" + model + ") streaming", () -> {
+            StringBuilder reasoning = new StringBuilder();
+            StringBuilder responseContent = new StringBuilder();
+            String actualModel = null;
+            int lineCount = 0;
+            boolean gotDone = false;
+            try {
+                System.out.println("Starting " + provider.displayName + " (" + model + ") streaming fetch...");
+                HttpResponse<java.util.stream.Stream<String>> response = client.send(request, HttpResponse.BodyHandlers.ofLines());
+                if (response.statusCode() != 200) {
+                    String errorBody = response.body().collect(java.util.stream.Collectors.joining("\n"));
+                    throw new Exception("HTTP " + response.statusCode() + ": " + errorBody);
+                }
+                try (java.util.stream.Stream<String> lines = response.body()) {
+                    java.util.Iterator<String> it = lines.iterator();
+                    while (it.hasNext()) {
+                        if (abortFlag != null && abortFlag.get()) {
+                            System.out.println(provider.displayName + " streaming aborted by flag.");
+                            break;
+                        }
+                        String line = it.next();
+                        lineCount = lineCount + 1;
+                        String data = line.trim();
+                        if (data.isEmpty()) continue;
+                        String json = null;
+                        if (data.startsWith("data:") && !data.contains("[DONE]")) {
+                            json = data.substring(5).trim();
+                        } else if (data.startsWith("{")) {
+                            json = data;
+                        }
+                        if (json != null && !json.isEmpty()) {
+                            JsonNode node = mapper.readTree(json);
+                            if (node.has("error")) {
+                                JsonNode errorNode = node.get("error");
+                                String code = "200";
+                                if (errorNode.has("status_code")) code = errorNode.get("status_code").asText();
+                                else if (errorNode.has("statusCode")) code = errorNode.get("statusCode").asText();
+                                throw new Exception("Status: " + code + " Body: " + errorNode.toString());
+                            }
+                            if (node.has("model") && (actualModel == null || actualModel.isEmpty())) {
+                                actualModel = node.get("model").asText();
+                            }
+                            if (node.has("message")) {
+                                JsonNode message = node.get("message");
+                                if (message.has("content")) {
+                                    responseContent.append(message.get("content").asText());
+                                }
+                            } else if (node.has("choices")) {
+                                JsonNode choices = node.path("choices");
+                                if (choices.isArray() && choices.size() > 0) {
+                                    JsonNode delta = choices.get(0).path("delta");
+                                    if (delta.has("content")) {
+                                        responseContent.append(delta.get("content").asText());
+                                    } else if (delta.has("reasoning")) {
+                                        reasoning.append(delta.get("reasoning").asText());
+                                    } else if (delta.has("reasoning_content")) {
+                                        reasoning.append(delta.get("reasoning_content").asText());
+                                    }
+                                }
+                            }
+                            if (node.has("done") && node.get("done").asBoolean()) {
+                                gotDone = true;
+                            }
+                        } else if (data.contains("[DONE]")) {
+                            System.out.println(provider.displayName + " streaming finished normally ([DONE] received).");
+                            gotDone = true;
+                            break;
+                        }
+                        if (gotDone) break;
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error during " + provider.displayName + " streaming fetch: " + e.getMessage());
+                e.printStackTrace();
+                throw new Exception(e.getMessage(), e);
+            }
+            if (responseContent.length() == 0 && reasoning.length() == 0) {
+                String details = (lineCount == 0) ? "No SSE data received" :
+                               (gotDone ? "Stream ended with [DONE] but no content" : "Stream incomplete, no [DONE] received");
+                throw new Exception(provider.displayName + " error: " + details + ".");
+            }
+            String finalOutput;
+            if (responseContent.toString().trim().isEmpty()) {
+                if (reasoning.length() > 0) {
+                    String trimmed = trimReasoning(reasoning.toString());
+                    finalOutput = "> " + trimmed.replace("\n", "\n> ") + "\n\n**" + provider.displayName + ": No final response was generated.**";
+                } else {
+                    finalOutput = "**" + provider.displayName + " Error: No final response was generated.**";
+                }
+            } else {
+                finalOutput = responseContent.toString();
+            }
+            if (finalOutput.length() > 16000) {
+                finalOutput = finalOutput.substring(0, 15900) + "... [TRUNCATED]";
+            }
+            if (footer != null && !footer.isEmpty()) {
+                finalOutput = finalOutput + "\n\n" + footer;
+            }
+            finalOutput = appendMessageLink(finalOutput, exportRoomId, firstEventId, provider.displayName, actualModel);
+            return finalOutput;
+        });
     }
 
     public void queryAIUnread(String responseRoomId, String exportRoomId, String sender, ZoneId zoneId,
