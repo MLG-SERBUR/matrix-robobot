@@ -464,6 +464,7 @@ public class AIService {
         // Lazy error handling: only send status message if at least one provider fails
         String batchEventId = null;
         StringBuilder accumulatedStatus = new StringBuilder();
+        boolean hasCalibrated = calibrationRetryDone;
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -493,34 +494,39 @@ public class AIService {
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
                 
-                // Self-calibration: only unbounded !ask should truncate/retry and calibrate; bounded replies/duration/count/autotldr must fail over to next provider to keep all messages and not pollute factor.
+                // Self-calibration: bounded requests should still calibrate but not retry; only unbounded !ask truncates/retries.
                 // Handles both ArliAI 403 context length and Groq 413 TPM (Limit 8000, Requested N) — TPM is prompt-size driven.
-                if (!calibrationRetryDone && TokenCalibrationManager.isCalibrationError(errorMsg)) {
-                    if (isAsk && !isBoundedReply) {
+                // Estimator must include entire body with timestamps as it appears in final prompt (buildPrompt uses formatted logs).
+                if (!hasCalibrated && TokenCalibrationManager.isCalibrationError(errorMsg)) {
+                    if (isAsk) {
                         TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg);
-                        Integer actual = TokenCalibrationManager.extractActualTokensForCalibration(errorMsg);
-                        Integer limit = TokenCalibrationManager.extractLimitForCalibration(errorMsg);
-                        if (actual != null && limit != null && history.logs.size() > 10) {
-                            double targetRatio = limit * 0.85 / (double) actual;
-                            targetRatio = Math.max(0.3, Math.min(0.85, targetRatio));
-                            int newSize = Math.max(10, (int) (history.logs.size() * targetRatio));
-                            if (newSize < history.logs.size()) {
-                                java.util.List<String> truncated = new java.util.ArrayList<>(history.logs.subList(history.logs.size() - newSize, history.logs.size()));
-                                RoomHistoryManager.ChatLogsResult truncatedHistory = new RoomHistoryManager.ChatLogsResult(truncated, history.firstEventId, null, history.antispamApplied);
-                                String calMsg = "Context exceeded (" + actual + "/" + limit + "). Calibrated factor to " + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor()) + " and retrying with " + newSize + " messages (" + (int)(targetRatio*100) + "%)...";
-                                System.out.println(calMsg);
-                                String fullStatus = accumulatedStatus.toString() + "\n" + calMsg;
-                                if (batchEventId == null) {
-                                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, fullStatus);
-                                } else {
-                                    matrixClient.updateNoticeMessage(responseRoomId, batchEventId, fullStatus);
+                        hasCalibrated = true;
+                        if (!isBoundedReply) {
+                            Integer actual = TokenCalibrationManager.extractActualTokensForCalibration(errorMsg);
+                            Integer limit = TokenCalibrationManager.extractLimitForCalibration(errorMsg);
+                            if (actual != null && limit != null && history.logs.size() > 10) {
+                                double targetRatio = limit * 0.85 / (double) actual;
+                                targetRatio = Math.max(0.3, Math.min(0.85, targetRatio));
+                                int newSize = Math.max(10, (int) (history.logs.size() * targetRatio));
+                                if (newSize < history.logs.size()) {
+                                    java.util.List<String> truncated = new java.util.ArrayList<>(history.logs.subList(history.logs.size() - newSize, history.logs.size()));
+                                    RoomHistoryManager.ChatLogsResult truncatedHistory = new RoomHistoryManager.ChatLogsResult(truncated, history.firstEventId, null, history.antispamApplied);
+                                    String calMsg = "Context exceeded (" + actual + "/" + limit + "). Calibrated factor to " + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor()) + " and retrying with " + newSize + " messages (" + (int)(targetRatio*100) + "%)...";
+                                    System.out.println(calMsg);
+                                    String fullStatus = accumulatedStatus.toString() + "\n" + calMsg;
+                                    if (batchEventId == null) {
+                                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, fullStatus);
+                                    } else {
+                                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, fullStatus);
+                                    }
+                                    performAIQuery(responseRoomId, exportRoomId, truncatedHistory, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, batchEventId != null ? batchEventId : statusEventId, footer, skipUserFilterRetry, true);
+                                    return;
                                 }
-                                performAIQuery(responseRoomId, exportRoomId, truncatedHistory, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, batchEventId != null ? batchEventId : statusEventId, footer, skipUserFilterRetry, true);
-                                return;
                             }
                         }
                     }
-                    // Non-ask: still calibrated, but now fall through to normal provider fallback (no truncate)
+                    // For bounded !ask we calibrated above and now fall through to provider fallback without retry.
+                    // Non-ask (overview etc) currently does not calibrate to keep factor ask-specific; falls through.
                 }
 
                 // Always allow fallback for OLLAMA_PROXY since it's not 24/7

@@ -184,6 +184,24 @@ public class RoomHistoryManager {
         return tokens;
     }
 
+    /**
+     * Estimates tokens for rawLines stored newest-first (reverse chronological) as used during
+     * fetchRoomHistoryUntilLimit pagination. Computes exactly as final chronological formatting will,
+     * including grouped timestamps, so estimator includes entire body and timestamp.
+     */
+    private int estimateTokensForReverseRawLines(List<RawLogLine> rawLinesReverse, ZoneId zoneId, boolean aiFriendlyTimestamps) {
+        int tokens = 0;
+        LocalDate previousDate = null;
+        ZoneId effectiveZoneId = normalizeZoneId(zoneId);
+        for (int i = rawLinesReverse.size() - 1; i >= 0; i--) {
+            RawLogLine line = rawLinesReverse.get(i);
+            var zonedTimestamp = Instant.ofEpochMilli(line.timestamp).atZone(effectiveZoneId);
+            tokens += estimateLogLineTokens(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps));
+            previousDate = zonedTimestamp.toLocalDate();
+        }
+        return tokens;
+    }
+
     private List<String> extractEventIds(List<RawLogLine> rawLines) {
         List<String> ids = new ArrayList<>(rawLines.size());
         for (RawLogLine line : rawLines) {
@@ -1100,29 +1118,31 @@ public class RoomHistoryManager {
                     String sender = ev.path("sender").asText(null);
                     String eventId = ev.path("event_id").asText(null);
                     if (body != null && sender != null) {
-                        String line;
                         if (includeTimestamp) {
                             long originServerTs = ev.path("origin_server_ts").asLong(0);
                             RawLogLine rawLine = new RawLogLine(originServerTs, sender, body, eventId);
                             rawLines.add(rawLine);
-                            line = formatLogLine(rawLine, zoneId, null, aiFriendlyTimestamps);
-                        } else {
-                            line = "<" + sender + "> " + body;
-                        }
-
-                        int lineTokens = estimateLogLineTokens(line);
-
-                        if (currentTokens + lineTokens > tokenLimit) {
-                            if (includeTimestamp) {
+                            // Recompute total tokens accurately including grouped timestamps (previousDate logic)
+                            // to ensure estimator includes entire body with timestamps exactly as final prompt will.
+                            int totalTokens = estimateTokensForReverseRawLines(rawLines, zoneId, aiFriendlyTimestamps);
+                            if (totalTokens > tokenLimit) {
                                 rawLines.remove(rawLines.size() - 1);
+                                reachedLimit = true;
+                                break;
                             }
-                            reachedLimit = true;
-                            break;
+                            currentTokens = totalTokens;
+                            firstEventId = eventId;
+                        } else {
+                            String line = "<" + sender + "> " + body;
+                            int lineTokens = estimateLogLineTokens(line);
+                            if (currentTokens + lineTokens > tokenLimit) {
+                                reachedLimit = true;
+                                break;
+                            }
+                            logs.add(line);
+                            currentTokens += lineTokens;
+                            firstEventId = eventId;
                         }
-
-                        logs.add(line);
-                        currentTokens += lineTokens;
-                        firstEventId = eventId;
                     }
                 }
 
