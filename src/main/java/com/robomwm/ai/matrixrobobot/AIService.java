@@ -482,14 +482,6 @@ public class AIService {
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model), threadExtraContent.get());
                 }
-                // Success - if we had previous failures, send them now as second message
-                if (accumulatedStatus.length() > 0) {
-                    if (batchEventId == null) {
-                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
-                    } else {
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
-                    }
-                }
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -565,7 +557,12 @@ public class AIService {
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     return;
                 }
-                // otherwise fallback to next provider silently (no message yet)
+                // Fallback to next provider - ensure errors shown before next attempt's AI output
+                if (batchEventId == null) {
+                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                } else {
+                    matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
+                }
             }
         }
 
@@ -604,13 +601,6 @@ public class AIService {
                     matrixClient.sendMarkdownWithEventId(responseRoomId,
                             appendMessageLink(answer, exportRoomId, history.firstEventId, provider.displayName,
                                     attempt.model), threadExtraContent.get());
-                }
-                if (accumulatedStatus.length() > 0) {
-                    if (batchEventId == null) {
-                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
-                    } else {
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
-                    }
                 }
                 return;
             } catch (Exception e) {
@@ -656,6 +646,12 @@ public class AIService {
                             preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     return;
+                }
+                // Fallback to next provider - ensure errors shown before next attempt's AI output
+                if (batchEventId == null) {
+                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                } else {
+                    matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
                 }
             }
         }
@@ -707,13 +703,6 @@ public class AIService {
                             provider.displayName, attempt.model);
                     matrixClient.sendMarkdownWithEventId(responseRoomId, renderedAnswer);
                 }
-                if (accumulatedStatus.length() > 0) {
-                    if (batchEventId == null) {
-                        batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
-                    } else {
-                        matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
-                    }
-                }
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -749,6 +738,12 @@ public class AIService {
                             preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     return;
+                }
+                // Fallback to next provider - ensure errors shown before next attempt's AI output
+                if (batchEventId == null) {
+                    batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
+                } else {
+                    matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
                 }
             }
         }
