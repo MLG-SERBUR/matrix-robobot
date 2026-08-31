@@ -768,7 +768,7 @@ public class RoomHistoryManager {
                     }
                     if (!"m.room.message".equals(ev.path("type").asText(null))) continue;
                     String sender = ev.path("sender").asText(null);
-                    // Skip self-messages
+                    // Ignore messages by the sender (don't count self-mentions/replies)
                     if (targetUserId.equals(sender)) continue;
 
                     long originServerTs = ev.path("origin_server_ts").asLong(0);

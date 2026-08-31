@@ -49,11 +49,7 @@ public class AiSearchService {
     private final MatrixClient matrixClient;
 
     // ArliAI context limit is 12k tokens
-    // Reserve ~3k for system prompt, user prompt, and response
-    // Leave ~9k for chat log content
     private static final int MAX_CONTEXT_TOKENS = 12000;
-    private static final int RESERVED_TOKENS = 3000;
-    private static final int AVAILABLE_LOG_TOKENS = MAX_CONTEXT_TOKENS - RESERVED_TOKENS;
     
     // Maximum candidates to send in initial pass
     private static final int MAX_INITIAL_CANDIDATES = 30;
@@ -403,7 +399,7 @@ public class AiSearchService {
             String candidateLine = formatCandidate(candidate, exportRoomId);
             int lineTokens = RoomHistoryManager.estimateTokens(candidateLine);
             
-            if (currentTokens + lineTokens > AVAILABLE_LOG_TOKENS) {
+            if (currentTokens + lineTokens > MAX_CONTEXT_TOKENS) {
                 sb.append("... [truncated - ").append(candidates.size()).append(" total candidates]");
                 break;
             }
