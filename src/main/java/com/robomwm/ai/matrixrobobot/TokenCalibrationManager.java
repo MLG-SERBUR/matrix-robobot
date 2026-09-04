@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
  */
 public class TokenCalibrationManager {
     private static final Path FILE = Paths.get("token_calibration.json");
+    private static final Path HISTORY_FILE = Paths.get("token_calibration_history.jsonl");
     private static final double DEFAULT_FACTOR = 1.0;
     private static final double ALPHA = 0.3;
     private static final double MIN_FACTOR = 1.0;
@@ -125,7 +126,11 @@ public class TokenCalibrationManager {
     }
 
     public static boolean isGroqTpmError(String errorMsg) {
-        return errorMsg != null && errorMsg.contains("tokens per minute") && GROQ_REQUESTED_PATTERN.matcher(errorMsg).find();
+        if (errorMsg == null) return false;
+        // Exclude output-token limits (OTPM) – those report max_tokens, not prompt tokens
+        String lower = errorMsg.toLowerCase();
+        if (lower.contains("output tokens per minute") || lower.contains("otpm")) return false;
+        return errorMsg.contains("tokens per minute") && GROQ_REQUESTED_PATTERN.matcher(errorMsg).find();
     }
 
     public static boolean isCalibrationError(String errorMsg) {
@@ -189,6 +194,8 @@ public class TokenCalibrationManager {
 
     /**
      * Update calibration from a failed prompt and its actual token count.
+     * Estimator is for entire prompt sent to AI provider – no assumptions/exceptions.
+     * Logs raw, calibrated, actual, new factor for future review (linear EMA vs log/exp).
      * Returns new factor.
      */
     public synchronized double recordFromError(String prompt, String errorMsg) {
@@ -199,15 +206,24 @@ public class TokenCalibrationManager {
         }
         int estimatedRaw = estimateRaw(prompt);
         if (estimatedRaw == 0) return factor;
+        int estimatedCalibrated = (int) Math.ceil(estimatedRaw * factor);
         double ratio = (double) actual / estimatedRaw;
+        double rawRatio = ratio;
         // ratio <1 means we overestimated, don't reduce below MIN_FACTOR
         if (ratio < 1.0) ratio = 1.0;
         if (ratio > 3.0) ratio = 3.0; // clamp outlier
         double old = factor;
         factor = old * (1 - ALPHA) + ratio * ALPHA;
         factor = Math.max(MIN_FACTOR, Math.min(MAX_FACTOR, factor));
-        System.out.println("Calibration update: estimatedRaw=" + estimatedRaw + " actual=" + actual +
-                " ratio=" + String.format("%.2f", ratio) + " factor " + String.format("%.2f", old) + " -> " + String.format("%.2f", factor));
+        Integer limit = extractLimitForCalibration(errorMsg);
+        String limitStr = limit != null ? String.valueOf(limit) : "unknown";
+        // Detailed log for future review: raw vs calibrated vs actual to judge if linear factor sufficient
+        // Persist to file (not chat) per user request; also keep stdout for journal
+        String detail = "Calibration update: estimatedRaw=" + estimatedRaw + " estimatedCalibrated=" + estimatedCalibrated + " (factor " + String.format("%.4f", old) + ") actual=" + actual + " limit=" + limitStr +
+                " rawRatio=" + String.format("%.4f", rawRatio) + " clampedRatio=" + String.format("%.4f", ratio) + " factor " + String.format("%.4f", old) + " -> " + String.format("%.4f", factor) +
+                " promptChars=" + (prompt != null ? prompt.length() : 0);
+        System.out.println(detail);
+        appendHistory(estimatedRaw, estimatedCalibrated, old, actual, limit, rawRatio, ratio, factor, prompt != null ? prompt.length() : 0);
         // load samples for persistence
         int samples = 0;
         if (Files.exists(FILE)) {
@@ -218,6 +234,26 @@ public class TokenCalibrationManager {
         }
         saveFactor(samples + 1);
         return factor;
+    }
+
+    private synchronized void appendHistory(int estimatedRaw, int estimatedCalibrated, double oldFactor, int actual, Integer limit, double rawRatio, double clampedRatio, double newFactor, int promptChars) {
+        try {
+            java.util.Map<String, Object> entry = new java.util.LinkedHashMap<>();
+            entry.put("timestamp", java.time.Instant.now().toString());
+            entry.put("estimatedRaw", estimatedRaw);
+            entry.put("estimatedCalibrated", estimatedCalibrated);
+            entry.put("oldFactor", oldFactor);
+            entry.put("actual", actual);
+            entry.put("limit", limit);
+            entry.put("rawRatio", rawRatio);
+            entry.put("clampedRatio", clampedRatio);
+            entry.put("newFactor", newFactor);
+            entry.put("promptChars", promptChars);
+            String line = mapper.writeValueAsString(entry);
+            Files.writeString(HISTORY_FILE, line + System.lineSeparator(), java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            System.err.println("Failed to append calibration history: " + e.getMessage());
+        }
     }
 
     /** For testing/manual adjustment */
