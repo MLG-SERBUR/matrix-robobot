@@ -190,13 +190,17 @@ public class RoomHistoryManager {
      * including grouped timestamps, so estimator includes entire body and timestamp.
      */
     private int estimateTokensForReverseRawLines(List<RawLogLine> rawLinesReverse, ZoneId zoneId, boolean aiFriendlyTimestamps) {
+        return estimateTokensForReverseRawLines(rawLinesReverse, zoneId, aiFriendlyTimestamps, null);
+    }
+
+    private int estimateTokensForReverseRawLines(List<RawLogLine> rawLinesReverse, ZoneId zoneId, boolean aiFriendlyTimestamps, String estimateModel) {
         int tokens = 0;
         LocalDate previousDate = null;
         ZoneId effectiveZoneId = normalizeZoneId(zoneId);
         for (int i = rawLinesReverse.size() - 1; i >= 0; i--) {
             RawLogLine line = rawLinesReverse.get(i);
             var zonedTimestamp = Instant.ofEpochMilli(line.timestamp).atZone(effectiveZoneId);
-            tokens += estimateLogLineTokens(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps));
+            tokens += estimateLogLineTokens(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps), estimateModel);
             previousDate = zonedTimestamp.toLocalDate();
         }
         return tokens;
@@ -1029,10 +1033,15 @@ public class RoomHistoryManager {
      * Keeps vendored tokenizer as fallback but primary is aggressive heuristic.
      */
     public static int estimateTokens(String text) {
+        return estimateTokens(text, (String) null);
+    }
+
+    /** Per-model estimate using that model's tokenizer-family calibration factor. */
+    public static int estimateTokens(String text, String model) {
         if (text == null || text.isEmpty()) return 0;
         // Use calibrated heuristic (aggressive). If calibration not yet converged, still better than
         // Java tokenizer mismatch. Keep tokenizer as sanity floor: take max of both.
-        int heuristic = TokenCalibrationManager.getInstance().estimateTokens(text);
+        int heuristic = TokenCalibrationManager.getInstance().estimateTokens(text, model);
         try {
             int tokenCount = AI_TOKENIZER.encode(text, false, false).getIds().length;
             int tokenizerEst = (int) Math.ceil(tokenCount * TOKEN_SAFETY_MARGIN);
@@ -1042,8 +1051,27 @@ public class RoomHistoryManager {
         }
     }
 
+    /**
+     * Conservative estimate across candidate models (max calibrated estimate),
+     * so gathered history fits the most restrictive tokenizer family.
+     */
+    public static int estimateTokensConservative(String text, java.util.Collection<String> models) {
+        if (text == null || text.isEmpty()) return 0;
+        int best = estimateTokens(text);
+        if (models != null) {
+            for (String m : models) {
+                best = Math.max(best, estimateTokens(text, m));
+            }
+        }
+        return best;
+    }
+
     private static int estimateLogLineTokens(String line) {
         return estimateTokens(line + "\n");
+    }
+
+    private static int estimateLogLineTokens(String line, String model) {
+        return estimateTokens(line + "\n", model);
     }
 
     private static HuggingFaceTokenizer loadTokenizer() {
@@ -1077,6 +1105,15 @@ public class RoomHistoryManager {
 
     public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId,
             boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
+        return fetchRoomHistoryUntilLimit(roomId, fromToken, tokenLimit, includeTimestamp, zoneId, aiFriendlyTimestamps, abortFlag, progressCallback, null);
+    }
+
+    /**
+     * Variant that estimates with a representative model (per-family calibration), so the
+     * gathered history fits a specific tokenizer family. Null model = default estimate.
+     */
+    public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId,
+            boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback, String estimateModel) {
         List<String> logs = new ArrayList<>();
         List<RawLogLine> rawLines = includeTimestamp ? new ArrayList<>() : null;
         String firstEventId = null;
@@ -1124,7 +1161,7 @@ public class RoomHistoryManager {
                             rawLines.add(rawLine);
                             // Recompute total tokens accurately including grouped timestamps (previousDate logic)
                             // to ensure estimator includes entire body with timestamps exactly as final prompt will.
-                            int totalTokens = estimateTokensForReverseRawLines(rawLines, zoneId, aiFriendlyTimestamps);
+                            int totalTokens = estimateTokensForReverseRawLines(rawLines, zoneId, aiFriendlyTimestamps, estimateModel);
                             if (totalTokens > tokenLimit) {
                                 rawLines.remove(rawLines.size() - 1);
                                 reachedLimit = true;
@@ -1134,7 +1171,7 @@ public class RoomHistoryManager {
                             firstEventId = eventId;
                         } else {
                             String line = "<" + sender + "> " + body;
-                            int lineTokens = estimateLogLineTokens(line);
+                            int lineTokens = estimateLogLineTokens(line, estimateModel);
                             if (currentTokens + lineTokens > tokenLimit) {
                                 reachedLimit = true;
                                 break;

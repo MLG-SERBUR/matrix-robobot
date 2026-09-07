@@ -180,6 +180,73 @@ public class AIService {
         return model != null && model.toLowerCase().contains("qwen");
     }
 
+    /** Observed Groq input-tokens-per-minute limits: qwen models get ~7k, gpt ~8k. */
+    public static final int GROQ_QWEN_IPTM_LIMIT = 7000;
+    public static final int GROQ_GPT_IPTM_LIMIT = 8000;
+    public static final int GROQ_DEFAULT_IPTM_LIMIT = 8000;
+    /** Headroom kept when trimming to a limit, so the retry fits under TPM/context. */
+    public static final double TRIM_HEADROOM_RATIO = 0.85;
+
+    public static int groqIptmLimitForModel(String model) {
+        if (isGroqQwenModel(model)) return GROQ_QWEN_IPTM_LIMIT;
+        if (model != null && model.toLowerCase().contains("gpt")) return GROQ_GPT_IPTM_LIMIT;
+        return GROQ_DEFAULT_IPTM_LIMIT;
+    }
+
+    /**
+     * Target prompt size for unbound !ask gathering: the smallest Groq IPTM limit
+     * across configured Groq models, so the initial gather already fits every
+     * fallback (not just the first model). Falls back to 8000 when Groq unused.
+     */
+    protected int targetPromptTokensForAsk() {
+        if (groqModels == null || groqModels.isEmpty()) return GROQ_DEFAULT_IPTM_LIMIT;
+        int min = Integer.MAX_VALUE;
+        for (String m : groqModels) {
+            min = Math.min(min, groqIptmLimitForModel(m));
+        }
+        return min == Integer.MAX_VALUE ? GROQ_DEFAULT_IPTM_LIMIT : min;
+    }
+
+    /**
+     * Representative model for conservative token estimation during gather:
+     * the candidate with the largest calibration factor (most tokens per char).
+     */
+    protected String estimateModelForGather() {
+        if (groqModels == null || groqModels.isEmpty()) return null;
+        String best = groqModels.get(0);
+        double bestFactor = TokenCalibrationManager.getInstance().getFactor(best);
+        for (String m : groqModels) {
+            double f = TokenCalibrationManager.getInstance().getFactor(m);
+            if (f > bestFactor) {
+                bestFactor = f;
+                best = m;
+            }
+        }
+        return best;
+    }
+
+    protected int estimateTokensConservativeForAsk(String text) {
+        if (groqModels == null || groqModels.isEmpty()) return RoomHistoryManager.estimateTokens(text);
+        return RoomHistoryManager.estimateTokensConservative(text, groqModels);
+    }
+
+    static boolean isUnboundedAskReply() {
+        Map<String, Object> ctxExtra = threadExtraContent.get();
+        if (ctxExtra != null) {
+            Object ctxObj = ctxExtra.get("ai.matrixrobobot.context");
+            if (ctxObj instanceof Map) {
+                Map<?,?> ctxMap = (Map<?,?>) ctxObj;
+                Object s = ctxMap.get("startEventId");
+                Object e = ctxMap.get("endEventId");
+                if (s instanceof String && e instanceof String) {
+                    String ss = (String)s; String ee = (String)e;
+                    if (ss != null && ss.startsWith("$") && ee != null && ee.startsWith("$")) return false;
+                }
+            }
+        }
+        return true;
+    }
+
     public static void applyGroqQwenNonThinkingDefaults(Map<String, Object> payload) {
         payload.put("reasoning_effort", "none");
     }
@@ -443,6 +510,32 @@ public class AIService {
         performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, skipUserFilterRetry, false);
     }
 
+    /**
+     * Calibrate the failing model's tokenizer family, and for unbounded !ask also
+     * shrink {@code curLogs} (tail slice) so the next fallback gets a smaller prompt.
+     * Returns the rebuilt prompt when trimmed, null otherwise. Pure trim sizing via
+     * TokenCalibrationManager.computeTrimmedSize.
+     */
+    private String calibrateAndMaybeTrim(String prompt, String errorMsg, String model,
+            List<String> curLogs, String question, String promptPrefix, boolean canTrim) {
+        if (!TokenCalibrationManager.isCalibrationError(errorMsg)) return null;
+        TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg, model);
+        if (!canTrim || curLogs.size() <= 10) return null;
+        Integer actual = TokenCalibrationManager.extractActualTokensForCalibration(errorMsg);
+        Integer limit = TokenCalibrationManager.extractLimitForCalibration(errorMsg);
+        int newSize = TokenCalibrationManager.computeTrimmedSize(curLogs.size(), actual, limit);
+        if (newSize >= curLogs.size()) return null;
+        List<String> truncated = new ArrayList<>(curLogs.subList(curLogs.size() - newSize, curLogs.size()));
+        curLogs.clear();
+        curLogs.addAll(truncated);
+        String calMsg = "Context exceeded (" + actual + "/" + limit + "). Calibrated factor ["
+                + TokenCalibrationManager.familyForModel(model) + "] to "
+                + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor(model))
+                + " and trimmed to " + newSize + " messages for next fallback...";
+        System.out.println(calMsg);
+        return buildPrompt(question, curLogs, promptPrefix);
+    }
+
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer, boolean skipUserFilterRetry, boolean calibrationRetryDone) {
@@ -451,28 +544,19 @@ public class AIService {
 
         boolean isAsk = Prompts.ASK_PREFIX.equals(promptPrefix);
         // Replies to bot carry bounded start/end eventIds (count-like) -> should fail over, not truncate
-        boolean isBoundedReply = false;
-        Map<String, Object> ctxExtra = threadExtraContent.get();
-        if (ctxExtra != null) {
-            Object ctxObj = ctxExtra.get("ai.matrixrobobot.context");
-            if (ctxObj instanceof Map) {
-                Map<?,?> ctxMap = (Map<?,?>) ctxObj;
-                Object s = ctxMap.get("startEventId");
-                Object e = ctxMap.get("endEventId");
-                if (s instanceof String && e instanceof String) {
-                    String ss = (String)s; String ee = (String)e;
-                    if (ss != null && ss.startsWith("$") && ee != null && ee.startsWith("$")) isBoundedReply = true;
-                }
-            }
-        }
+        boolean canTrimAsk = isAsk && isUnboundedAskReply();
         boolean skipSystem = isAsk || Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
-        String prompt = buildPrompt(question, history.logs, promptPrefix);
+        // Mutable log window: each input-TPM/context failure calibrates that model's
+        // family and shrinks the tail for the NEXT fallback (qwen 7k vs gpt 8k).
+        List<String> curLogs = new ArrayList<>(history.logs);
+        String prompt = buildPrompt(question, curLogs, promptPrefix);
+        final String firstEventId = history.firstEventId;
+        final boolean antispamApplied = history.antispamApplied;
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
         // Lazy error handling: only send status message if at least one provider fails
         String batchEventId = null;
         StringBuilder accumulatedStatus = new StringBuilder();
-        boolean hasCalibrated = calibrationRetryDone;
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -483,10 +567,10 @@ public class AIService {
             String answer;
             try {
                 if (provider.stream) {
-                    answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, history.firstEventId, abortFlag);
+                    answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, firstEventId, abortFlag);
                 } else {
                     String raw = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
-                    answer = appendMessageLink(raw, exportRoomId, history.firstEventId, provider.displayName, attempt.model);
+                    answer = appendMessageLink(raw, exportRoomId, firstEventId, provider.displayName, attempt.model);
                     if (footer != null && !footer.isEmpty()) answer = answer + "\n\n" + footer;
                 }
                 // Single error notice before AI output - no editing
@@ -506,45 +590,25 @@ public class AIService {
                 accumulatedStatus.append(statusUpdate);
                 
                 // Self-calibration: estimator is entire prompt (buildPrompt with timestamps) – no assumptions/exceptions.
-                // Calibrate for ALL prompt types on any context/TPM error (limit irrelevant for calibration).
-                // Only trim+retry for unbounded !ask; bounded requests must retain all messages (AGENTS.md: no hours/startTime guards trimming).
-                if (!hasCalibrated && TokenCalibrationManager.isCalibrationError(errorMsg)) {
-                    TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg);
-                    hasCalibrated = true;
-                    if (isAsk && !isBoundedReply) {
-                        Integer actual = TokenCalibrationManager.extractActualTokensForCalibration(errorMsg);
-                        Integer limit = TokenCalibrationManager.extractLimitForCalibration(errorMsg);
-                        if (actual != null && limit != null && history.logs.size() > 10) {
-                            double targetRatio = limit * 0.85 / (double) actual;
-                            targetRatio = Math.max(0.3, Math.min(0.85, targetRatio));
-                            int newSize = Math.max(10, (int) (history.logs.size() * targetRatio));
-                            if (newSize < history.logs.size()) {
-                                java.util.List<String> truncated = new java.util.ArrayList<>(history.logs.subList(history.logs.size() - newSize, history.logs.size()));
-                                RoomHistoryManager.ChatLogsResult truncatedHistory = new RoomHistoryManager.ChatLogsResult(truncated, history.firstEventId, null, history.antispamApplied);
-                                // Log calibration trim details to persistent file via TokenCalibrationManager (already logged) and stdout, not chat
-                                String calMsg = "Context exceeded (" + actual + "/" + limit + "). Calibrated factor to " + String.format("%.2f", TokenCalibrationManager.getInstance().getFactor()) + " and retrying with " + newSize + " messages (" + (int)(targetRatio*100) + "%)...";
-                                System.out.println(calMsg);
-                                // Do not send calMsg to chat; retry silently (calibration history already persisted)
-                                performAIQuery(responseRoomId, exportRoomId, truncatedHistory, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, skipUserFilterRetry, true);
-                                return;
-                            }
-                        }
-                    }
-                    // For bounded or non-ask: calibrated above, no trim – fall through to provider fallback.
-                }
+                // Calibrate EVERY input-TPM/context failure per model family; only trim
+                // unbounded !ask (bounded requests must retain all messages: no hours/startTime guards trimming).
+                // Trim applies per-fallback (not once) so a gpt-8k trim can shrink again for qwen-7k.
+                String trimmed = calibrateAndMaybeTrim(prompt, errorMsg, attempt.model, curLogs, question, promptPrefix, canTrimAsk);
+                if (trimmed != null) prompt = trimmed;
+                // For bounded or non-ask, or OTPM/output errors: calibrated above (or N/A), no trim – fall through to provider fallback.
 
                 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 // Otherwise only fallback in AUTO mode and if not the last attempt
                 if ((preferredBackend != Backend.AUTO && provider.backend != Backend.OLLAMA_PROXY) || i == attempts.size() - 1) {
-                    if (i == attempts.size() - 1 && !history.antispamApplied && !skipUserFilterRetry) {
+                    if (i == attempts.size() - 1 && !antispamApplied && !skipUserFilterRetry) {
                         // All providers failed, try removing messages from specific spammy user first
                         System.out.println("All providers failed, retrying with specific user filtering...");
                         String retryNotice = accumulatedStatus.toString() + "\nAll providers failed. Removing spammer messages from specific spammy user and retrying...";
                         batchEventId = matrixClient.sendNoticeWithEventId(responseRoomId, retryNotice);
                         
-                        // Create filtered history removing messages from the specific user
+                        // Create filtered history removing messages from the specific user (keeps prior trims)
                         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
-                                filterUserMessages(history.logs, "@buynbadrah:mikuplushfarm.ovh"), history.firstEventId, history.errorMessage, false);
+                                filterUserMessages(curLogs, "@buynbadrah:mikuplushfarm.ovh"), firstEventId, history.errorMessage, false);
                         
                         // Retry with specific user filtering
                         performAIQueryWithUserFilter(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, 
@@ -557,7 +621,9 @@ public class AIService {
                     } else {
                         matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
                     }
-                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
+                    RoomHistoryManager.ChatLogsResult finalHistory = new RoomHistoryManager.ChatLogsResult(
+                            new ArrayList<>(curLogs), firstEventId, history.errorMessage, antispamApplied);
+                    handleFinalError(responseRoomId, exportRoomId, finalHistory, question, promptPrefix, abortFlag,
                             preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     return;
@@ -577,14 +643,16 @@ public class AIService {
 
         boolean isAsk = Prompts.ASK_PREFIX.equals(promptPrefix);
         boolean skipSystem = isAsk || Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
-        
-        String prompt = buildPrompt(question, history.logs, promptPrefix);
+        boolean canTrimAsk = isAsk && isUnboundedAskReply();
+
+        List<String> curLogs = new ArrayList<>(history.logs);
+        String prompt = buildPrompt(question, curLogs, promptPrefix);
+        final String firstEventId = history.firstEventId;
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
         // Lazy error handling: only send status if failures occur
         String batchEventId = null;
         StringBuilder accumulatedStatus = new StringBuilder();
-        boolean hasCalibrated = false;
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -595,10 +663,10 @@ public class AIService {
             String answer;
             try {
                 if (provider.stream) {
-                    answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, history.firstEventId, abortFlag);
+                    answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, firstEventId, abortFlag);
                 } else {
                     String raw = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
-                    answer = appendMessageLink(raw, exportRoomId, history.firstEventId, provider.displayName, attempt.model);
+                    answer = appendMessageLink(raw, exportRoomId, firstEventId, provider.displayName, attempt.model);
                     if (footer != null && !footer.isEmpty()) answer = answer + "\n\n" + footer;
                 }
                 // Single error notice before AI output - no editing
@@ -616,11 +684,9 @@ public class AIService {
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
-                // Calibrate estimator for entire prompt on any TPM/context error – limit irrelevant, only trim is ASK+unbound
-                if (!hasCalibrated && TokenCalibrationManager.isCalibrationError(errorMsg)) {
-                    TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg);
-                    hasCalibrated = true;
-                }
+                // Calibrate per model family on any TPM/context error; trim unbounded !ask per-fallback.
+                String trimmed = calibrateAndMaybeTrim(prompt, errorMsg, attempt.model, curLogs, question, promptPrefix, canTrimAsk);
+                if (trimmed != null) prompt = trimmed;
                 
                 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
                 // Otherwise only fallback in AUTO mode and if not the last attempt
@@ -633,7 +699,7 @@ public class AIService {
                         
                         // Create filtered history - antispam will be applied by performAIQueryWithAntispam
                         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
-                                history.logs, history.firstEventId, history.errorMessage, false);
+                                new ArrayList<>(curLogs), firstEventId, history.errorMessage, false);
                         
                         // Retry with antispam filtering
                         performAIQueryWithAntispam(responseRoomId, exportRoomId, filteredHistory, question, promptPrefix, 
@@ -646,7 +712,9 @@ public class AIService {
                     } else {
                         matrixClient.updateNoticeMessage(responseRoomId, batchEventId, accumulatedStatus.toString());
                     }
-                    handleFinalError(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag,
+                    RoomHistoryManager.ChatLogsResult trimmedUserFilterHistory = new RoomHistoryManager.ChatLogsResult(
+                            new ArrayList<>(curLogs), firstEventId, history.errorMessage, history.antispamApplied);
+                    handleFinalError(responseRoomId, exportRoomId, trimmedUserFilterHistory, question, promptPrefix, abortFlag,
                             preferredBackend, forcedModel, timeoutSeconds, batchEventId,
                             errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
                     return;
@@ -668,22 +736,22 @@ public class AIService {
         boolean skipSystem = isAsk || Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
         
         // Apply antispam filtering to logs if not already applied
-        List<String> filteredLogs;
+        List<String> curLogs;
         if (history.antispamApplied) {
-            filteredLogs = history.logs;
+            curLogs = new ArrayList<>(history.logs);
         } else {
-            filteredLogs = AntispamFilter.applyAllFilters(history.logs);
+            curLogs = new ArrayList<>(AntispamFilter.applyAllFilters(history.logs));
         }
         RoomHistoryManager.ChatLogsResult filteredHistory = new RoomHistoryManager.ChatLogsResult(
-                filteredLogs, history.firstEventId, history.errorMessage, true);
-        
-        String prompt = buildPrompt(question, filteredLogs, promptPrefix);
+                curLogs, history.firstEventId, history.errorMessage, true);
+        boolean canTrimAsk = isAsk && isUnboundedAskReply();
+
+        String prompt = buildPrompt(question, curLogs, promptPrefix);
         List<ProviderAttempt> attempts = buildProviderAttempts(preferredBackend, forcedModel);
 
         // Lazy error handling: only send status if failures occur
         String batchEventId = null;
         StringBuilder accumulatedStatus = new StringBuilder();
-        boolean hasCalibrated = false;
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -714,10 +782,12 @@ public class AIService {
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
-                // Calibrate estimator for entire prompt on any TPM/context error
-                if (!hasCalibrated && TokenCalibrationManager.isCalibrationError(errorMsg)) {
-                    TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg);
-                    hasCalibrated = true;
+                // Calibrate per model family; trim unbounded !ask per-fallback like the main path.
+                String trimmed = calibrateAndMaybeTrim(prompt, errorMsg, attempt.model, curLogs, question, promptPrefix, canTrimAsk);
+                if (trimmed != null) {
+                    prompt = trimmed;
+                    filteredHistory = new RoomHistoryManager.ChatLogsResult(
+                            new ArrayList<>(curLogs), filteredHistory.firstEventId, filteredHistory.errorMessage, true);
                 }
                 
                 // For antispam retry, if any provider fails, we consider it final since we already applied filtering
@@ -1442,14 +1512,15 @@ public class AIService {
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            // Target context window for Groq (primary) is 8k tokens (TPM limit).
-            // Reserve headroom for response; ArliAI 12k fallback handled via calibration retry.
-            int targetPromptTokens = 8000;
+            // Target the smallest Groq IPTM across fallbacks (qwen ~7k vs gpt ~8k) so the
+            // initial gather already fits every fallback. ArliAI 12k fallback grows via trim headroom.
+            int targetPromptTokens = targetPromptTokensForAsk();
 
             // Account for the user prompt, including the question. No system prompt for ask.
+            // Estimate conservatively across Groq fallback families (qwen tokenizes differently than gpt).
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20; // Special tokens: BOS/EOS, role markers (im_start/im_end), separators
-            int baseTokens = RoomHistoryManager.estimateTokens(emptyPrompt) +
+            int baseTokens = estimateTokensConservativeForAsk(emptyPrompt) +
                              chatFormatOverhead;
 
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
@@ -1466,7 +1537,7 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
+                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
             if (gatherTimedOut.get() || gatherElapsed > 15000) {
@@ -1488,7 +1559,7 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
+                int estTokens = estimateTokensConservativeForAsk(String.join("\n", history.logs));
                 String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
                 String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
@@ -1517,10 +1588,10 @@ public class AIService {
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            int targetPromptTokens = 8000;
+            int targetPromptTokens = targetPromptTokensForAsk();
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20;
-            int baseTokens = RoomHistoryManager.estimateTokens(emptyPrompt) +
+            int baseTokens = estimateTokensConservativeForAsk(emptyPrompt) +
                              chatFormatOverhead;
 
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
@@ -1537,7 +1608,7 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
+                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
             if (gatherTimedOut.get() || gatherElapsed > 15000) {
@@ -1563,7 +1634,7 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
+                int estTokens = estimateTokensConservativeForAsk(String.join("\n", history.logs));
                 String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
                 String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
@@ -1851,10 +1922,10 @@ public class AIService {
                              java.util.concurrent.atomic.AtomicBoolean abortFlag, ZoneId zoneId) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            int targetPromptTokens = 8000;
+            int targetPromptTokens = targetPromptTokensForAsk();
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), Prompts.ASK_PREFIX);
             int chatFormatOverhead = 20;
-            int baseTokens = RoomHistoryManager.estimateTokens(emptyPrompt) +
+            int baseTokens = estimateTokensConservativeForAsk(emptyPrompt) +
                              chatFormatOverhead;
             int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
 
@@ -1871,7 +1942,7 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    null, tokenLimit, true, zoneId, true, abortFlag, progressCallback);
+                    null, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
             if (gatherTimedOut.get() || gatherElapsed > 15000) {
@@ -1903,7 +1974,7 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
+                int estTokens = estimateTokensConservativeForAsk(String.join("\n", history.logs));
                 String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
                 String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages from " + displayName + " (~" + tokenStr + " tokens). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
