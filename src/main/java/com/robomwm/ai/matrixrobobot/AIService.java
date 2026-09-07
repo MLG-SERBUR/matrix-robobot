@@ -176,6 +176,14 @@ public class AIService {
         payload.put("chat_template_kwargs", Map.of("enable_thinking", false));
     }
 
+    public static boolean isGroqQwenModel(String model) {
+        return model != null && model.toLowerCase().contains("qwen");
+    }
+
+    public static void applyGroqQwenNonThinkingDefaults(Map<String, Object> payload) {
+        payload.put("reasoning_effort", "none");
+    }
+
     private static class ProviderConfig {
         final Backend backend;
         final String displayName;
@@ -1646,6 +1654,9 @@ public class AIService {
         }
         if (provider.backend == Backend.ARLIAI) {
             applyArliAiNonThinkingDefaults(payload);
+        }
+        if (provider.backend == Backend.GROQ && isGroqQwenModel(model)) {
+            applyGroqQwenNonThinkingDefaults(payload);
         }
         String jsonPayload = mapper.writeValueAsString(payload);
 
