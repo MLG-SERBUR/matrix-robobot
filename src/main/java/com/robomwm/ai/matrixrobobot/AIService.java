@@ -194,17 +194,26 @@ public class AIService {
     }
 
     /**
-     * Target prompt size for unbound !ask gathering: the smallest Groq IPTM limit
-     * across configured Groq models, so the initial gather already fits every
-     * fallback (not just the first model). Falls back to 8000 when Groq unused.
+     * Target prompt size for unbound !ask gathering: 8k (Groq gpt limit).
+     * Only trim down when actually trying a model with a known lower limit
+     * (Groq qwen ~7k). Falls back to 8000 when Groq unused.
      */
     protected int targetPromptTokensForAsk() {
-        if (groqModels == null || groqModels.isEmpty()) return GROQ_DEFAULT_IPTM_LIMIT;
-        int min = Integer.MAX_VALUE;
-        for (String m : groqModels) {
-            min = Math.min(min, groqIptmLimitForModel(m));
+        return GROQ_GPT_IPTM_LIMIT;
+    }
+
+    /**
+     * Known input limit requiring a trim for this attempt, or null when the
+     * attempt has no known restrictive limit. Currently only Groq qwen models
+     * (~7k) qualify; gpt gathers at 8k need no trim, other providers fall
+     * through untrimmed (e.g. ArliAI 12k handles the full prompt).
+     */
+    static Integer knownTrimLimitForAttempt(ProviderAttempt attempt) {
+        if (attempt == null || attempt.provider == null) return null;
+        if (attempt.provider.backend == Backend.GROQ && isGroqQwenModel(attempt.model)) {
+            return GROQ_QWEN_IPTM_LIMIT;
         }
-        return min == Integer.MAX_VALUE ? GROQ_DEFAULT_IPTM_LIMIT : min;
+        return null;
     }
 
     /**
@@ -513,14 +522,19 @@ public class AIService {
     /**
      * Calibrate the failing model's tokenizer family, and for unbounded !ask also
      * shrink {@code curLogs} (tail slice) so the next fallback gets a smaller prompt.
+     * Always calibrates on TPM/context errors; only trims when trying a model
+     * with a known restrictive limit (Groq qwen ~7k). Other failures fall
+     * through untrimmed (e.g. gpt 8k prompt stays full for ArliAI 12k).
      * Returns the rebuilt prompt when trimmed, null otherwise. Pure trim sizing via
      * TokenCalibrationManager.computeTrimmedSize.
      */
-    private String calibrateAndMaybeTrim(String prompt, String errorMsg, String model,
+    private String calibrateAndMaybeTrim(String prompt, String errorMsg, ProviderAttempt attempt,
             List<String> curLogs, String question, String promptPrefix, boolean canTrim) {
+        String model = attempt != null ? attempt.model : null;
         if (!TokenCalibrationManager.isCalibrationError(errorMsg)) return null;
         TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg, model);
         if (!canTrim || curLogs.size() <= 10) return null;
+        if (knownTrimLimitForAttempt(attempt) == null) return null;
         Integer actual = TokenCalibrationManager.extractActualTokensForCalibration(errorMsg);
         Integer limit = TokenCalibrationManager.extractLimitForCalibration(errorMsg);
         int newSize = TokenCalibrationManager.computeTrimmedSize(curLogs.size(), actual, limit);
@@ -536,6 +550,29 @@ public class AIService {
         return buildPrompt(question, curLogs, promptPrefix);
     }
 
+    /**
+     * Proactively shrink {@code curLogs} to a model's known limit before trying
+     * it, so an 8k gpt gather fits a 7k qwen fallback without waiting for a
+     * TPM failure. No-op unless unbounded !ask and the attempt has a known
+     * restrictive limit. Sizing reuses computeTrimmedSize headroom logic.
+     */
+    private String trimToKnownLimitIfNeeded(List<String> curLogs, String question,
+            String promptPrefix, ProviderAttempt attempt, String currentPrompt, boolean canTrim) {
+        if (!canTrim || curLogs.size() <= 10) return currentPrompt;
+        Integer knownLimit = knownTrimLimitForAttempt(attempt);
+        if (knownLimit == null) return currentPrompt;
+        int est = RoomHistoryManager.estimateTokens(currentPrompt, attempt.model);
+        if (est <= (int) (knownLimit * TRIM_HEADROOM_RATIO)) return currentPrompt;
+        int newSize = TokenCalibrationManager.computeTrimmedSize(curLogs.size(), est, knownLimit);
+        if (newSize >= curLogs.size()) return currentPrompt;
+        List<String> truncated = new ArrayList<>(curLogs.subList(curLogs.size() - newSize, curLogs.size()));
+        curLogs.clear();
+        curLogs.addAll(truncated);
+        System.out.println("Proactive trim for known limit " + knownLimit + " (" + attempt.model
+                + "): estimated " + est + " tokens, trimmed to " + newSize + " messages...");
+        return buildPrompt(question, curLogs, promptPrefix);
+    }
+
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer, boolean skipUserFilterRetry, boolean calibrationRetryDone) {
@@ -546,8 +583,8 @@ public class AIService {
         // Replies to bot carry bounded start/end eventIds (count-like) -> should fail over, not truncate
         boolean canTrimAsk = isAsk && isUnboundedAskReply();
         boolean skipSystem = isAsk || Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
-        // Mutable log window: each input-TPM/context failure calibrates that model's
-        // family and shrinks the tail for the NEXT fallback (qwen 7k vs gpt 8k).
+        // Mutable log window: gathered at 8k (gpt limit); only shrinks when trying
+        // a model with a known lower limit (Groq qwen 7k).
         List<String> curLogs = new ArrayList<>(history.logs);
         String prompt = buildPrompt(question, curLogs, promptPrefix);
         final String firstEventId = history.firstEventId;
@@ -563,6 +600,8 @@ public class AIService {
 
             ProviderAttempt attempt = attempts.get(i);
             ProviderConfig provider = attempt.provider;
+            // Unbounded !ask gathers to 8k; shrink to 7k before trying Groq qwen.
+            prompt = trimToKnownLimitIfNeeded(curLogs, question, promptPrefix, attempt, prompt, canTrimAsk);
             
             String answer;
             try {
@@ -591,9 +630,9 @@ public class AIService {
                 
                 // Self-calibration: estimator is entire prompt (buildPrompt with timestamps) – no assumptions/exceptions.
                 // Calibrate EVERY input-TPM/context failure per model family; only trim
-                // unbounded !ask (bounded requests must retain all messages: no hours/startTime guards trimming).
-                // Trim applies per-fallback (not once) so a gpt-8k trim can shrink again for qwen-7k.
-                String trimmed = calibrateAndMaybeTrim(prompt, errorMsg, attempt.model, curLogs, question, promptPrefix, canTrimAsk);
+                // unbounded !ask when trying a known-limit model (Groq qwen 7k).
+                // Bounded requests must retain all messages: no hours/startTime guards trimming.
+                String trimmed = calibrateAndMaybeTrim(prompt, errorMsg, attempt, curLogs, question, promptPrefix, canTrimAsk);
                 if (trimmed != null) prompt = trimmed;
                 // For bounded or non-ask, or OTPM/output errors: calibrated above (or N/A), no trim – fall through to provider fallback.
 
@@ -659,6 +698,7 @@ public class AIService {
 
             ProviderAttempt attempt = attempts.get(i);
             ProviderConfig provider = attempt.provider;
+            prompt = trimToKnownLimitIfNeeded(curLogs, question, promptPrefix, attempt, prompt, canTrimAsk);
             
             String answer;
             try {
@@ -684,8 +724,8 @@ public class AIService {
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
-                // Calibrate per model family on any TPM/context error; trim unbounded !ask per-fallback.
-                String trimmed = calibrateAndMaybeTrim(prompt, errorMsg, attempt.model, curLogs, question, promptPrefix, canTrimAsk);
+                // Calibrate per model family on any TPM/context error; trim only known-limit attempts.
+                String trimmed = calibrateAndMaybeTrim(prompt, errorMsg, attempt, curLogs, question, promptPrefix, canTrimAsk);
                 if (trimmed != null) prompt = trimmed;
                 
                 // Always allow fallback for OLLAMA_PROXY since it's not 24/7
@@ -758,6 +798,12 @@ public class AIService {
 
             ProviderAttempt attempt = attempts.get(i);
             ProviderConfig provider = attempt.provider;
+            int sizeBeforeTrim = curLogs.size();
+            prompt = trimToKnownLimitIfNeeded(curLogs, question, promptPrefix, attempt, prompt, canTrimAsk);
+            if (curLogs.size() != sizeBeforeTrim) {
+                filteredHistory = new RoomHistoryManager.ChatLogsResult(
+                        new ArrayList<>(curLogs), filteredHistory.firstEventId, filteredHistory.errorMessage, true);
+            }
             
             String answer;
             try {
@@ -782,8 +828,8 @@ public class AIService {
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
-                // Calibrate per model family; trim unbounded !ask per-fallback like the main path.
-                String trimmed = calibrateAndMaybeTrim(prompt, errorMsg, attempt.model, curLogs, question, promptPrefix, canTrimAsk);
+                // Calibrate per model family; trim only known-limit attempts like the main path.
+                String trimmed = calibrateAndMaybeTrim(prompt, errorMsg, attempt, curLogs, question, promptPrefix, canTrimAsk);
                 if (trimmed != null) {
                     prompt = trimmed;
                     filteredHistory = new RoomHistoryManager.ChatLogsResult(
@@ -1512,8 +1558,7 @@ public class AIService {
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            // Target the smallest Groq IPTM across fallbacks (qwen ~7k vs gpt ~8k) so the
-            // initial gather already fits every fallback. ArliAI 12k fallback grows via trim headroom.
+            // Gather to 8k (Groq gpt limit); only trim when trying Groq qwen (~7k).
             int targetPromptTokens = targetPromptTokensForAsk();
 
             // Account for the user prompt, including the question. No system prompt for ask.
