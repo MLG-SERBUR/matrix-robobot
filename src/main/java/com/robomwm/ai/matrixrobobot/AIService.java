@@ -239,6 +239,16 @@ public class AIService {
         return RoomHistoryManager.estimateTokensConservative(text, groqModels);
     }
 
+    static String formatTokenCount(int est) {
+        return est >= 1000 ? String.format("%.1fk", est / 1000.0) : String.valueOf(est);
+    }
+
+    static String formatDualTokenEstimates(String text) {
+        int gptEst = RoomHistoryManager.estimateTokens(text, TokenCalibrationManager.FAMILY_GPT);
+        int qwenEst = RoomHistoryManager.estimateTokens(text, TokenCalibrationManager.FAMILY_QWEN);
+        return "~" + formatTokenCount(gptEst) + " gpt / ~" + formatTokenCount(qwenEst) + " qwen tokens";
+    }
+
     static boolean isUnboundedAskReply() {
         Map<String, Object> ctxExtra = threadExtraContent.get();
         if (ctxExtra != null) {
@@ -393,9 +403,8 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
-                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
@@ -480,9 +489,8 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", history.logs));
-                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
@@ -1454,9 +1462,8 @@ public class AIService {
 
             {
                 int gatheredCount = result.logs.size();
-                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", result.logs));
-                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                String dualTokens = formatDualTokenEstimates(String.join("\n", result.logs));
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
@@ -1532,9 +1539,8 @@ public class AIService {
 
             {
                 int gatheredCount = result.logs.size();
-                int estTokens = RoomHistoryManager.estimateTokens(String.join("\n", result.logs));
-                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                String dualTokens = formatDualTokenEstimates(String.join("\n", result.logs));
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
@@ -1604,9 +1610,8 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                int estTokens = estimateTokensConservativeForAsk(String.join("\n", history.logs));
-                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
@@ -1679,9 +1684,8 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                int estTokens = estimateTokensConservativeForAsk(String.join("\n", history.logs));
-                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (~" + tokenStr + " tokens). Now querying AI provider...";
+                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
@@ -2019,9 +2023,8 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                int estTokens = estimateTokensConservativeForAsk(String.join("\n", history.logs));
-                String tokenStr = estTokens >= 1000 ? String.format("%.1fk", estTokens / 1000.0) : String.valueOf(estTokens);
-                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages from " + displayName + " (~" + tokenStr + " tokens). Now querying AI provider...";
+                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages from " + displayName + " (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
