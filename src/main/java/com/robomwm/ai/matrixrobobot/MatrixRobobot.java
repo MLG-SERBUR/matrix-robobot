@@ -137,6 +137,9 @@ public class MatrixRobobot {
         // NEW: OkReactionService for consecutive "ok" reactions
         OkReactionService okReactionService = new OkReactionService(matrixClient);
 
+        // NEW: DowntimeVerificationService for @autoplayerbot:matrix.org reports
+        DowntimeVerificationService downtimeService = new DowntimeVerificationService(matrixClient);
+
         String userId = matrixClient.getUserId();
 
         // Skip initial sync - we only care about messages after bot starts
@@ -234,6 +237,9 @@ public class MatrixRobobot {
                             
                             // Process consecutive "ok" messages
                             okReactionService.processMessage(roomId, eventId, body, sender, msgtype);
+
+                            // Verify @autoplayerbot downtime reports in export room
+                            downtimeService.processMessage(roomId, eventId, body, sender, config.exportRoomId);
 
                             // PRIMARY: !last command
                             if ("!last".equals(trimmed)) {
