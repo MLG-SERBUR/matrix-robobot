@@ -27,4 +27,17 @@ class AIServiceTest {
         assertEquals("none", payload.get("reasoning_effort"));
         assertEquals(0, payload.get("thinking_token_budget"));
     }
+
+    @Test
+    void groqQwenDefaultsDisableThinking() {
+        for (String model : new String[]{"qwen/qwen3-32b", "qwen/qwen3.6-27b", "qwen/qwen3.8-27b"}) {
+            org.junit.jupiter.api.Assertions.assertTrue(AIService.isGroqQwenModel(model), model);
+            Map<String, Object> payload = new HashMap<>();
+            AIService.applyGroqQwenNonThinkingDefaults(payload);
+
+            assertEquals("none", payload.get("reasoning_effort"));
+            assertEquals(Map.of("enable_thinking", false), payload.get("chat_template_kwargs"));
+            org.junit.jupiter.api.Assertions.assertFalse(payload.containsKey("reasoning_format"));
+        }
+    }
 }

@@ -267,7 +267,13 @@ public class AIService {
     }
 
     public static void applyGroqQwenNonThinkingDefaults(Map<String, Object> payload) {
+        // No reasoning to format: reasoning_effort="none" disables thinking entirely
+        // (Groq docs: qwen3 models support none/default), so reasoning_format is omitted.
         payload.put("reasoning_effort", "none");
+        // Underlying vLLM template also respects chat_template_kwargs.enable_thinking=false
+        // (see Qwen3, Featherless, vLLM docs). Ensures true non-thinking mode, avoids
+        // hidden reasoning time and <think> leaks on dot-version models (qwen3.6/3.8).
+        payload.put("chat_template_kwargs", Map.of("enable_thinking", false));
     }
 
     private static class ProviderConfig {
