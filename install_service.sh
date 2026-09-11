@@ -67,7 +67,8 @@ WorkingDirectory=$WORK_DIR
 # Try to pull latest changes first (ignoring failure if offline)
 # ExecStartPre=-$GIT_BIN pull
 # ExecStartPre=$MVN_BIN clean package
-ExecStart=$JAVA_BIN -jar $WORK_DIR/$JAR_FILE
+Environment=MALLOC_ARENA_MAX=2
+ExecStart=$JAVA_BIN -Xms64m -Xmx384m -XX:+UseSerialGC -Xss512k -XX:ReservedCodeCacheSize=64m -XX:MaxMetaspaceSize=128m -Xshare:auto -jar $WORK_DIR/$JAR_FILE
 Restart=always
 RestartSec=10
 StandardOutput=journal
