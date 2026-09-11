@@ -1,10 +1,8 @@
 package com.robomwm.ai.matrixrobobot;
 
-import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -31,9 +29,6 @@ public class RoomHistoryManager {
     private static final DateTimeFormatter LEGACY_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter AI_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter AI_TIME_FORMATTER = DateTimeFormatter.ofPattern("H:mm");
-    private static final String ARLIAI_TOKENIZER_RESOURCE = "/tokenizers/arliai-tokenizer.json";
-    private static final double TOKEN_SAFETY_MARGIN = 1.0; // calibration manager handles margin
-    private static final HuggingFaceTokenizer AI_TOKENIZER = loadTokenizer();
 
     @FunctionalInterface
     public interface ProgressCallback {
@@ -1030,7 +1025,6 @@ public class RoomHistoryManager {
 
     /**
      * Estimates prompt tokens using heuristic + self-calibration.
-     * Keeps vendored tokenizer as fallback but primary is aggressive heuristic.
      */
     public static int estimateTokens(String text) {
         return estimateTokens(text, (String) null);
@@ -1039,16 +1033,7 @@ public class RoomHistoryManager {
     /** Per-model estimate using that model's tokenizer-family calibration factor. */
     public static int estimateTokens(String text, String model) {
         if (text == null || text.isEmpty()) return 0;
-        // Use calibrated heuristic (aggressive). If calibration not yet converged, still better than
-        // Java tokenizer mismatch. Keep tokenizer as sanity floor: take max of both.
-        int heuristic = TokenCalibrationManager.getInstance().estimateTokens(text, model);
-        try {
-            int tokenCount = AI_TOKENIZER.encode(text, false, false).getIds().length;
-            int tokenizerEst = (int) Math.ceil(tokenCount * TOKEN_SAFETY_MARGIN);
-            return Math.max(heuristic, tokenizerEst);
-        } catch (Exception e) {
-            return heuristic;
-        }
+        return TokenCalibrationManager.getInstance().estimateTokens(text, model);
     }
 
     /**
@@ -1072,19 +1057,6 @@ public class RoomHistoryManager {
 
     private static int estimateLogLineTokens(String line, String model) {
         return estimateTokens(line + "\n", model);
-    }
-
-    private static HuggingFaceTokenizer loadTokenizer() {
-        try (var stream = RoomHistoryManager.class.getResourceAsStream(ARLIAI_TOKENIZER_RESOURCE)) {
-            if (stream == null) {
-                throw new IllegalStateException("Missing tokenizer resource: " + ARLIAI_TOKENIZER_RESOURCE);
-            }
-            Map<String, String> options = new HashMap<>();
-            options.put("addSpecialTokens", "false");
-            return HuggingFaceTokenizer.newInstance(stream, options);
-        } catch (IOException e) {
-            throw new ExceptionInInitializerError(e);
-        }
     }
 
     /**

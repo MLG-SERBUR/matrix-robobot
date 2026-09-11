@@ -68,9 +68,10 @@ WorkingDirectory=$WORK_DIR
 # ExecStartPre=-$GIT_BIN pull
 # ExecStartPre=$MVN_BIN clean package
 Environment=MALLOC_ARENA_MAX=2
-ExecStart=$JAVA_BIN -Xms64m -Xmx384m -XX:+UseSerialGC -Xss512k -XX:ReservedCodeCacheSize=64m -XX:MaxMetaspaceSize=128m -Xshare:auto -jar $WORK_DIR/$JAR_FILE
+ExecStart=$JAVA_BIN -Xms32m -Xmx256m -XX:+UseSerialGC -Xss512k -XX:ReservedCodeCacheSize=48m -XX:MaxMetaspaceSize=96m -XX:MaxDirectMemorySize=64m -Xshare:auto -XX:+ExitOnOutOfMemoryError -jar $WORK_DIR/$JAR_FILE
 Restart=always
 RestartSec=10
+MemoryMax=350M
 StandardOutput=journal
 StandardError=journal
 
