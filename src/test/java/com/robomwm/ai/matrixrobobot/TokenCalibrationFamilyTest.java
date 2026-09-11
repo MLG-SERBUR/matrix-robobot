@@ -67,6 +67,25 @@ class TokenCalibrationFamilyTest {
     }
 
     @Test
+    void rawEstimateUsesPerFamilyMaxObservedBase() {
+        String gptModel = "openai/gpt-oss-120b";
+        String qwenModel = "qwen/qwen3.8-27b";
+        assertEquals(2.75, TokenCalibrationManager.baseCharsPerToken(gptModel));
+        assertEquals(2.46, TokenCalibrationManager.baseCharsPerToken(qwenModel));
+        assertEquals(2.75, TokenCalibrationManager.baseCharsPerToken(null));
+        assertEquals(0, TokenCalibrationManager.estimateRaw(""));
+        assertEquals(0, TokenCalibrationManager.estimateRaw(null, gptModel));
+        assertEquals(1, TokenCalibrationManager.estimateRaw("x", gptModel));
+        assertEquals(100, TokenCalibrationManager.estimateRaw("x".repeat(275), gptModel));
+        assertEquals(100, TokenCalibrationManager.estimateRaw("x".repeat(246), qwenModel));
+        // qwen base denser: same text yields more raw tokens than gpt
+        String text = "x".repeat(1000);
+        org.junit.jupiter.api.Assertions.assertTrue(
+                TokenCalibrationManager.estimateRaw(text, qwenModel)
+                        > TokenCalibrationManager.estimateRaw(text, gptModel));
+    }
+
+    @Test
     void tpmErrorExcludesOutputLimits() {
         String inputTpm = "Rate limit reached for model `qwen/qwen3.8-27b` on tokens per minute (TPM): Limit 7000, Used 5000, Requested 3000.";
         assertTrue(TokenCalibrationManager.isGroqTpmError(inputTpm));

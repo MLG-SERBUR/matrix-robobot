@@ -193,14 +193,39 @@ public class AIService {
         return GROQ_DEFAULT_IPTM_LIMIT;
     }
 
+    /** Observed ArliAI context window for the qwen fallback models. */
+    public static final int ARLIAI_INPUT_LIMIT = 12288;
+    // Free-tier per-request input budgets (researched Sep 2026; recheck when
+    // fallbacks start failing — providers change these without notice):
+    // Cerebras free trial: 30K uncached input TPM (official model docs).
+    public static final int CEREBRAS_INPUT_LIMIT = 30000;
+    // Gemini free: ~250K input TPM on Flash-class models (conservative floor;
+    // Lite models allow more). Context is 1M, TPM binds first.
+    public static final int GEMINI_INPUT_LIMIT = 250000;
+    // SambaNova free: no per-minute token cap published (20 RPM / 20 RPD /
+    // 200K TPD per model); binding per-request limit is model context, min
+    // 128K across configured models (DeepSeek-V3.1, Llama-3.3-70B).
+    public static final int SAMBANOVA_INPUT_LIMIT = 128000;
+    // Z.ai free Flash models (glm-4.7/4.5-flash, $0): ~200K context, no
+    // published TPM; context binds per request.
+    public static final int ZAI_INPUT_LIMIT = 200000;
+    // Cloudflare Workers AI: 300 RPM text-gen, 10K neurons/day free; no
+    // per-request token cap published, so model context binds
+    // (@cf/openai/gpt-oss-120b = 131K).
+    public static final int CLOUDFLARE_INPUT_LIMIT = 131072;
+    // Mistral free (Experiment), Ollama Cloud (GPU-time quotas), OpenRouter
+    // :free (model-dependent context), and local proxies have no usable
+    // published per-request token number -> unknown (null), never constrain.
     /**
-     * Target prompt size for unbound !ask gathering: 8k (Groq gpt limit).
-     * Only trim down when actually trying a model with a known lower limit
-     * (Groq qwen ~7k). Falls back to 8000 when Groq unused.
+     * Fetch ceiling for history gathering: the gather aborts the whole query
+     * past GATHER_TIMEOUT_MS, so budgets above this are unfetchable without a
+     * gather rework. Scales with the timeout (4x timeout -> 4x cap); revisit
+     * from failure rows if big-room pagination proves slower. Also the
+     * default when no chain attempt has a known limit.
      */
-    protected int targetPromptTokensForAsk() {
-        return GROQ_GPT_IPTM_LIMIT;
-    }
+    public static final int MAX_GATHER_BUDGET = 128000;
+    /** History-gather timeout: abort gather (and query) past this. */
+    public static final long GATHER_TIMEOUT_MS = 60000;
 
     /**
      * Known input limit requiring a trim for this attempt, or null when the
@@ -214,6 +239,41 @@ public class AIService {
             return GROQ_QWEN_IPTM_LIMIT;
         }
         return null;
+    }
+
+    /**
+     * Known input-token budget for an attempt, or null when unknown.
+     * Groq/ArliAI are observed values; Cerebras/Gemini are official free-tier
+     * TPM; SambaNova/ZAI/Cloudflare fall back to model context (no published
+     * per-request token cap). Unknown backends never constrain the gather.
+     */
+    static Integer knownInputLimitForAttempt(ProviderAttempt attempt) {
+        if (attempt == null || attempt.provider == null) return null;
+        switch (attempt.provider.backend) {
+            case GROQ: return groqIptmLimitForModel(attempt.model);
+            case ARLIAI: return ARLIAI_INPUT_LIMIT;
+            case CEREBRAS: return CEREBRAS_INPUT_LIMIT;
+            case GEMINI: return GEMINI_INPUT_LIMIT;
+            case SAMBANOVA: return SAMBANOVA_INPUT_LIMIT;
+            case ZAI: return ZAI_INPUT_LIMIT;
+            case CLOUDFLARE: return CLOUDFLARE_INPUT_LIMIT;
+            default: return null;
+        }
+    }
+
+    /**
+     * Initial gather budget for unbound !ask: the known limit of the first
+     * attempt with one (i.e. the model currently used first), capped at the
+     * fetch ceiling, so reordering the fallback chain needs no code change.
+     * Falls back to MAX_GATHER_BUDGET when no attempt has a known limit.
+     * Per-attempt trim/expand adjusts from here.
+     */
+    protected int gatherBudgetForChain(Backend preferredBackend, String forcedModel) {
+        for (ProviderAttempt attempt : buildProviderAttempts(preferredBackend, forcedModel)) {
+            Integer limit = knownInputLimitForAttempt(attempt);
+            if (limit != null) return Math.min(limit, MAX_GATHER_BUDGET);
+        }
+        return MAX_GATHER_BUDGET;
     }
 
     /**
@@ -371,7 +431,7 @@ public class AIService {
             long gatherStart = System.currentTimeMillis();
             java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                if (System.currentTimeMillis() - gatherStart > 15000) {
+                if (System.currentTimeMillis() - gatherStart > GATHER_TIMEOUT_MS) {
                     gatherTimedOut.set(true);
                     if (abortFlag != null) abortFlag.set(true);
                 }
@@ -381,10 +441,10 @@ public class AIService {
                     startEventId, endEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
-            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+            if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
                 String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                        gatherMsg + " Aborted: gathering took over " + (GATHER_TIMEOUT_MS / 1000) + " seconds (" + gatheredStr + " messages gathered).");
                 return;
             }
             if (abortFlag != null && abortFlag.get()) {
@@ -452,7 +512,7 @@ public class AIService {
             long gatherStart = System.currentTimeMillis();
             java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                if (System.currentTimeMillis() - gatherStart > 15000) {
+                if (System.currentTimeMillis() - gatherStart > GATHER_TIMEOUT_MS) {
                     gatherTimedOut.set(true);
                     if (abortFlag != null) abortFlag.set(true);
                 }
@@ -462,10 +522,10 @@ public class AIService {
                     startEventId, endEventId, forward, zoneId, maxMessages, abortFlag, progressCallback);
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
-            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+            if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
                 String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                        gatherMsg + " Aborted: gathering took over " + (GATHER_TIMEOUT_MS / 1000) + " seconds (" + gatheredStr + " messages gathered).");
                 return;
             }
             if (abortFlag != null && abortFlag.get()) {
@@ -524,13 +584,13 @@ public class AIService {
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer) {
-        performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, false, false);
+        performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, false, false, null, null);
     }
 
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
                                 Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer, boolean skipUserFilterRetry) {
-        performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, skipUserFilterRetry, false);
+        performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, footer, skipUserFilterRetry, false, null, null);
     }
 
     /**
@@ -565,15 +625,16 @@ public class AIService {
     }
 
     /**
-     * Proactively shrink {@code curLogs} to a model's known limit before trying
-     * it, so an 8k gpt gather fits a 7k qwen fallback without waiting for a
-     * TPM failure. No-op unless unbounded !ask and the attempt has a known
-     * restrictive limit. Sizing reuses computeTrimmedSize headroom logic.
+     * Proactively shrink {@code curLogs} to a model's known input limit before
+     * trying it, so a larger gather fits a smaller fallback without waiting
+     * for a TPM failure. No-op unless unbounded !ask, the attempt has a known
+     * limit, and the prompt exceeds it. Sizing reuses computeTrimmedSize
+     * headroom logic.
      */
     private String trimToKnownLimitIfNeeded(List<String> curLogs, String question,
             String promptPrefix, ProviderAttempt attempt, String currentPrompt, boolean canTrim) {
         if (!canTrim || curLogs.size() <= 10) return currentPrompt;
-        Integer knownLimit = knownTrimLimitForAttempt(attempt);
+        Integer knownLimit = knownInputLimitForAttempt(attempt);
         if (knownLimit == null) return currentPrompt;
         int est = RoomHistoryManager.estimateTokens(currentPrompt, attempt.model);
         if (est <= (int) (knownLimit * TRIM_HEADROOM_RATIO)) return currentPrompt;
@@ -587,9 +648,40 @@ public class AIService {
         return buildPrompt(question, curLogs, promptPrefix);
     }
 
+    /**
+     * Proactively grow {@code curLogs} toward a model's known input limit
+     * before trying it, so falling back to a larger budget (e.g. ArliAI 12k
+     * after a Groq 8k gather) uses the extra headroom instead of leaving it
+     * empty. Re-gathers from the original token; keeps existing logs when the
+     * fetch adds nothing. No-op unless unbounded !ask and the prompt is
+     * already well under the attempt's limit.
+     */
+    private String expandToKnownLimitIfNeeded(String exportRoomId, String fromToken, List<String> curLogs,
+            String question, String promptPrefix, ZoneId zoneId, ProviderAttempt attempt,
+            String currentPrompt, boolean canExpand, java.util.concurrent.atomic.AtomicBoolean abortFlag) {
+        if (!canExpand || zoneId == null) return currentPrompt;
+        Integer knownLimit = knownInputLimitForAttempt(attempt);
+        if (knownLimit == null) return currentPrompt;
+        int est = RoomHistoryManager.estimateTokens(currentPrompt, attempt.model);
+        if (est >= (int) (knownLimit * TRIM_HEADROOM_RATIO)) return currentPrompt;
+        int baseTokens = estimateTokensConservativeForAsk(buildPrompt(question, new ArrayList<>(), promptPrefix)) + 20;
+        // Capped: budgets above the fetch ceiling would blow the 15s gather
+        // timeout and abort the query instead of returning partial history.
+        int tokenLimit = Math.max(1000, Math.min(knownLimit - baseTokens, MAX_GATHER_BUDGET));
+        RoomHistoryManager.ChatLogsResult expanded = historyManager.fetchRoomHistoryUntilLimit(
+                exportRoomId, fromToken, tokenLimit, true, zoneId, true, abortFlag, null, attempt.model);
+        if (expanded == null || expanded.logs == null || expanded.logs.size() <= curLogs.size()) return currentPrompt;
+        curLogs.clear();
+        curLogs.addAll(expanded.logs);
+        System.out.println("Expanded gather for known limit " + knownLimit + " (" + attempt.model
+                + "): estimated " + est + " tokens, expanded to " + curLogs.size() + " messages...");
+        return buildPrompt(question, curLogs, promptPrefix);
+    }
+
     protected void performAIQuery(String responseRoomId, String exportRoomId, RoomHistoryManager.ChatLogsResult history,
                                 String question, String promptPrefix, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-                                Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer, boolean skipUserFilterRetry, boolean calibrationRetryDone) {
+                                Backend preferredBackend, String forcedModel, int timeoutSeconds, String statusEventId, String footer, boolean skipUserFilterRetry, boolean calibrationRetryDone,
+                                String gatherFromToken, ZoneId gatherZoneId) {
         if (abortFlag != null && abortFlag.get()) return;
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
 
@@ -597,8 +689,8 @@ public class AIService {
         // Replies to bot carry bounded start/end eventIds (count-like) -> should fail over, not truncate
         boolean canTrimAsk = isAsk && isUnboundedAskReply();
         boolean skipSystem = isAsk || Prompts.DEBUGAI_PREFIX.equals(promptPrefix);
-        // Mutable log window: gathered at 8k (gpt limit); only shrinks when trying
-        // a model with a known lower limit (Groq qwen 7k).
+        // Mutable log window: starts at the chain-aware gather budget, then
+        // shrinks/grows per attempt to match the model currently used.
         List<String> curLogs = new ArrayList<>(history.logs);
         String prompt = buildPrompt(question, curLogs, promptPrefix);
         final String firstEventId = history.firstEventId;
@@ -614,8 +706,10 @@ public class AIService {
 
             ProviderAttempt attempt = attempts.get(i);
             ProviderConfig provider = attempt.provider;
-            // Unbounded !ask gathers to 8k; shrink to 7k before trying Groq qwen.
+            // Unbounded !ask: fit the window to the model currently used.
             prompt = trimToKnownLimitIfNeeded(curLogs, question, promptPrefix, attempt, prompt, canTrimAsk);
+            prompt = expandToKnownLimitIfNeeded(exportRoomId, gatherFromToken, curLogs, question,
+                    promptPrefix, gatherZoneId, attempt, prompt, canTrimAsk, abortFlag);
             
             String answer;
             try {
@@ -1438,7 +1532,7 @@ public class AIService {
             long gatherStart = System.currentTimeMillis();
             java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                if (System.currentTimeMillis() - gatherStart > 15000) {
+                if (System.currentTimeMillis() - gatherStart > GATHER_TIMEOUT_MS) {
                     gatherTimedOut.set(true);
                     if (abortFlag != null) abortFlag.set(true);
                 }
@@ -1449,10 +1543,10 @@ public class AIService {
                     zoneId, true, abortFlag, progressCallback);
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
-            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+            if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
                 String gatheredStr = result != null && result.logs != null ? String.valueOf(result.logs.size()) : "0";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                        gatherMsg + " Aborted: gathering took over " + (GATHER_TIMEOUT_MS / 1000) + " seconds (" + gatheredStr + " messages gathered).");
                 return;
             }
             if (abortFlag != null && abortFlag.get()) {
@@ -1511,7 +1605,7 @@ public class AIService {
             long gatherStart = System.currentTimeMillis();
             java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                if (System.currentTimeMillis() - gatherStart > 15000) {
+                if (System.currentTimeMillis() - gatherStart > GATHER_TIMEOUT_MS) {
                     gatherTimedOut.set(true);
                     if (abortFlag != null) abortFlag.set(true);
                 }
@@ -1522,10 +1616,10 @@ public class AIService {
                     zoneId, true, abortFlag, progressCallback);
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
-            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+            if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
                 String gatheredStr = result != null && result.logs != null ? String.valueOf(result.logs.size()) : "0";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                        gatherMsg + " Aborted: gathering took over " + (GATHER_TIMEOUT_MS / 1000) + " seconds (" + gatheredStr + " messages gathered).");
                 return;
             }
             if (abortFlag != null && abortFlag.get()) {
@@ -1570,8 +1664,9 @@ public class AIService {
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            // Gather to 8k (Groq gpt limit); only trim when trying Groq qwen (~7k).
-            int targetPromptTokens = targetPromptTokensForAsk();
+            // Gather to the first chained model's known input limit (chain-aware,
+            // no hardcoded budget); per-attempt trim/expand adjusts from here.
+            int targetPromptTokens = gatherBudgetForChain(preferredBackend, forcedModel);
 
             // Account for the user prompt, including the question. No system prompt for ask.
             // Estimate conservatively across Groq fallback families (qwen tokenizes differently than gpt).
@@ -1587,7 +1682,7 @@ public class AIService {
             long gatherStart = System.currentTimeMillis();
             java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                if (System.currentTimeMillis() - gatherStart > 15000) {
+                if (System.currentTimeMillis() - gatherStart > GATHER_TIMEOUT_MS) {
                     gatherTimedOut.set(true);
                     if (abortFlag != null) abortFlag.set(true);
                 }
@@ -1597,10 +1692,10 @@ public class AIService {
                     fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
-            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+            if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
                 String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                        gatherMsg + " Aborted: gathering took over " + (GATHER_TIMEOUT_MS / 1000) + " seconds (" + gatheredStr + " messages gathered).");
                 return;
             }
             if (abortFlag != null && abortFlag.get()) {
@@ -1621,7 +1716,7 @@ public class AIService {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null, false, false, fromToken, zoneId);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -1644,7 +1739,7 @@ public class AIService {
 
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            int targetPromptTokens = targetPromptTokensForAsk();
+            int targetPromptTokens = gatherBudgetForChain(preferredBackend, forcedModel);
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20;
             int baseTokens = estimateTokensConservativeForAsk(emptyPrompt) +
@@ -1657,7 +1752,7 @@ public class AIService {
             long gatherStart = System.currentTimeMillis();
             java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                if (System.currentTimeMillis() - gatherStart > 15000) {
+                if (System.currentTimeMillis() - gatherStart > GATHER_TIMEOUT_MS) {
                     gatherTimedOut.set(true);
                     if (abortFlag != null) abortFlag.set(true);
                 }
@@ -1667,10 +1762,10 @@ public class AIService {
                     fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
-            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+            if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
                 String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                        gatherMsg + " Aborted: gathering took over " + (GATHER_TIMEOUT_MS / 1000) + " seconds (" + gatheredStr + " messages gathered).");
                 return;
             }
             if (abortFlag != null && abortFlag.get()) {
@@ -1695,7 +1790,7 @@ public class AIService {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null, true);
+            performAIQuery(responseRoomId, exportRoomId, history, question, promptPrefix, abortFlag, preferredBackend, forcedModel, timeoutSeconds, statusEventId, null, true, false, fromToken, zoneId);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -1977,7 +2072,7 @@ public class AIService {
                              java.util.concurrent.atomic.AtomicBoolean abortFlag, ZoneId zoneId) {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
-            int targetPromptTokens = targetPromptTokensForAsk();
+            int targetPromptTokens = gatherBudgetForChain(Backend.AUTO, null);
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), Prompts.ASK_PREFIX);
             int chatFormatOverhead = 20;
             int baseTokens = estimateTokensConservativeForAsk(emptyPrompt) +
@@ -1990,7 +2085,7 @@ public class AIService {
             long gatherStart = System.currentTimeMillis();
             java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                if (System.currentTimeMillis() - gatherStart > 15000) {
+                if (System.currentTimeMillis() - gatherStart > GATHER_TIMEOUT_MS) {
                     gatherTimedOut.set(true);
                     if (abortFlag != null) abortFlag.set(true);
                 }
@@ -2000,10 +2095,10 @@ public class AIService {
                     null, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
-            if (gatherTimedOut.get() || gatherElapsed > 15000) {
+            if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
                 String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        gatherMsg + " Aborted: gathering took over 15 seconds (" + gatheredStr + " messages gathered).");
+                        gatherMsg + " Aborted: gathering took over " + (GATHER_TIMEOUT_MS / 1000) + " seconds (" + gatheredStr + " messages gathered).");
                 return;
             }
             if (abortFlag != null && abortFlag.get()) {
@@ -2034,7 +2129,7 @@ public class AIService {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
 
-            performAIQuery(responseRoomId, exportRoomId, history, question, Prompts.ASK_PREFIX, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null);
+            performAIQuery(responseRoomId, exportRoomId, history, question, Prompts.ASK_PREFIX, abortFlag, Backend.AUTO, null, AI_TIMEOUT_SECONDS, statusEventId, null, false, false, null, zoneId);
 
         } catch (Exception e) {
             e.printStackTrace();

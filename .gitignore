@@ -96,3 +96,4 @@ autotopiclist_enabled_users.json
 autolast_read_info.json
 token_calibration.json
 token_calibration_history.jsonl
+token_calibration_history.pre-simplify.jsonl

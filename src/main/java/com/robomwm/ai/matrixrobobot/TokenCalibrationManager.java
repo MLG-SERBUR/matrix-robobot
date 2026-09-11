@@ -13,7 +13,8 @@ import java.util.regex.Pattern;
 
 /**
  * Heuristic estimator + self-calibrating factor persisted to disk.
- * Aggressive initially (factor=1.0, chars/4), then retries with less on 403 context length.
+ * Base is plain length/max-observed-chars-per-token per family (gpt 2.75,
+ * qwen 2.46), then retries with less on 403 context length.
  * EMA update: factor = factor*(1-ALPHA) + ratio*ALPHA where ratio = actual/estimatedRaw.
  *
  * Factors are stored per tokenizer family because token counts differ consistently
@@ -36,16 +37,16 @@ public class TokenCalibrationManager {
     private static final Pattern CONTEXT_PATTERN = Pattern.compile("\\((\\d+)\\s*/\\s*\\d+\\s*\\)");
     private static final Pattern GROQ_REQUESTED_PATTERN = Pattern.compile("Requested\\s+(\\d+)");
     private static final Pattern GROQ_LIMIT_PATTERN = Pattern.compile("Limit\\s+(\\d+)");
-    private static final Pattern CJK_PATTERN = Pattern.compile(
-            "[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef\uac00-\ud7af]");
-    private static final Pattern URL_PATTERN = Pattern.compile("https?://\\S+");
-    private static final Pattern CODE_PATTERN = Pattern.compile(
-            "(?:def |class |function |const |let |var |import |from |if \\(|for \\(|while \\(|=>|->|\\{\\{|\\}\\}|;$)",
-            Pattern.MULTILINE);
 
-    private static final double CHARS_PER_TOKEN = 4.0;
-    private static final double CHARS_PER_TOKEN_CODE = 3.5;
-    private static final double CHARS_PER_TOKEN_CJK = 1.5;
+    // Base estimator: plain chars/token, one constant per tokenizer family.
+    // Values are the max observed chars/token from failure history (rounded):
+    // gpt max 2.751 (mean 2.621, n=12), qwen max 2.460 (mean 2.407, n=13).
+    // Max = aggressive start (gather most context); failure-only feedback can
+    // only ratchet the factor upward, so starting hot maximizes context while
+    // staying self-correcting. Per-family factor absorbs drift/content mix.
+    private static final double CHARS_PER_TOKEN_DEFAULT = 2.75;
+    private static final double CHARS_PER_TOKEN_QWEN = 2.46;
+    private static final double CHARS_PER_TOKEN_GPT = 2.75;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, Double> factors = new HashMap<>();
@@ -156,35 +157,23 @@ public class TokenCalibrationManager {
         return samples.getOrDefault(familyForModel(model), 0);
     }
 
-    /** Heuristic raw estimate without calibration, aggressive. */
+    /** Base chars/token for a model (per tokenizer family, max-observed). */
+    public static double baseCharsPerToken(String model) {
+        String family = familyForModel(model);
+        if (FAMILY_QWEN.equals(family)) return CHARS_PER_TOKEN_QWEN;
+        if (FAMILY_GPT.equals(family)) return CHARS_PER_TOKEN_GPT;
+        return CHARS_PER_TOKEN_DEFAULT;
+    }
+
+    /** Heuristic raw estimate without calibration: plain length/base. */
     public static int estimateRaw(String text) {
+        return estimateRaw(text, (String) null);
+    }
+
+    /** Per-family raw estimate; family base keeps history ratios comparable. */
+    public static int estimateRaw(String text, String model) {
         if (text == null || text.isEmpty()) return 0;
-        int cjkChars = 0;
-        Matcher m = CJK_PATTERN.matcher(text);
-        while (m.find()) cjkChars++;
-        int otherChars = text.length() - cjkChars;
-
-        double ratio = CHARS_PER_TOKEN;
-        // detect code-heavy
-        if (text.contains("```") || CODE_PATTERN.matcher(text).find()) {
-            // if >2 code indicators per KB, treat as code
-            long codeHits = CODE_PATTERN.matcher(text).results().count();
-            if (codeHits > text.length() / 500.0) ratio = CHARS_PER_TOKEN_CODE;
-        }
-
-        double tokens = cjkChars / CHARS_PER_TOKEN_CJK + otherChars / ratio;
-
-        // URL overhead: each URL component costs extra ~2 tokens per & and /
-        Matcher um = URL_PATTERN.matcher(text);
-        while (um.find()) {
-            String url = um.group();
-            // count extra tokens for URL density (urls tokenize ~2 chars/token vs 4)
-            double urlTokensHeuristic = url.length() / 2.0;
-            double urlTokensProse = url.length() / ratio;
-            tokens += (urlTokensHeuristic - urlTokensProse);
-        }
-
-        return Math.max(1, (int) Math.ceil(tokens));
+        return Math.max(1, (int) Math.ceil(text.length() / baseCharsPerToken(model)));
     }
 
     /** Calibrated estimate used by RoomHistoryManager (default family, backward compat). */
@@ -192,9 +181,9 @@ public class TokenCalibrationManager {
         return estimateTokens(text, (String) null);
     }
 
-    /** Calibrated estimate for a specific model (per-family factor). */
+    /** Calibrated estimate for a specific model (per-family base + factor). */
     public int estimateTokens(String text, String model) {
-        int raw = estimateRaw(text);
+        int raw = estimateRaw(text, model);
         return (int) Math.ceil(raw * getFactor(model));
     }
 
@@ -203,15 +192,13 @@ public class TokenCalibrationManager {
      * estimate, so gathered history fits the most restrictive tokenizer family.
      */
     public int estimateTokensConservative(String text, Collection<String> models) {
-        int raw = estimateRaw(text);
-        if (raw == 0) return 0;
-        double maxFactor = getFactor((String) null);
+        int best = estimateTokens(text, (String) null);
         if (models != null) {
             for (String m : models) {
-                maxFactor = Math.max(maxFactor, getFactor(m));
+                best = Math.max(best, estimateTokens(text, m));
             }
         }
-        return (int) Math.ceil(raw * maxFactor);
+        return best;
     }
 
     public static boolean isContextLengthError(String errorMsg) {
@@ -322,8 +309,9 @@ public class TokenCalibrationManager {
             System.out.println("Calibration: could not parse actual tokens from: " + errorMsg);
             return old;
         }
-        int estimatedRaw = estimateRaw(prompt);
+        int estimatedRaw = estimateRaw(prompt, model);
         if (estimatedRaw == 0) return old;
+        double rawBase = baseCharsPerToken(model);
         int estimatedCalibrated = (int) Math.ceil(estimatedRaw * old);
         double ratio = (double) actual / estimatedRaw;
         double rawRatio = ratio;
@@ -341,19 +329,20 @@ public class TokenCalibrationManager {
                 " rawRatio=" + String.format("%.4f", rawRatio) + " clampedRatio=" + String.format("%.4f", ratio) + " factor " + String.format("%.4f", old) + " -> " + String.format("%.4f", factor) +
                 " promptChars=" + (prompt != null ? prompt.length() : 0);
         System.out.println(detail);
-        appendHistory(family, model, estimatedRaw, estimatedCalibrated, old, actual, limit, rawRatio, ratio, factor, prompt != null ? prompt.length() : 0);
+        appendHistory(family, model, estimatedRaw, rawBase, estimatedCalibrated, old, actual, limit, rawRatio, ratio, factor, prompt != null ? prompt.length() : 0);
         samples.put(family, samples.getOrDefault(family, 0) + 1);
         saveFactors();
         return factor;
     }
 
-    private synchronized void appendHistory(String family, String model, int estimatedRaw, int estimatedCalibrated, double oldFactor, int actual, Integer limit, double rawRatio, double clampedRatio, double newFactor, int promptChars) {
+    private synchronized void appendHistory(String family, String model, int estimatedRaw, double rawBase, int estimatedCalibrated, double oldFactor, int actual, Integer limit, double rawRatio, double clampedRatio, double newFactor, int promptChars) {
         try {
             java.util.Map<String, Object> entry = new java.util.LinkedHashMap<>();
             entry.put("timestamp", java.time.Instant.now().toString());
             entry.put("family", family);
             if (model != null) entry.put("model", model);
             entry.put("estimatedRaw", estimatedRaw);
+            entry.put("rawBase", rawBase);
             entry.put("estimatedCalibrated", estimatedCalibrated);
             entry.put("oldFactor", oldFactor);
             entry.put("actual", actual);
