@@ -40,8 +40,9 @@ class AIServiceTest {
             AIService.applyGroqQwenNonThinkingDefaults(payload);
 
             assertEquals("none", payload.get("reasoning_effort"));
-            assertEquals(Map.of("enable_thinking", false), payload.get("chat_template_kwargs"));
+            org.junit.jupiter.api.Assertions.assertFalse(payload.containsKey("chat_template_kwargs"));
             org.junit.jupiter.api.Assertions.assertFalse(payload.containsKey("reasoning_format"));
+            org.junit.jupiter.api.Assertions.assertFalse(payload.containsKey("include_reasoning"));
         }
     }
 
