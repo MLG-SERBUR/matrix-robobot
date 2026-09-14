@@ -420,17 +420,24 @@ public class AIService {
         return text;
     }
 
-    private void checkHardRefusalWithSafeguard(String prompt, String errorMsg, String refusingProvider,
+    private String checkHardRefusalWithSafeguard(String prompt, String errorMsg, String refusingProvider,
             String refusingModel) {
-        if (errorMsg == null || !errorMsg.contains("hard refusal")) return;
+        if (errorMsg == null || !errorMsg.contains("hard refusal")) return null;
         try {
             String verdict = AIRequestQueue.run("Groq safeguard (" + SAFEGUARD_MODEL + ")",
                     () -> querySafeguardModel(prompt));
             System.err.println("SAFEGUARD verdict for hard refusal by "
                     + refusingProvider + " (" + refusingModel + "): " + verdict);
+            if (verdict != null && verdict.length() > 2000) {
+                verdict = verdict.substring(0, 2000) + "... [TRUNCATED]";
+            }
+            return "Safeguard (" + SAFEGUARD_MODEL + ") verdict on refusal by "
+                    + refusingProvider + " (" + refusingModel + "): " + verdict;
         } catch (Exception se) {
             System.err.println("SAFEGUARD check failed for hard refusal by "
                     + refusingProvider + " (" + refusingModel + "): " + se.getMessage());
+            return "Safeguard (" + SAFEGUARD_MODEL + ") check failed for refusal by "
+                    + refusingProvider + " (" + refusingModel + "): " + se.getMessage();
         }
     }
 
@@ -782,10 +789,13 @@ public class AIService {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                checkHardRefusalWithSafeguard(prompt, errorMsg, provider.displayName, attempt.model);
-                
+
                 String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
+                String safeguardLine = checkHardRefusalWithSafeguard(prompt, errorMsg, provider.displayName, attempt.model);
+                if (safeguardLine != null && !safeguardLine.isBlank()) {
+                    statusUpdate = appendStatusLine(statusUpdate, errorPrefix + safeguardLine);
+                }
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
                 
@@ -881,10 +891,13 @@ public class AIService {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                checkHardRefusalWithSafeguard(prompt, errorMsg, provider.displayName, attempt.model);
-                
+
                 String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
+                String safeguardLine = checkHardRefusalWithSafeguard(prompt, errorMsg, provider.displayName, attempt.model);
+                if (safeguardLine != null && !safeguardLine.isBlank()) {
+                    statusUpdate = appendStatusLine(statusUpdate, errorPrefix + safeguardLine);
+                }
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
                 // Calibrate per model family on any TPM/context error; trim only known-limit attempts.
@@ -987,10 +1000,13 @@ public class AIService {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                checkHardRefusalWithSafeguard(prompt, errorMsg, provider.displayName, attempt.model);
-                
+
                 String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
+                String safeguardLine = checkHardRefusalWithSafeguard(prompt, errorMsg, provider.displayName, attempt.model);
+                if (safeguardLine != null && !safeguardLine.isBlank()) {
+                    statusUpdate = appendStatusLine(statusUpdate, errorPrefix + safeguardLine);
+                }
                 accumulatedStatus.setLength(0);
                 accumulatedStatus.append(statusUpdate);
                 // Calibrate per model family; trim only known-limit attempts like the main path.
