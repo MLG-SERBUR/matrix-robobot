@@ -40,6 +40,7 @@ class AIServiceTest {
             AIService.applyGroqQwenNonThinkingDefaults(payload);
 
             assertEquals("none", payload.get("reasoning_effort"));
+            assertEquals(AIService.GROQ_QWEN_MAX_TOKENS, payload.get("max_tokens"));
             org.junit.jupiter.api.Assertions.assertFalse(payload.containsKey("chat_template_kwargs"));
             org.junit.jupiter.api.Assertions.assertFalse(payload.containsKey("reasoning_format"));
             org.junit.jupiter.api.Assertions.assertFalse(payload.containsKey("include_reasoning"));

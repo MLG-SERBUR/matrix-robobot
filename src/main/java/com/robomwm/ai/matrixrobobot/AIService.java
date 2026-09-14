@@ -184,6 +184,8 @@ public class AIService {
     public static final int GROQ_QWEN_IPTM_LIMIT = 7000;
     public static final int GROQ_GPT_IPTM_LIMIT = 8000;
     public static final int GROQ_DEFAULT_IPTM_LIMIT = 8000;
+    /** Observed Groq OTPM (output) limit for qwen models: 1k (Sep 2026 journal: Requested 1077/1498 rejected). */
+    public static final int GROQ_QWEN_MAX_TOKENS = 1000;
     /** Headroom kept when trimming to a limit, so the retry fits under TPM/context. */
     public static final double TRIM_HEADROOM_RATIO = 0.85;
 
@@ -332,6 +334,15 @@ public class AIService {
         // chat_template_kwargs is not a Groq param, and reasoning_format/include_reasoning
         // only hide output while still burning reasoning tokens.
         payload.put("reasoning_effort", "none");
+        // OTPM limit 1k on qwen models: Groq bills declared max_tokens, so an
+        // unset/default max exceeds it (journal: Requested 1077/1498 rejected).
+        // Clamp any preset rather than overwriting a smaller explicit value.
+        Object existing = payload.get("max_tokens");
+        if (existing instanceof Number n) {
+            if (n.intValue() > GROQ_QWEN_MAX_TOKENS) payload.put("max_tokens", GROQ_QWEN_MAX_TOKENS);
+        } else {
+            payload.put("max_tokens", GROQ_QWEN_MAX_TOKENS);
+        }
     }
 
     private static class ProviderConfig {
