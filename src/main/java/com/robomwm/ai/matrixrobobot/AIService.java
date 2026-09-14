@@ -381,6 +381,21 @@ public class AIService {
         public static final String DEBUGAI_PREFIX = "\n\n";
     }
 
+    public static final String HARD_REFUSAL_EXACT = "I\u2019m sorry, but I can\u2019t help with that.";
+
+    static boolean isHardRefusal(String text) {
+        if (text == null) return false;
+        return text.trim().equals(HARD_REFUSAL_EXACT);
+    }
+
+    static void throwOnHardRefusal(String text, String providerName, String model) throws Exception {
+        if (isHardRefusal(text)) {
+            throw new Exception((providerName != null ? providerName : "AI provider")
+                    + (model != null ? " (" + model + ")" : "")
+                    + " returned hard refusal: " + HARD_REFUSAL_EXACT);
+        }
+    }
+
     public static final ThreadLocal<Map<String, Object>> threadExtraContent = new ThreadLocal<>();
 
     static Map<String, Object> buildHistoryContext(String exportRoomId, String startEventId, String endEventId,
@@ -715,6 +730,7 @@ public class AIService {
                     answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, firstEventId, abortFlag);
                 } else {
                     String raw = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    throwOnHardRefusal(raw, provider.displayName, attempt.model);
                     answer = appendMessageLink(raw, exportRoomId, firstEventId, provider.displayName, attempt.model);
                     if (footer != null && !footer.isEmpty()) answer = answer + "\n\n" + footer;
                 }
@@ -812,6 +828,7 @@ public class AIService {
                     answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, firstEventId, abortFlag);
                 } else {
                     String raw = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    throwOnHardRefusal(raw, provider.displayName, attempt.model);
                     answer = appendMessageLink(raw, exportRoomId, firstEventId, provider.displayName, attempt.model);
                     if (footer != null && !footer.isEmpty()) answer = answer + "\n\n" + footer;
                 }
@@ -917,6 +934,7 @@ public class AIService {
                     answer = fetchStreamingContent(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds, footer, exportRoomId, filteredHistory.firstEventId, abortFlag);
                 } else {
                     String raw = callNonStreaming(provider, prompt, attempt.model, skipSystem, isAsk, timeoutSeconds);
+                    throwOnHardRefusal(raw, provider.displayName, attempt.model);
                     answer = appendMessageLink(raw, exportRoomId, filteredHistory.firstEventId, provider.displayName, attempt.model);
                     if (footer != null && !footer.isEmpty()) answer = answer + "\n\n" + footer;
                 }
@@ -1354,6 +1372,8 @@ public class AIService {
             throw new Exception(aiName + " error: " + details + ".");
         }
 
+        throwOnHardRefusal(responseContent.toString(), aiName, actualModel);
+
         String finalOutput;
         if (responseContent.toString().trim().isEmpty()) {
             if (reasoning.length() > 0) {
@@ -1481,6 +1501,7 @@ public class AIService {
                                (gotDone ? "Stream ended with [DONE] but no content" : "Stream incomplete, no [DONE] received");
                 throw new Exception(provider.displayName + " error: " + details + ".");
             }
+            throwOnHardRefusal(responseContent.toString(), provider.displayName, model != null ? model : actualModel);
             String finalOutput;
             if (responseContent.toString().trim().isEmpty()) {
                 if (reasoning.length() > 0) {
@@ -1824,8 +1845,10 @@ public class AIService {
                 if (text == null || text.trim().isEmpty()) {
                     throw new Exception("No response from " + provider.displayName + " (" + model + ").");
                 }
+                throwOnHardRefusal(text, provider.displayName, model);
                 return text;
             } catch (Exception e) {
+                if (e.getMessage() != null && e.getMessage().contains("hard refusal")) throw e;
                 throw new Exception("Unexpected 200 response from " + provider.displayName + " (" + model
                         + "). Body: " + response.body(), e);
             }
