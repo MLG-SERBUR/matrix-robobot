@@ -396,44 +396,6 @@ public class AIService {
         }
     }
 
-    public static final String SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b";
-
-    private String querySafeguardModel(String prompt) throws Exception {
-        ProviderConfig groq = getProviderConfig(Backend.GROQ);
-        if (groq == null || groq.apiKey == null || groq.apiKey.isEmpty()) {
-            throw new Exception("GROQ_API_KEY not configured, skipping safeguard");
-        }
-        HttpRequest request = buildChatCompletionRequest(groq, prompt, SAFEGUARD_MODEL, true, false, false, 120);
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            throw new Exception("Safeguard HTTP " + response.statusCode() + ": " + response.body());
-        }
-        JsonNode root = mapper.readTree(response.body());
-        JsonNode choice = root.path("choices").get(0);
-        if (choice == null) {
-            throw new Exception("Safeguard missing 'choices' array. Body: " + response.body());
-        }
-        String text = choice.path("message").path("content").asText(null);
-        if (text == null || text.trim().isEmpty()) {
-            throw new Exception("Safeguard empty response. Body: " + response.body());
-        }
-        return text;
-    }
-
-    private void checkHardRefusalWithSafeguard(String prompt, String errorMsg, String refusingProvider,
-            String refusingModel) {
-        if (errorMsg == null || !errorMsg.contains("hard refusal")) return;
-        try {
-            String verdict = AIRequestQueue.run("Groq safeguard (" + SAFEGUARD_MODEL + ")",
-                    () -> querySafeguardModel(prompt));
-            System.err.println("SAFEGUARD verdict for hard refusal by "
-                    + refusingProvider + " (" + refusingModel + "): " + verdict);
-        } catch (Exception se) {
-            System.err.println("SAFEGUARD check failed for hard refusal by "
-                    + refusingProvider + " (" + refusingModel + "): " + se.getMessage());
-        }
-    }
-
     public static final ThreadLocal<Map<String, Object>> threadExtraContent = new ThreadLocal<>();
 
     static Map<String, Object> buildHistoryContext(String exportRoomId, String startEventId, String endEventId,
@@ -782,7 +744,6 @@ public class AIService {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                checkHardRefusalWithSafeguard(prompt, errorMsg, provider.displayName, attempt.model);
                 
                 String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
@@ -881,7 +842,6 @@ public class AIService {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                checkHardRefusalWithSafeguard(prompt, errorMsg, provider.displayName, attempt.model);
                 
                 String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
@@ -987,7 +947,6 @@ public class AIService {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
                 String errorPrefix = (footer != null ? footer + ": " : "");
                 System.out.println(errorPrefix + provider.displayName + " (" + attempt.model + ") failed: " + errorMsg);
-                checkHardRefusalWithSafeguard(prompt, errorMsg, provider.displayName, attempt.model);
                 
                 String failureLine = provider.noticeName + " (" + attempt.model + ") failed: " + errorMsg;
                 String statusUpdate = appendStatusLine(accumulatedStatus.toString(), errorPrefix + failureLine);
