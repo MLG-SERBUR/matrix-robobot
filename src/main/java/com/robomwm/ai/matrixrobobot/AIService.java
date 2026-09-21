@@ -952,7 +952,7 @@ public class AIService {
                 if (accumulatedStatus.length() > 0) {
                     matrixClient.sendNoticeWithEventId(responseRoomId, accumulatedStatus.toString());
                 }
-                matrixClient.sendMarkdownWithEventId(responseRoomId, answer);
+                matrixClient.sendMarkdownWithEventId(responseRoomId, answer, threadExtraContent.get());
                 return;
             } catch (Exception e) {
                 String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();

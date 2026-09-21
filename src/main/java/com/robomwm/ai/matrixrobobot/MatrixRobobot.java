@@ -66,7 +66,20 @@ public class MatrixRobobot {
 
     private static final Map<String, AtomicBoolean> runningOperations = new ConcurrentHashMap<>();
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
+        try {
+            runBot(args);
+        } catch (Throwable t) {
+            // An unhandled startup failure (e.g. DNS not yet available at boot)
+            // must not leave the JVM lingering after main dies, or the service
+            // manager would never see an exit and Restart=always would not fire.
+            t.printStackTrace();
+            System.err.println("Matrix Robobot failed to start. Exiting so the service manager can restart us.");
+            System.exit(1);
+        }
+    }
+
+    private static void runBot(String[] args) throws Exception {
         String configPath = args.length > 0 ? args[0] : "config.json";
         Config config = loadConfig(configPath);
 
@@ -346,6 +359,46 @@ public class MatrixRobobot {
                                                                     aiService.queryAIFiltered(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, true, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
                                                                 } else {
                                                                     aiService.queryAI(responseRoomId, fRoom, fHours, null, fQuestion, fStart, fEnd, true, zoneId, fMax, AIService.Prompts.ASK_PREFIX, abortFlag, AIService.Backend.AUTO);
+                                                                }
+                                                            } finally {
+                                                                runningOperations.remove(sender);
+                                                            }
+                                                        }).start();
+                                                        isAskReplyHandled = true;
+                                                    } else {
+                                                        // Unbounded (!ask output carries start=null): still use
+                                                        // metadata (room/filter/timezone) with fresh token-limited gather.
+                                                        String ctxRoom = context.path("exportRoomId").asText(config.exportRoomId);
+                                                        boolean ctxFiltered = context.path("filtered").asBoolean(false);
+                                                        String ctxTimezone = context.path("timezone").asText(null);
+                                                        if ("null".equals(ctxTimezone)) ctxTimezone = null;
+                                                        System.out.println("!ask reply to bot detected (unbounded, filtered=" + ctxFiltered + ", timezone=" + ctxTimezone + ")! Using metadata with fresh gather...");
+                                                        AtomicBoolean abortFlag = new AtomicBoolean(false);
+                                                        runningOperations.put(sender, abortFlag);
+                                                        final String fRoom = ctxRoom;
+                                                        final boolean fFiltered = ctxFiltered;
+                                                        final String fTimezone = ctxTimezone;
+                                                        String question = actualBodyForAsk.replaceFirst("^!ask\\s*", "").trim();
+                                                        if (question.isEmpty()) question = null;
+                                                        final String fQuestion = question;
+                                                        new Thread(() -> {
+                                                            try {
+                                                                java.time.ZoneId zoneId = null;
+                                                                if (fTimezone != null && !fTimezone.isEmpty()) {
+                                                                    try {
+                                                                        zoneId = java.time.ZoneId.of(fTimezone);
+                                                                    } catch (Exception e) {
+                                                                        System.out.println("Invalid timezone in context: " + fTimezone + ", falling back to sender timezone");
+                                                                    }
+                                                                }
+                                                                if (zoneId == null) {
+                                                                    zoneId = timezoneService.getZoneIdForUser(sender);
+                                                                }
+                                                                if (zoneId == null) zoneId = java.time.ZoneId.of("UTC");
+                                                                if (fFiltered) {
+                                                                    aiService.queryAskFiltered(responseRoomId, fRoom, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
+                                                                } else {
+                                                                    aiService.queryAsk(responseRoomId, fRoom, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO, zoneId);
                                                                 }
                                                             } finally {
                                                                 runningOperations.remove(sender);

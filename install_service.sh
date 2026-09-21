@@ -59,7 +59,8 @@ echo -e "${BLUE}Configuring systemd service: $SERVICE_NAME...${NC}"
 # 5. Create the service file content
 SERVICE_CONTENT="[Unit]
 Description=Matrix Robobot Service
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 WorkingDirectory=$WORK_DIR
