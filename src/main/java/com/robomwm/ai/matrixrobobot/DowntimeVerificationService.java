@@ -83,6 +83,8 @@ public class DowntimeVerificationService {
     /**
      * Extract the first FQDN from the body. Returns null when none found.
      * Raw IPs never match (TLD must be alpha), so ICMP targets are ignored.
+     * Monitor prefixes (e.g. "0-5-" in "[0-5-mikuplushfarm.ovh]") are stripped
+     * so the probed host is the real domain.
      */
     static String extractFqdn(String body) {
         if (body == null) {
@@ -92,7 +94,8 @@ public class DowntimeVerificationService {
         if (!m.find()) {
             return null;
         }
-        return m.group(1).toLowerCase(Locale.ROOT);
+        String fqdn = m.group(1).toLowerCase(Locale.ROOT);
+        return NUMERIC_PREFIX_PATTERN.matcher(fqdn).replaceFirst("");
     }
 
     static String buildHealthUrl(String fqdn) {
@@ -105,8 +108,10 @@ public class DowntimeVerificationService {
     /**
      * Probe a health URL. 2xx-3xx counts as up, anything else (network error,
      * timeout, 4xx/5xx) counts as down.
+     * Returns null when the host cannot be resolved (DNS failure): the check
+     * is indeterminate, so the caller must skip reacting and only log.
      */
-    boolean isServiceUp(String healthUrl) {
+    Boolean isServiceUp(String healthUrl) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(healthUrl))
@@ -119,9 +124,35 @@ public class DowntimeVerificationService {
             int status = response.statusCode();
             return status >= 200 && status < 400;
         } catch (Exception e) {
+            if (isDnsFailure(e)) {
+                System.out.println("Downtime check unresolved host for " + healthUrl + ": " + e + ". Skipping reaction.");
+                return null;
+            }
             System.out.println("Downtime check failed for " + healthUrl + ": " + e.getMessage());
             return false;
         }
+    }
+
+    static boolean isDnsFailure(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof java.net.UnknownHostException) {
+                return true;
+            }
+            String msg = t.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase(Locale.ROOT);
+                if (lower.contains("could not resolve host")
+                        || lower.contains("cannot resolve host")
+                        || lower.contains("unknownhost")
+                        || lower.contains("unknown host")
+                        || lower.contains("name or service not known")
+                        || lower.contains("temporary failure in name resolution")
+                        || lower.contains("nxdomain")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -150,7 +181,11 @@ public class DowntimeVerificationService {
         }
         String healthUrl = buildHealthUrl(fqdn);
         new Thread(() -> {
-            boolean up = isServiceUp(healthUrl);
+            Boolean up = isServiceUp(healthUrl);
+            if (up == null) {
+                System.out.println("Downtime report for " + serviceName + " (" + fqdn + ") unresolved, no reaction sent.");
+                return;
+            }
             // Report claims down: ✅ = confirmed down, ❌ = actually up.
             String reaction = up ? REFUTED_DOWN_REACTION : CONFIRMED_DOWN_REACTION;
             System.out.println("Downtime report for " + serviceName + " (" + fqdn + ", up=" + up + ") -> " + reaction);
