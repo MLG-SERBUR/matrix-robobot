@@ -80,7 +80,7 @@ public class TextSearchService {
                 }
                 long now = System.currentTimeMillis();
                 if (now - lastProgressUpdate >= 10000L) {
-                    matrixClient.updateNoticeMessage(responseRoomId, originalEventId,
+                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, originalEventId,
                             state.renderPage() + "\n(searching...)");
                     lastProgressUpdate = now;
                 }
@@ -104,7 +104,7 @@ public class TextSearchService {
 
             searchCache.put(sender, state);
 
-            matrixClient.updateNoticeMessage(responseRoomId, originalEventId, state.renderPage());
+            matrixClient.updateMarkdownNoticeMessage(responseRoomId, originalEventId, state.renderPage());
 
         } catch (Exception e) {
             System.out.println("Failed to perform grep: " + e.getMessage());
@@ -149,7 +149,7 @@ public class TextSearchService {
                 }
                 long now = System.currentTimeMillis();
                 if (now - lastProgressUpdate >= 10000L) {
-                    matrixClient.updateNoticeMessage(responseRoomId, originalEventId,
+                    matrixClient.updateMarkdownNoticeMessage(responseRoomId, originalEventId,
                             state.renderPage() + "\n(searching...)");
                     lastProgressUpdate = now;
                 }
@@ -173,7 +173,7 @@ public class TextSearchService {
 
             searchCache.put(sender, state);
 
-            matrixClient.updateNoticeMessage(responseRoomId, originalEventId, state.renderPage());
+            matrixClient.updateMarkdownNoticeMessage(responseRoomId, originalEventId, state.renderPage());
 
         } catch (Exception e) {
             System.out.println("Failed to perform search: " + e.getMessage());
@@ -205,7 +205,7 @@ public class TextSearchService {
         if (targetPage < 1) return false;
 
         if (state.goToPage(targetPage)) {
-            matrixClient.updateNoticeMessage(state.responseRoomId, state.eventMessageId, state.renderPage());
+            matrixClient.updateMarkdownNoticeMessage(state.responseRoomId, state.eventMessageId, state.renderPage());
             return true;
         }
         return false;
