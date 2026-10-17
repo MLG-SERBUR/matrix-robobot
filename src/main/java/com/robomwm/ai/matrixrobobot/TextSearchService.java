@@ -63,7 +63,12 @@ public class TextSearchService {
                     pattern.toLowerCase(), true, "Grep", exportRoomId,
                     responseRoomId, originalEventId, zoneId, startTime, endTime, filterSenders);
 
-            fetchMoreResults(state);
+            // Fetch enough history for at least one result page (or until the requested window ends),
+            // matching !search's lazy pagination: keep scanning older batches until a page is filled
+            // or the lookback window is exhausted.
+            while (state.hasMoreResults && state.allResults.size() < TextSearchPaginationState.PAGE_SIZE) {
+                fetchMoreResults(state);
+            }
 
             if (state.allResults.isEmpty()) {
                 if (originalEventId != null) {
@@ -105,7 +110,12 @@ public class TextSearchService {
             TextSearchPaginationState state = new TextSearchPaginationState(sender, query, searchTerms,
                     exportRoomId, responseRoomId, originalEventId, zoneId, startTime, endTime, filterSenders);
 
-            fetchMoreResults(state);
+            // Fetch enough history for at least one result page (or until the requested window ends),
+            // matching !search's lazy pagination: keep scanning older batches until a page is filled
+            // or the lookback window is exhausted.
+            while (state.hasMoreResults && state.allResults.size() < TextSearchPaginationState.PAGE_SIZE) {
+                fetchMoreResults(state);
+            }
 
             if (state.allResults.isEmpty()) {
                 if (originalEventId != null) {
@@ -255,8 +265,16 @@ public class TextSearchService {
         }
 
         if (!state.reachedStart) {
-            state.nextBatch = root.path("end").asText(null);
-            state.hasMoreResults = state.nextBatch != null;
+            String newToken = root.path("end").asText(null);
+            // Guard against homeservers that repeat or omit the pagination token,
+            // which would otherwise spin forever.
+            if (newToken == null || newToken.equals(token)) {
+                state.nextBatch = null;
+                state.hasMoreResults = false;
+            } else {
+                state.nextBatch = newToken;
+                state.hasMoreResults = true;
+            }
         }
     }
 
