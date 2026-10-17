@@ -149,7 +149,8 @@ public class MatrixRobobot {
         
         // NEW: OkReactionService for consecutive "ok" reactions
         OkReactionService okReactionService = new OkReactionService(matrixClient);
-
+        // NEW: ShushReactionService for consecutive "Shush" reactions
+        ShushReactionService shushReactionService = new ShushReactionService(matrixClient);
         // NEW: DowntimeVerificationService for @autoplayerbot:matrix.org reports
         DowntimeVerificationService downtimeService = new DowntimeVerificationService(matrixClient);
 
@@ -251,6 +252,8 @@ public class MatrixRobobot {
                             // Process consecutive "ok" messages
                             okReactionService.processMessage(roomId, eventId, body, sender, msgtype);
 
+                            // Process consecutive "Shush" messages
+                            shushReactionService.processMessage(roomId, eventId, body, sender, msgtype);
                             // Verify @autoplayerbot downtime reports in export room
                             downtimeService.processMessage(roomId, eventId, body, sender, config.exportRoomId);
 
