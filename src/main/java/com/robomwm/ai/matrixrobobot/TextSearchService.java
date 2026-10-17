@@ -48,6 +48,7 @@ public class TextSearchService {
 
     public void performGrep(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
             String fromToken, String pattern, ZoneId zoneId, List<String> filterSenders) {
+        AtomicBoolean abortFlag = null;
         try {
             String timeInfo = "last " + hours + "h";
 
@@ -55,6 +56,9 @@ public class TextSearchService {
                     + ")...";
             String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
             String originalEventId = eventMessageId;
+
+            abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
 
             long startTime = System.currentTimeMillis() - (long) hours * 3600L * 1000L;
             long endTime = System.currentTimeMillis();
@@ -65,9 +69,25 @@ public class TextSearchService {
 
             // Fetch enough history for at least one result page (or until the requested window ends),
             // matching !search's lazy pagination: keep scanning older batches until a page is filled
-            // or the lookback window is exhausted.
-            while (state.hasMoreResults && state.allResults.size() < TextSearchPaginationState.PAGE_SIZE) {
+            // or the lookback window is exhausted. Update the status message at most every 10s so a
+            // long scan does not appear stuck.
+            long lastProgressUpdate = System.currentTimeMillis();
+            while (state.hasMoreResults && state.allResults.size() < TextSearchPaginationState.PAGE_SIZE && !abortFlag.get()) {
                 fetchMoreResults(state);
+                if (abortFlag.get()) {
+                    matrixClient.updateTextMessage(responseRoomId, originalEventId, "Search aborted.");
+                    return;
+                }
+                long now = System.currentTimeMillis();
+                if (now - lastProgressUpdate >= 10000L) {
+                    matrixClient.updateNoticeMessage(responseRoomId, originalEventId,
+                            state.renderPage() + "\n(searching...)");
+                    lastProgressUpdate = now;
+                }
+            }
+            if (abortFlag.get()) {
+                matrixClient.updateTextMessage(responseRoomId, originalEventId, "Search aborted.");
+                return;
             }
 
             if (state.allResults.isEmpty()) {
@@ -89,11 +109,14 @@ public class TextSearchService {
         } catch (Exception e) {
             System.out.println("Failed to perform grep: " + e.getMessage());
             matrixClient.sendText(responseRoomId, "Error performing grep: " + e.getMessage());
+        } finally {
+            if (abortFlag != null) runningOperations.remove(sender);
         }
     }
 
     public void performSearch(String roomId, String sender, String responseRoomId, String exportRoomId, int hours,
             String fromToken, String query, ZoneId zoneId, List<String> filterSenders) {
+        AtomicBoolean abortFlag = null;
         try {
             String timeInfo = "last " + hours + "h";
 
@@ -101,6 +124,9 @@ public class TextSearchService {
                     + ")...";
             String eventMessageId = matrixClient.sendNoticeWithEventId(responseRoomId, initialMessage);
             String originalEventId = eventMessageId;
+
+            abortFlag = new AtomicBoolean(false);
+            runningOperations.put(sender, abortFlag);
 
             String[] searchTerms = query.toLowerCase().split("\\s+");
 
@@ -112,9 +138,25 @@ public class TextSearchService {
 
             // Fetch enough history for at least one result page (or until the requested window ends),
             // matching !search's lazy pagination: keep scanning older batches until a page is filled
-            // or the lookback window is exhausted.
-            while (state.hasMoreResults && state.allResults.size() < TextSearchPaginationState.PAGE_SIZE) {
+            // or the lookback window is exhausted. Update the status message at most every 10s so a
+            // long scan does not appear stuck.
+            long lastProgressUpdate = System.currentTimeMillis();
+            while (state.hasMoreResults && state.allResults.size() < TextSearchPaginationState.PAGE_SIZE && !abortFlag.get()) {
                 fetchMoreResults(state);
+                if (abortFlag.get()) {
+                    matrixClient.updateTextMessage(responseRoomId, originalEventId, "Search aborted.");
+                    return;
+                }
+                long now = System.currentTimeMillis();
+                if (now - lastProgressUpdate >= 10000L) {
+                    matrixClient.updateNoticeMessage(responseRoomId, originalEventId,
+                            state.renderPage() + "\n(searching...)");
+                    lastProgressUpdate = now;
+                }
+            }
+            if (abortFlag.get()) {
+                matrixClient.updateTextMessage(responseRoomId, originalEventId, "Search aborted.");
+                return;
             }
 
             if (state.allResults.isEmpty()) {
@@ -136,7 +178,23 @@ public class TextSearchService {
         } catch (Exception e) {
             System.out.println("Failed to perform search: " + e.getMessage());
             matrixClient.sendText(responseRoomId, "Error performing search: " + e.getMessage());
+        } finally {
+            if (abortFlag != null) runningOperations.remove(sender);
         }
+    }
+
+    public boolean abortTextSearch(String sender) {
+        AtomicBoolean flag = runningOperations.get(sender);
+        if (flag != null) {
+            flag.set(true);
+            return true;
+        }
+        TextSearchPaginationState state = searchCache.get(sender);
+        if (state != null) {
+            state.abortFlag.set(true);
+            return true;
+        }
+        return false;
     }
 
     public boolean goToPage(String sender, int pageNum) {
@@ -164,11 +222,19 @@ public class TextSearchService {
                 "Loading more search results for page " + pageNum + "...");
 
         while (pageNum > state.getTotalPages() || (pageNum == state.getTotalPages() && state.hasMoreResults)) {
+            if (state.abortFlag.get()) {
+                matrixClient.updateTextMessage(state.responseRoomId, state.eventMessageId, "Search aborted.");
+                return -1;
+            }
             if (!state.hasMoreResults && pageNum > state.getTotalPages()) break;
             try {
                 fetchMoreResults(state);
             } catch (Exception e) {
                 System.out.println("Failed to load more search results: " + e.getMessage());
+                return -1;
+            }
+            if (state.abortFlag.get()) {
+                matrixClient.updateTextMessage(state.responseRoomId, state.eventMessageId, "Search aborted.");
                 return -1;
             }
             if (!state.hasMoreResults) break;
@@ -583,6 +649,7 @@ public class TextSearchService {
         String nextBatch;
         boolean reachedStart;
         boolean hasMoreResults;
+        final AtomicBoolean abortFlag = new AtomicBoolean(false);
 
         TextSearchPaginationState(String sender, String query, String[] searchTerms,
                 String exportRoomId, String responseRoomId, String eventMessageId,

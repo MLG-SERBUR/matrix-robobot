@@ -1007,8 +1007,11 @@ public class CommandDispatcher {
     private void handleAbort(String sender, String responseRoomId) {
         System.out.println("Received abort command from " + sender);
         AtomicBoolean abortFlag = runningOperations.get(sender);
-        if (abortFlag != null) {
-            abortFlag.set(true);
+        boolean textSearchAborted = textSearchService.abortTextSearch(sender);
+        if (abortFlag != null || textSearchAborted) {
+            if (abortFlag != null) {
+                abortFlag.set(true);
+            }
             matrixClient.sendText(responseRoomId, "Aborting your running operations (summaries, searches, etc.)...");
         } else {
             matrixClient.sendText(responseRoomId, "No running operations found to abort.");
