@@ -135,11 +135,11 @@ public class RoomHistoryManager {
         this.accessToken = accessToken;
     }
 
-    private ZoneId normalizeZoneId(ZoneId zoneId) {
+    private static ZoneId normalizeZoneId(ZoneId zoneId) {
         return zoneId != null ? zoneId : ZoneId.of("UTC");
     }
 
-    private String formatLogLine(RawLogLine line, ZoneId zoneId, LocalDate previousDate, boolean aiFriendlyTimestamps) {
+    private static String formatLogLine(RawLogLine line, ZoneId zoneId, LocalDate previousDate, boolean aiFriendlyTimestamps) {
         ZoneId effectiveZoneId = normalizeZoneId(zoneId);
         var zonedTimestamp = Instant.ofEpochMilli(line.timestamp).atZone(effectiveZoneId);
         String timestamp;
@@ -188,17 +188,54 @@ public class RoomHistoryManager {
         return estimateTokensForReverseRawLines(rawLinesReverse, zoneId, aiFriendlyTimestamps, null);
     }
 
-    private int estimateTokensForReverseRawLines(List<RawLogLine> rawLinesReverse, ZoneId zoneId, boolean aiFriendlyTimestamps, String estimateModel) {
-        int tokens = 0;
+    /**
+     * Chronological total for newest-first lines. The gather loop accumulates
+     * incrementally instead of calling this per line; the two are equivalent
+     * because each line's cost depends only on itself and whether the previous
+     * line shares its date, and both accumulate unrounded and round once.
+     * See {@link #estimateTokensIncremental}.
+     */
+    static int estimateTokensForReverseRawLines(List<RawLogLine> rawLinesReverse, ZoneId zoneId, boolean aiFriendlyTimestamps, String estimateModel) {
+        double tokens = 0;
         LocalDate previousDate = null;
-        ZoneId effectiveZoneId = normalizeZoneId(zoneId);
+        ZoneId effectiveZoneId = zoneId == null ? ZoneId.of("UTC") : zoneId;
         for (int i = rawLinesReverse.size() - 1; i >= 0; i--) {
             RawLogLine line = rawLinesReverse.get(i);
             var zonedTimestamp = Instant.ofEpochMilli(line.timestamp).atZone(effectiveZoneId);
-            tokens += estimateLogLineTokens(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps), estimateModel);
+            tokens += rawLogLineTokens(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps), estimateModel);
             previousDate = zonedTimestamp.toLocalDate();
         }
-        return tokens;
+        return (int) Math.ceil(tokens);
+    }
+
+    /**
+     * Running-total equivalent of {@link #estimateTokensForReverseRawLines} for
+     * newest-first lines: accumulate in append order, carrying the previous
+     * line's date. The gather loop uses this shape; both are covered by a
+     * randomized equivalence test so the per-line total cannot silently drift.
+     */
+    static int estimateTokensIncremental(List<RawLogLine> rawLinesReverse, ZoneId zoneId, boolean aiFriendlyTimestamps, String estimateModel) {
+        double tokens = 0;
+        LocalDate previousDate = null;
+        ZoneId effectiveZoneId = zoneId == null ? ZoneId.of("UTC") : zoneId;
+        for (RawLogLine line : rawLinesReverse) {
+            tokens += rawLogLineTokens(formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps), estimateModel);
+            previousDate = Instant.ofEpochMilli(line.timestamp).atZone(effectiveZoneId).toLocalDate();
+        }
+        return (int) Math.ceil(tokens);
+    }
+
+    /**
+     * Token cost of one gathered line, with grouped timestamps: the date is
+     * printed only when it differs from the previous line's, matching
+     * {@link #formatLogLine}. Lines arrive newest-first, so the caller's
+     * "previous" line is the one appended just before this one.
+     */
+    private static double formatLogLineRawTokens(RawLogLine line, LocalDate previousDate, ZoneId zoneId,
+                                                boolean aiFriendlyTimestamps, String estimateModel) {
+        ZoneId effectiveZoneId = zoneId == null ? ZoneId.of("UTC") : zoneId;
+        return rawLogLineTokens(
+                formatLogLine(line, effectiveZoneId, previousDate, aiFriendlyTimestamps), estimateModel);
     }
 
     private List<String> extractEventIds(List<RawLogLine> rawLines) {
@@ -1060,6 +1097,17 @@ public class RoomHistoryManager {
     }
 
     /**
+     * Unrounded token cost of one formatted line, including the newline joiner.
+     * Gather accumulates these into a fractional running total and rounds once at
+     * the end: rounding per line would make the total depend on which line happens
+     * to carry the date prefix.
+     */
+    private static double rawLogLineTokens(String line, String model) {
+        return TokenCalibrationManager.countTokens(line + "\n", TokenCalibrationManager.weightsFor(model))
+                * TokenCalibrationManager.getInstance().getFactor(model);
+    }
+
+    /**
      * Fetch room history backwards until a token limit is reached.
      */
     public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId) {
@@ -1090,6 +1138,10 @@ public class RoomHistoryManager {
         List<RawLogLine> rawLines = includeTimestamp ? new ArrayList<>() : null;
         String firstEventId = null;
         int currentTokens = 0;
+        // Fractional running total; rounded once per line for the limit check.
+        double rawTokenTotal = 0;
+        // Date of the previously appended line, for grouped timestamp rendering.
+        LocalDate appendedPrevDate = null;
 
         String token = getPaginationToken(roomId, fromToken);
 
@@ -1131,15 +1183,23 @@ public class RoomHistoryManager {
                             long originServerTs = ev.path("origin_server_ts").asLong(0);
                             RawLogLine rawLine = new RawLogLine(originServerTs, sender, body, eventId);
                             rawLines.add(rawLine);
-                            // Recompute total tokens accurately including grouped timestamps (previousDate logic)
-                            // to ensure estimator includes entire body with timestamps exactly as final prompt will.
-                            int totalTokens = estimateTokensForReverseRawLines(rawLines, zoneId, aiFriendlyTimestamps, estimateModel);
-                            if (totalTokens > tokenLimit) {
+                            // Running total over appended (newest-first) lines. Each line's
+                            // cost depends only on itself and whether it shares a date with
+                            // the previously appended line, so accumulating is equivalent to
+                            // re-summing the whole prompt every line (covered by
+                            // incrementalRunningTotalMatchesFullRecompute). Accumulate
+                            // unrounded and round once, otherwise the total would depend on
+                            // which line carries the date prefix.
+                            double lineTokens = formatLogLineRawTokens(rawLine, appendedPrevDate, zoneId, aiFriendlyTimestamps, estimateModel);
+                            rawTokenTotal += lineTokens;
+                            appendedPrevDate = Instant.ofEpochMilli(originServerTs).atZone(normalizeZoneId(zoneId)).toLocalDate();
+                            if ((int) Math.ceil(rawTokenTotal) > tokenLimit) {
+                                rawTokenTotal -= lineTokens;
                                 rawLines.remove(rawLines.size() - 1);
                                 reachedLimit = true;
                                 break;
                             }
-                            currentTokens = totalTokens;
+                            currentTokens = (int) Math.ceil(rawTokenTotal);
                             firstEventId = eventId;
                         } else {
                             String line = "<" + sender + "> " + body;

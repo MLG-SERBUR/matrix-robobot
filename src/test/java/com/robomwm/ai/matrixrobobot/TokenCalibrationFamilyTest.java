@@ -67,22 +67,79 @@ class TokenCalibrationFamilyTest {
     }
 
     @Test
-    void rawEstimateUsesPerFamilyMaxObservedBase() {
-        String gptModel = "openai/gpt-oss-120b";
-        String qwenModel = "qwen/qwen3.8-27b";
-        assertEquals(2.75, TokenCalibrationManager.baseCharsPerToken(gptModel));
-        assertEquals(2.46, TokenCalibrationManager.baseCharsPerToken(qwenModel));
-        assertEquals(2.75, TokenCalibrationManager.baseCharsPerToken(null));
+    void rawEstimatePricesCharacterClassesNotRawLength() {
+        String gpt = "openai/gpt-oss-120b";
+        String qwen = "qwen/qwen3.8-27b";
         assertEquals(0, TokenCalibrationManager.estimateRaw(""));
-        assertEquals(0, TokenCalibrationManager.estimateRaw(null, gptModel));
-        assertEquals(1, TokenCalibrationManager.estimateRaw("x", gptModel));
-        assertEquals(100, TokenCalibrationManager.estimateRaw("x".repeat(275), gptModel));
-        assertEquals(100, TokenCalibrationManager.estimateRaw("x".repeat(246), qwenModel));
-        // qwen base denser: same text yields more raw tokens than gpt
-        String text = "x".repeat(1000);
-        org.junit.jupiter.api.Assertions.assertTrue(
-                TokenCalibrationManager.estimateRaw(text, qwenModel)
-                        > TokenCalibrationManager.estimateRaw(text, gptModel));
+        assertEquals(0, TokenCalibrationManager.estimateRaw(null, gpt));
+        assertEquals(1, TokenCalibrationManager.estimateRaw("x", gpt));
+
+        // Digits and emoji cost far more per char than prose; a flat
+        // chars/token constant cannot express this.
+        String digits = "1234567890";
+        String prose = "aaaaaaaaaa";
+        assertTrue(TokenCalibrationManager.estimateRaw(digits, gpt)
+                > TokenCalibrationManager.estimateRaw(prose, gpt),
+                "digits must cost more than prose letters");
+
+        // Whitespace is nearly free (0.010 tok/char vs 0.216 for latin).
+        assertEquals(1, TokenCalibrationManager.estimateRaw("     ", gpt));
+        assertTrue(TokenCalibrationManager.estimateRaw(prose, gpt) > 2);
+
+        // Emoji are astral: one glyph, two chars, 1-2 tokens. Must not double-count.
+        assertEquals(2, TokenCalibrationManager.estimateRaw("🚀", gpt));
+        assertEquals(1, TokenCalibrationManager.estimateRaw("🚀", qwen));
+
+        // CJK is denser than latin.
+        assertTrue(TokenCalibrationManager.estimateRaw("今天天气不错", gpt)
+                > TokenCalibrationManager.estimateRaw("abcdefghij", gpt) / 2);
+
+        // qwen charges ~1 token per digit vs gpt ~0.84, so identical text costs more.
+        assertTrue(TokenCalibrationManager.estimateRaw(digits, qwen)
+                > TokenCalibrationManager.estimateRaw(digits, gpt));
+
+        // Log-line furniture (the dominant class in gathered history).
+        assertEquals(12, TokenCalibrationManager.estimateRaw("[12:34:56] <@u:x> ", gpt));
+    }
+
+    @Test
+    void estimateIsMonotonicInAppendedText() {
+        String gpt = "openai/gpt-oss-120b";
+        StringBuilder acc = new StringBuilder("[12:34:56] <@user:matrix.org> lgtm, merging ");
+        int prev = 0;
+        for (String extra : new String[]{"ok", " ", "🚀", "0xdeadbeef", "今天", "https://x.org/a?b=1"}) {
+            acc.append(extra);
+            int now = TokenCalibrationManager.estimateRaw(acc.toString(), gpt);
+            assertTrue(now >= prev, "appending text must never lower the estimate: " + extra);
+            prev = now;
+        }
+    }
+
+    @Test
+    void baseCharsPerTokenStaysInRealisticChatRange() {
+        // Derived from the weighted estimator over log-line probes; recorded in
+        // calibration history so rawBase stays comparable across estimator changes.
+        double gptBase = TokenCalibrationManager.baseCharsPerToken("openai/gpt-oss-120b");
+        double qwenBase = TokenCalibrationManager.baseCharsPerToken("qwen/qwen3.8-27b");
+        assertTrue(gptBase > 2.0 && gptBase < 3.5, "gpt base out of range: " + gptBase);
+        assertTrue(qwenBase > 2.0 && qwenBase < 3.5, "qwen base out of range: " + qwenBase);
+        assertTrue(TokenCalibrationManager.baseCharsPerToken(null) > 2.0);
+    }
+
+    @Test
+    void classCountsPartitionTheString() {
+        String text = "[12:34:56] <@u:x> 🚀 今天 Привет abc 123";
+        long[] counts = TokenCalibrationManager.countClasses(text, "openai/gpt-oss-120b");
+        long total = 0;
+        for (long c : counts) total += c;
+        long astralPairs = text.length() - text.codePointCount(0, text.length());
+        // Astral glyphs span two chars but count once, so total = length - surrogate pairs.
+        assertEquals(text.length() - astralPairs, total, "class counts must account for every char");
+        assertEquals(1, counts[TokenCalibrationManager.CLASS_EMOJI]);
+        assertEquals(9, counts[TokenCalibrationManager.CLASS_DIGIT]);
+        assertEquals(6, counts[TokenCalibrationManager.CLASS_SPACE]);
+        assertEquals(2, counts[TokenCalibrationManager.CLASS_CJK]);
+        assertEquals(6, counts[TokenCalibrationManager.CLASS_OTHER], "Cyrillic is other, not CJK");
     }
 
     @Test
