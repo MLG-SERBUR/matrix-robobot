@@ -215,10 +215,10 @@ public class AIService {
     // per-request token cap published, so model context binds
     // (@cf/openai/gpt-oss-120b = 131K).
     public static final int CLOUDFLARE_INPUT_LIMIT = 131072;
-    // Ollama Cloud model context windows: Beam and MiniMax M3 (1M),
-    // Nemotron 3 Ultra and Gemma 4 31B (256K), and gpt-oss (128K).
+    // Ollama Cloud model input budgets: Beam is temporarily capped at 800K
+    // (its advertised context is 1M); other listed values are model contexts.
     public static final int OLLAMA_MINIMAX_M3_INPUT_LIMIT = 1000000;
-    public static final int OLLAMA_BEAM_INPUT_LIMIT = 1000000;
+    public static final int OLLAMA_BEAM_INPUT_LIMIT = 800000;
     public static final int OLLAMA_NEMOTRON_3_ULTRA_INPUT_LIMIT = 256000;
     public static final int OLLAMA_GPT_OSS_INPUT_LIMIT = 128000;
     public static final int OLLAMA_GEMMA4_31B_INPUT_LIMIT = 256000;

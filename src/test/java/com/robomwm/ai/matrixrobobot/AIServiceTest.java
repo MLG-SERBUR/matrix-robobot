@@ -102,7 +102,7 @@ class AIServiceTest {
     @Test
     void gatherBudgetUsesConfiguredOllamaModelContext() {
         for (String[] modelAndExpected : new String[][]{
-                {"beam", "1000000"},
+                {"beam", "800000"},
                 {"minimax-m3", "1000000"},
                 {"nemotron-3-ultra", "256000"},
                 {"gpt-oss:120b", "128000"},
