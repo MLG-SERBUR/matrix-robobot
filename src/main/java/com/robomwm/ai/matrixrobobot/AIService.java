@@ -224,11 +224,6 @@ public class AIService {
     public static final int OLLAMA_GEMMA4_31B_INPUT_LIMIT = 256000;
     // Mistral free (Experiment), OpenRouter :free (model-dependent context),
     // and local proxies have no usable published per-request token number.
-    /**
-     * Temporary gather ceiling to leave room for Ollama Cloud token-estimation
-     * error; the estimator currently undercounts Beam prompts.
-     */
-    public static final int MAX_GATHER_BUDGET = 800000;
     /** Fallback when no chain attempt has a known input limit. */
     public static final int DEFAULT_GATHER_BUDGET = 128000;
     /** History-gather timeout: abort gather (and query) past this. */
@@ -294,15 +289,14 @@ public class AIService {
 
     /**
      * Initial gather budget for unbound !ask: the known limit of the first
-     * attempt with one (i.e. the model currently used first), capped at the
-     * largest configured model context.
+     * attempt with one (i.e. the model currently used first).
      * Falls back to DEFAULT_GATHER_BUDGET when no attempt has a known limit.
      * Per-attempt trim/expand adjusts from here.
      */
     protected int gatherBudgetForChain(Backend preferredBackend, String forcedModel) {
         for (ProviderAttempt attempt : buildProviderAttempts(preferredBackend, forcedModel)) {
             Integer limit = knownInputLimitForAttempt(attempt);
-            if (limit != null) return Math.min(limit, MAX_GATHER_BUDGET);
+            if (limit != null) return limit;
         }
         return DEFAULT_GATHER_BUDGET;
     }
@@ -724,9 +718,7 @@ public class AIService {
         int est = RoomHistoryManager.estimateTokens(currentPrompt, attempt.model);
         if (est >= (int) (knownLimit * TRIM_HEADROOM_RATIO)) return currentPrompt;
         int baseTokens = estimateTokensConservativeForAsk(buildPrompt(question, new ArrayList<>(), promptPrefix)) + 20;
-        // Capped: budgets above the fetch ceiling would blow the 15s gather
-        // timeout and abort the query instead of returning partial history.
-        int tokenLimit = Math.max(1000, Math.min(knownLimit - baseTokens, MAX_GATHER_BUDGET));
+        int tokenLimit = Math.max(1000, knownLimit - baseTokens);
         RoomHistoryManager.ChatLogsResult expanded = historyManager.fetchRoomHistoryUntilLimit(
                 exportRoomId, fromToken, tokenLimit, true, zoneId, true, abortFlag, null, attempt.model);
         if (expanded == null || expanded.logs == null || expanded.logs.size() <= curLogs.size()) return currentPrompt;
