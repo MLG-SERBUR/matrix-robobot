@@ -23,6 +23,12 @@ class AIServiceTest {
     }
 
     @Test
+    void ollamaCloudIsFirstInAutomaticFallbackOrder() {
+        assertEquals(List.of(AIService.Backend.OLLAMA_CLOUD, AIService.Backend.GROQ),
+                AIService.AUTO_PROVIDER_ORDER.subList(0, 2));
+    }
+
+    @Test
     void arliAiDefaultsDisableThinking() {
         Map<String, Object> payload = new HashMap<>();
         AIService.applyArliAiNonThinkingDefaults(payload);

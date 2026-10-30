@@ -51,7 +51,8 @@ Create a `config.json` file in the same directory as the JAR:
 - `cerebrasModels`: List of Cerebras models to try in sequence on fallback
 - `groqModels`: List of Groq models to try in sequence on fallback
 - `openrouterModels`: List of OpenRouter models (first model used)
-- `geminiModels`/`mistralModels`/`zaiModels`/`cloudflareModels`/`ollamaModels`/`sambaNovaModels`: Model lists for the new providers. New providers are tried after all others, before OpenRouter. For Cloudflare and Ollama Cloud the model order is randomized per query since usage is tracked for the whole account rather than per model.
+- `ollamaModels`: Ollama Cloud models, tried before Groq in automatic fallback. Their order is randomized per query since usage is tracked for the whole account rather than per model.
+- `geminiModels`/`mistralModels`/`zaiModels`/`cloudflareModels`/`sambaNovaModels`: Model lists for the other providers. They are tried after Groq and before OpenRouter. Cloudflare model order is randomized per query since usage is tracked for the whole account rather than per model.
 
 ## Commands
 

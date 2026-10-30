@@ -1017,12 +1017,14 @@ public class AIService {
         matrixClient.updateNoticeMessage(roomId, eventId, status);
     }
 
+    static final List<Backend> AUTO_PROVIDER_ORDER = List.of(
+            Backend.OLLAMA_CLOUD, Backend.GROQ, Backend.ARLIAI, Backend.OLLAMA_PROXY,
+            Backend.FREELLM, Backend.CEREBRAS, Backend.GEMINI, Backend.MISTRAL, Backend.CLOUDFLARE,
+            Backend.ZAI, Backend.SAMBANOVA, Backend.OPENROUTER);
+
     private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
         List<ProviderAttempt> attempts = new ArrayList<>();
-        Backend[] order = {Backend.GROQ, Backend.ARLIAI, Backend.OLLAMA_PROXY, Backend.FREELLM, Backend.CEREBRAS,
-                Backend.GEMINI, Backend.MISTRAL, Backend.CLOUDFLARE, Backend.OLLAMA_CLOUD, Backend.ZAI,
-                Backend.SAMBANOVA, Backend.OPENROUTER};
-        for (Backend backend : order) {
+        for (Backend backend : AUTO_PROVIDER_ORDER) {
             if (preferredBackend != Backend.AUTO && preferredBackend != backend) {
                 continue;
             }
