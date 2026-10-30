@@ -74,7 +74,7 @@ class AIServiceTest {
         AIService none = new AIService(HttpClient.newHttpClient(), new ObjectMapper(), "https://x", "t",
                 null, null, null, null, null, null, null,
                 null, null, null, null, null, null);
-        assertEquals(AIService.MAX_GATHER_BUDGET,
+        assertEquals(AIService.DEFAULT_GATHER_BUDGET,
                 none.gatherBudgetForChain(AIService.Backend.AUTO, null));
 
         // forced model narrows the chain to one attempt
@@ -82,20 +82,58 @@ class AIServiceTest {
     }
 
     @Test
-    void gatherBudgetUsesFreeTierLimitsCappedAtFetchCeiling() {
+    void gatherBudgetUsesKnownProviderLimits() {
         AIService cerebras = new AIService(HttpClient.newHttpClient(), new ObjectMapper(), "https://x", "t",
                 null, "csk", null, null, null, null, null,
                 null, List.of("gpt-oss-120b"), null, null, null, null);
         assertEquals(AIService.CEREBRAS_INPUT_LIMIT,
                 cerebras.gatherBudgetForChain(AIService.Backend.AUTO, null));
 
-        // 250K Gemini budget is unfetchable in the 15s gather window: capped.
+        // Gemini's known input budget is below the maximum supported context.
         AIService gemini = new AIService(HttpClient.newHttpClient(), new ObjectMapper(), "https://x", "t",
                 null, null, null, null, null, null, null,
                 null, null, null, null, null, null,
                 new AIService.ExtraProviders("g", null, null, null, null, null, null,
                         List.of("gemini-2.5-flash"), null, null, null, null, null));
-        assertEquals(AIService.MAX_GATHER_BUDGET,
+        assertEquals(AIService.GEMINI_INPUT_LIMIT,
                 gemini.gatherBudgetForChain(AIService.Backend.AUTO, null));
+    }
+
+    @Test
+    void gatherBudgetUsesConfiguredOllamaModelContext() {
+        for (String[] modelAndExpected : new String[][]{
+                {"beam", "1000000"},
+                {"minimax-m3", "1000000"},
+                {"nemotron-3-ultra", "256000"},
+                {"gpt-oss:120b", "128000"},
+                {"gemma4:31b", "256000"}}) {
+            AIService ollama = new AIService(HttpClient.newHttpClient(), new ObjectMapper(), "https://x", "t",
+                    null, null, null, null, null, null, null,
+                    null, null, null, null, null, null,
+                    new AIService.ExtraProviders(null, null, null, null, null, "ollama", null,
+                            null, null, null, null, List.of(modelAndExpected[0]), null));
+            assertEquals(Integer.parseInt(modelAndExpected[1]),
+                    ollama.gatherBudgetForChain(AIService.Backend.AUTO, null), modelAndExpected[0]);
+        }
+    }
+
+    @Test
+    void beamIsAlwaysFirstAmongOllamaModels() {
+        List<String> ordered = AIService.orderOllamaModels(
+                List.of("minimax-m3", "gemma4:31b", "beam", "gpt-oss:120b"),
+                new java.util.Random(1));
+
+        assertEquals("beam", ordered.get(0));
+        org.junit.jupiter.api.Assertions.assertEquals(4, ordered.size());
+        org.junit.jupiter.api.Assertions.assertTrue(ordered.containsAll(
+                List.of("minimax-m3", "gemma4:31b", "gpt-oss:120b")));
+    }
+
+    @Test
+    void gatherTimeoutScalesForLargerHistoryBudgets() {
+        assertEquals(AIService.GATHER_TIMEOUT_MS,
+                AIService.gatherTimeoutForBudget(AIService.DEFAULT_GATHER_BUDGET));
+        assertEquals(AIService.GATHER_TIMEOUT_MS * 8,
+                AIService.gatherTimeoutForBudget(AIService.OLLAMA_MINIMAX_M3_INPUT_LIMIT));
     }
 }

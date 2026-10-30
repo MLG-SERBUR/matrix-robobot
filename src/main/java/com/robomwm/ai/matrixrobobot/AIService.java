@@ -215,17 +215,21 @@ public class AIService {
     // per-request token cap published, so model context binds
     // (@cf/openai/gpt-oss-120b = 131K).
     public static final int CLOUDFLARE_INPUT_LIMIT = 131072;
-    // Mistral free (Experiment), Ollama Cloud (GPU-time quotas), OpenRouter
-    // :free (model-dependent context), and local proxies have no usable
-    // published per-request token number -> unknown (null), never constrain.
+    // Ollama Cloud model context windows: Beam and MiniMax M3 (1M),
+    // Nemotron 3 Ultra and Gemma 4 31B (256K), and gpt-oss (128K).
+    public static final int OLLAMA_MINIMAX_M3_INPUT_LIMIT = 1000000;
+    public static final int OLLAMA_BEAM_INPUT_LIMIT = 1000000;
+    public static final int OLLAMA_NEMOTRON_3_ULTRA_INPUT_LIMIT = 256000;
+    public static final int OLLAMA_GPT_OSS_INPUT_LIMIT = 128000;
+    public static final int OLLAMA_GEMMA4_31B_INPUT_LIMIT = 256000;
+    // Mistral free (Experiment), OpenRouter :free (model-dependent context),
+    // and local proxies have no usable published per-request token number.
     /**
-     * Fetch ceiling for history gathering: the gather aborts the whole query
-     * past GATHER_TIMEOUT_MS, so budgets above this are unfetchable without a
-     * gather rework. Scales with the timeout (4x timeout -> 4x cap); revisit
-     * from failure rows if big-room pagination proves slower. Also the
-     * default when no chain attempt has a known limit.
+     * Maximum supported input context among configured Ollama Cloud models.
      */
-    public static final int MAX_GATHER_BUDGET = 128000;
+    public static final int MAX_GATHER_BUDGET = OLLAMA_MINIMAX_M3_INPUT_LIMIT;
+    /** Fallback when no chain attempt has a known input limit. */
+    public static final int DEFAULT_GATHER_BUDGET = 128000;
     /** History-gather timeout: abort gather (and query) past this. */
     public static final long GATHER_TIMEOUT_MS = 60000;
 
@@ -243,12 +247,24 @@ public class AIService {
         return null;
     }
 
-    /**
-     * Known input-token budget for an attempt, or null when unknown.
-     * Groq/ArliAI are observed values; Cerebras/Gemini are official free-tier
-     * TPM; SambaNova/ZAI/Cloudflare fall back to model context (no published
-     * per-request token cap). Unknown backends never constrain the gather.
-     */
+    static List<String> orderOllamaModels(List<String> models, Random random) {
+        List<String> remaining = new ArrayList<>(models);
+        String beamModel = null;
+        for (int i = 0; i < remaining.size(); i++) {
+            if (remaining.get(i).toLowerCase().startsWith("beam")) {
+                beamModel = remaining.remove(i);
+                break;
+            }
+        }
+        java.util.Collections.shuffle(remaining, random);
+        if (beamModel == null) return remaining;
+        List<String> ordered = new ArrayList<>(remaining.size() + 1);
+        ordered.add(beamModel);
+        ordered.addAll(remaining);
+        return ordered;
+    }
+
+    /** Known input-token budget for an attempt, or null when unknown. */
     static Integer knownInputLimitForAttempt(ProviderAttempt attempt) {
         if (attempt == null || attempt.provider == null) return null;
         switch (attempt.provider.backend) {
@@ -259,15 +275,27 @@ public class AIService {
             case SAMBANOVA: return SAMBANOVA_INPUT_LIMIT;
             case ZAI: return ZAI_INPUT_LIMIT;
             case CLOUDFLARE: return CLOUDFLARE_INPUT_LIMIT;
+            case OLLAMA_CLOUD: return ollamaCloudInputLimitForModel(attempt.model);
             default: return null;
         }
+    }
+
+    static Integer ollamaCloudInputLimitForModel(String model) {
+        if (model == null) return null;
+        String normalized = model.toLowerCase();
+        if (normalized.startsWith("beam")) return OLLAMA_BEAM_INPUT_LIMIT;
+        if (normalized.contains("minimax-m3")) return OLLAMA_MINIMAX_M3_INPUT_LIMIT;
+        if (normalized.contains("nemotron-3-ultra")) return OLLAMA_NEMOTRON_3_ULTRA_INPUT_LIMIT;
+        if (normalized.contains("gpt-oss")) return OLLAMA_GPT_OSS_INPUT_LIMIT;
+        if (normalized.contains("gemma4:31b")) return OLLAMA_GEMMA4_31B_INPUT_LIMIT;
+        return null;
     }
 
     /**
      * Initial gather budget for unbound !ask: the known limit of the first
      * attempt with one (i.e. the model currently used first), capped at the
-     * fetch ceiling, so reordering the fallback chain needs no code change.
-     * Falls back to MAX_GATHER_BUDGET when no attempt has a known limit.
+     * largest configured model context.
+     * Falls back to DEFAULT_GATHER_BUDGET when no attempt has a known limit.
      * Per-attempt trim/expand adjusts from here.
      */
     protected int gatherBudgetForChain(Backend preferredBackend, String forcedModel) {
@@ -275,7 +303,13 @@ public class AIService {
             Integer limit = knownInputLimitForAttempt(attempt);
             if (limit != null) return Math.min(limit, MAX_GATHER_BUDGET);
         }
-        return MAX_GATHER_BUDGET;
+        return DEFAULT_GATHER_BUDGET;
+    }
+
+    static long gatherTimeoutForBudget(int budget) {
+        long multiplier = Math.max(1L,
+                (budget + (long) DEFAULT_GATHER_BUDGET - 1) / DEFAULT_GATHER_BUDGET);
+        return GATHER_TIMEOUT_MS * multiplier;
     }
 
     /**
@@ -1082,9 +1116,13 @@ public class AIService {
             } else if (backend == Backend.CLOUDFLARE || backend == Backend.OLLAMA_CLOUD) {
                 // Cloudflare Workers AI and Ollama Cloud track usage across the whole account rather
                 // than per model, so shuffle the model order on every query to spread the load.
-                List<String> models = backend == Backend.CLOUDFLARE ? extra.cloudflareModels : extra.ollamaModels;
-                List<String> shuffled = new ArrayList<>(models);
-                java.util.Collections.shuffle(shuffled, random);
+                List<String> shuffled;
+                if (backend == Backend.CLOUDFLARE) {
+                    shuffled = new ArrayList<>(extra.cloudflareModels);
+                    java.util.Collections.shuffle(shuffled, random);
+                } else {
+                    shuffled = orderOllamaModels(extra.ollamaModels, random);
+                }
                 for (String model : shuffled) {
                     attempts.add(new ProviderAttempt(provider, model));
                 }
@@ -1699,6 +1737,7 @@ public class AIService {
             // Gather to the first chained model's known input limit (chain-aware,
             // no hardcoded budget); per-attempt trim/expand adjusts from here.
             int targetPromptTokens = gatherBudgetForChain(preferredBackend, forcedModel);
+            long gatherTimeoutMs = gatherTimeoutForBudget(targetPromptTokens);
 
             // Account for the user prompt, including the question. No system prompt for ask.
             // Estimate conservatively across Groq fallback families (qwen tokenizes differently than gpt).
@@ -1714,7 +1753,7 @@ public class AIService {
             long gatherStart = System.currentTimeMillis();
             java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                if (System.currentTimeMillis() - gatherStart > GATHER_TIMEOUT_MS) {
+                if (System.currentTimeMillis() - gatherStart > gatherTimeoutMs) {
                     gatherTimedOut.set(true);
                     if (abortFlag != null) abortFlag.set(true);
                 }
@@ -1724,10 +1763,10 @@ public class AIService {
                     fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
-            if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
+            if (gatherTimedOut.get() || gatherElapsed > gatherTimeoutMs) {
                 String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        gatherMsg + " Aborted: gathering took over " + (GATHER_TIMEOUT_MS / 1000) + " seconds (" + gatheredStr + " messages gathered).");
+                        gatherMsg + " Aborted: gathering took over " + (gatherTimeoutMs / 1000) + " seconds (" + gatheredStr + " messages gathered).");
                 return;
             }
             if (abortFlag != null && abortFlag.get()) {
@@ -1772,6 +1811,7 @@ public class AIService {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             int targetPromptTokens = gatherBudgetForChain(preferredBackend, forcedModel);
+            long gatherTimeoutMs = gatherTimeoutForBudget(targetPromptTokens);
             String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
             int chatFormatOverhead = 20;
             int baseTokens = estimateTokensConservativeForAsk(emptyPrompt) +
@@ -1784,7 +1824,7 @@ public class AIService {
             long gatherStart = System.currentTimeMillis();
             java.util.concurrent.atomic.AtomicBoolean gatherTimedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
             RoomHistoryManager.ProgressCallback progressCallback = (msgCount, estTokens) -> {
-                if (System.currentTimeMillis() - gatherStart > GATHER_TIMEOUT_MS) {
+                if (System.currentTimeMillis() - gatherStart > gatherTimeoutMs) {
                     gatherTimedOut.set(true);
                     if (abortFlag != null) abortFlag.set(true);
                 }
@@ -1794,10 +1834,10 @@ public class AIService {
                     fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
-            if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
+            if (gatherTimedOut.get() || gatherElapsed > gatherTimeoutMs) {
                 String gatheredStr = history != null && history.logs != null ? String.valueOf(history.logs.size()) : "0";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
-                        gatherMsg + " Aborted: gathering took over " + (GATHER_TIMEOUT_MS / 1000) + " seconds (" + gatheredStr + " messages gathered).");
+                        gatherMsg + " Aborted: gathering took over " + (gatherTimeoutMs / 1000) + " seconds (" + gatheredStr + " messages gathered).");
                 return;
             }
             if (abortFlag != null && abortFlag.get()) {
