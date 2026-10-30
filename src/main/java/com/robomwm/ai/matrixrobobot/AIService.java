@@ -225,9 +225,10 @@ public class AIService {
     // Mistral free (Experiment), OpenRouter :free (model-dependent context),
     // and local proxies have no usable published per-request token number.
     /**
-     * Maximum supported input context among configured Ollama Cloud models.
+     * Temporary gather ceiling to leave room for Ollama Cloud token-estimation
+     * error; the estimator currently undercounts Beam prompts.
      */
-    public static final int MAX_GATHER_BUDGET = OLLAMA_MINIMAX_M3_INPUT_LIMIT;
+    public static final int MAX_GATHER_BUDGET = 800000;
     /** Fallback when no chain attempt has a known input limit. */
     public static final int DEFAULT_GATHER_BUDGET = 128000;
     /** History-gather timeout: abort gather (and query) past this. */

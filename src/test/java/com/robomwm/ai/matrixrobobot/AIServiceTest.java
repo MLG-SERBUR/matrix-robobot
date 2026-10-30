@@ -112,9 +112,18 @@ class AIServiceTest {
                     null, null, null, null, null, null,
                     new AIService.ExtraProviders(null, null, null, null, null, "ollama", null,
                             null, null, null, null, List.of(modelAndExpected[0]), null));
-            assertEquals(Integer.parseInt(modelAndExpected[1]),
+            int modelContext = Integer.parseInt(modelAndExpected[1]);
+            assertEquals(modelContext, AIService.ollamaCloudInputLimitForModel(modelAndExpected[0]));
+            assertEquals(Math.min(modelContext, AIService.MAX_GATHER_BUDGET),
                     ollama.gatherBudgetForChain(AIService.Backend.AUTO, null), modelAndExpected[0]);
         }
+
+        AIService beamFirst = new AIService(HttpClient.newHttpClient(), new ObjectMapper(), "https://x", "t",
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null,
+                new AIService.ExtraProviders(null, null, null, null, null, "ollama", null,
+                        null, null, null, null, List.of("beam", "minimax-m3"), null));
+        assertEquals(800000, beamFirst.gatherBudgetForChain(AIService.Backend.AUTO, null));
     }
 
     @Test
@@ -133,7 +142,7 @@ class AIServiceTest {
     void gatherTimeoutScalesForLargerHistoryBudgets() {
         assertEquals(AIService.GATHER_TIMEOUT_MS,
                 AIService.gatherTimeoutForBudget(AIService.DEFAULT_GATHER_BUDGET));
-        assertEquals(AIService.GATHER_TIMEOUT_MS * 8,
-                AIService.gatherTimeoutForBudget(AIService.OLLAMA_MINIMAX_M3_INPUT_LIMIT));
+        assertEquals(AIService.GATHER_TIMEOUT_MS * 7,
+                AIService.gatherTimeoutForBudget(AIService.MAX_GATHER_BUDGET));
     }
 }
