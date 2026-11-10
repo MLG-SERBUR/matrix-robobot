@@ -1045,9 +1045,9 @@ public class AIService {
     }
 
     static final List<Backend> AUTO_PROVIDER_ORDER = List.of(
-            Backend.OLLAMA_CLOUD, Backend.GROQ, Backend.ARLIAI, Backend.OLLAMA_PROXY,
+            Backend.GROQ, Backend.ARLIAI, Backend.OLLAMA_PROXY,
             Backend.FREELLM, Backend.CEREBRAS, Backend.GEMINI, Backend.MISTRAL, Backend.CLOUDFLARE,
-            Backend.ZAI, Backend.SAMBANOVA, Backend.OPENROUTER);
+            Backend.ZAI, Backend.SAMBANOVA, Backend.OPENROUTER, Backend.OLLAMA_CLOUD);
 
     private List<ProviderAttempt> buildProviderAttempts(Backend preferredBackend, String forcedModel) {
         List<ProviderAttempt> attempts = new ArrayList<>();

@@ -23,9 +23,9 @@ class AIServiceTest {
     }
 
     @Test
-    void ollamaCloudIsFirstInAutomaticFallbackOrder() {
-        assertEquals(List.of(AIService.Backend.OLLAMA_CLOUD, AIService.Backend.GROQ),
-                AIService.AUTO_PROVIDER_ORDER.subList(0, 2));
+    void ollamaCloudIsLastInAutomaticFallbackOrder() {
+        assertEquals(AIService.Backend.OLLAMA_CLOUD,
+                AIService.AUTO_PROVIDER_ORDER.get(AIService.AUTO_PROVIDER_ORDER.size() - 1));
     }
 
     @Test
