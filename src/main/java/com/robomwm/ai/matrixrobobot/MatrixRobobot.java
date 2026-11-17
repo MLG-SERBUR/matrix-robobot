@@ -224,6 +224,10 @@ public class MatrixRobobot {
                     JsonNode ephemeralEvents = roomNode.path("ephemeral").path("events");
                     autoLastService.processEphemeralEvents(roomId, ephemeralEvents, config.exportRoomId);
 
+                    if (roomId.equals(config.exportRoomId)) {
+                        continue;
+                    }
+
                     JsonNode timelineNode = roomNode.path("timeline");
                     String prevBatch = timelineNode.path("prev_batch").asText(null);
                     JsonNode timeline = timelineNode.path("events");
