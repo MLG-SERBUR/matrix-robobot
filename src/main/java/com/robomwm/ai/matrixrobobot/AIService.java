@@ -188,6 +188,8 @@ public class AIService {
     public static final int GROQ_QWEN_MAX_TOKENS = 1000;
     /** Headroom kept when trimming to a limit, so the retry fits under TPM/context. */
     public static final double TRIM_HEADROOM_RATIO = 0.85;
+    private static final double GATHER_HEADROOM_RATIO = 0.95;
+    private static final int CHAT_FORMAT_OVERHEAD = 20;
 
     public static int groqIptmLimitForModel(String model) {
         if (isGroqQwenModel(model)) return GROQ_QWEN_IPTM_LIMIT;
@@ -307,27 +309,39 @@ public class AIService {
         return GATHER_TIMEOUT_MS * multiplier;
     }
 
-    /**
-     * Representative model for conservative token estimation during gather:
-     * the candidate with the largest calibration factor (most tokens per char).
-     */
-    protected String estimateModelForGather() {
-        if (groqModels == null || groqModels.isEmpty()) return null;
-        String best = groqModels.get(0);
-        double bestFactor = TokenCalibrationManager.getInstance().getFactor(best);
-        for (String m : groqModels) {
-            double f = TokenCalibrationManager.getInstance().getFactor(m);
-            if (f > bestFactor) {
-                bestFactor = f;
-                best = m;
+    protected List<String> estimateModelsForGather() {
+        if (groqModels == null || groqModels.isEmpty()) {
+            return java.util.Collections.singletonList(null);
+        }
+        List<String> models = new ArrayList<>();
+        List<String> families = new ArrayList<>();
+        for (String model : groqModels) {
+            String family = TokenCalibrationManager.familyForModel(model);
+            if (!families.contains(family)) {
+                models.add(model);
+                families.add(family);
             }
         }
-        return best;
+        return models;
     }
 
     protected int estimateTokensConservativeForAsk(String text) {
         if (groqModels == null || groqModels.isEmpty()) return RoomHistoryManager.estimateTokens(text);
         return RoomHistoryManager.estimateTokensConservative(text, groqModels);
+    }
+
+    private int estimateEmptyRequestTokens(String question, String promptPrefix) {
+        String prompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
+        int tokens = estimateTokensConservativeForAsk(prompt);
+        if (!Prompts.ASK_PREFIX.equals(promptPrefix) && !Prompts.DEBUGAI_PREFIX.equals(promptPrefix)) {
+            tokens += estimateTokensConservativeForAsk(Prompts.SYSTEM_OVERVIEW);
+        }
+        return tokens + CHAT_FORMAT_OVERHEAD;
+    }
+
+    private int gatherTokenLimit(int targetPromptTokens, String question, String promptPrefix) {
+        int safePromptBudget = (int) Math.floor(targetPromptTokens * GATHER_HEADROOM_RATIO);
+        return Math.max(1000, safePromptBudget - estimateEmptyRequestTokens(question, promptPrefix));
     }
 
     static String formatTokenCount(int est) {
@@ -337,6 +351,18 @@ public class AIService {
     static String formatDualTokenEstimates(String text) {
         int gptEst = RoomHistoryManager.estimateTokens(text, TokenCalibrationManager.FAMILY_GPT);
         int qwenEst = RoomHistoryManager.estimateTokens(text, TokenCalibrationManager.FAMILY_QWEN);
+        return "~" + formatTokenCount(gptEst) + " gpt / ~" + formatTokenCount(qwenEst) + " qwen tokens";
+    }
+
+    private String formatRequestTokenEstimates(String question, List<String> logs, String promptPrefix) {
+        String prompt = buildPrompt(question, logs, promptPrefix);
+        String systemPrompt = Prompts.ASK_PREFIX.equals(promptPrefix) || Prompts.DEBUGAI_PREFIX.equals(promptPrefix)
+                ? null : Prompts.SYSTEM_OVERVIEW;
+        String requestText = systemPrompt == null ? prompt : systemPrompt + "\n" + prompt;
+        int gptEst = RoomHistoryManager.estimateTokens(requestText, TokenCalibrationManager.FAMILY_GPT)
+                + CHAT_FORMAT_OVERHEAD;
+        int qwenEst = RoomHistoryManager.estimateTokens(requestText, TokenCalibrationManager.FAMILY_QWEN)
+                + CHAT_FORMAT_OVERHEAD;
         return "~" + formatTokenCount(gptEst) + " gpt / ~" + formatTokenCount(qwenEst) + " qwen tokens";
     }
 
@@ -522,7 +548,7 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String dualTokens = formatRequestTokenEstimates(question, history.logs, promptPrefix);
                 String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
@@ -608,7 +634,7 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String dualTokens = formatRequestTokenEstimates(question, history.logs, promptPrefix);
                 String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
@@ -659,7 +685,10 @@ public class AIService {
             List<String> curLogs, String question, String promptPrefix, boolean canTrim) {
         String model = attempt != null ? attempt.model : null;
         if (!TokenCalibrationManager.isCalibrationError(errorMsg)) return null;
-        TokenCalibrationManager.getInstance().recordFromError(prompt, errorMsg, model);
+        String systemPrompt = Prompts.ASK_PREFIX.equals(promptPrefix) || Prompts.DEBUGAI_PREFIX.equals(promptPrefix)
+                ? null : Prompts.SYSTEM_OVERVIEW;
+        TokenCalibrationManager.getInstance().recordFromError(
+                prompt, errorMsg, model, systemPrompt, CHAT_FORMAT_OVERHEAD);
         if (!canTrim || curLogs.size() <= 10) return null;
         if (knownTrimLimitForAttempt(attempt) == null) return null;
         Integer actual = TokenCalibrationManager.extractActualTokensForCalibration(errorMsg);
@@ -1468,6 +1497,7 @@ public class AIService {
             StringBuilder reasoning = new StringBuilder();
             StringBuilder responseContent = new StringBuilder();
             String actualModel = null;
+            Integer actualInputTokens = null;
             int lineCount = 0;
             boolean gotDone = false;
             try {
@@ -1506,6 +1536,8 @@ public class AIService {
                             if (node.has("model") && (actualModel == null || actualModel.isEmpty())) {
                                 actualModel = node.get("model").asText();
                             }
+                            Integer usageTokens = reportedInputTokens(node);
+                            if (usageTokens != null) actualInputTokens = usageTokens;
                             if (node.has("message")) {
                                 JsonNode message = node.get("message");
                                 if (message.has("content")) {
@@ -1546,6 +1578,11 @@ public class AIService {
                 throw new Exception(provider.displayName + " error: " + details + ".");
             }
             throwOnHardRefusal(responseContent.toString(), provider.displayName, model != null ? model : actualModel);
+            if (actualInputTokens != null) {
+                TokenCalibrationManager.getInstance().recordFromUsage(
+                        prompt, actualInputTokens, actualModel != null ? actualModel : model,
+                        systemPromptForRequest(skipSystem, isAsk), CHAT_FORMAT_OVERHEAD);
+            }
             String finalOutput;
             if (responseContent.toString().trim().isEmpty()) {
                 if (reasoning.length() > 0) {
@@ -1732,14 +1769,7 @@ public class AIService {
             int targetPromptTokens = gatherBudgetForChain(preferredBackend, forcedModel);
             long gatherTimeoutMs = gatherTimeoutForBudget(targetPromptTokens);
 
-            // Account for the user prompt, including the question. No system prompt for ask.
-            // Estimate conservatively across Groq fallback families (qwen tokenizes differently than gpt).
-            String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
-            int chatFormatOverhead = 20; // Special tokens: BOS/EOS, role markers (im_start/im_end), separators
-            int baseTokens = estimateTokensConservativeForAsk(emptyPrompt) +
-                             chatFormatOverhead;
-
-            int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
+            int tokenLimit = gatherTokenLimit(targetPromptTokens, question, promptPrefix);
 
             String gatherMsg = "\uD83D\uDCE8 Gathering messages (up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
             String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
@@ -1752,8 +1782,8 @@ public class AIService {
                 }
             };
 
-            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
+            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimitForModels(exportRoomId,
+                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelsForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
             if (gatherTimedOut.get() || gatherElapsed > gatherTimeoutMs) {
@@ -1775,7 +1805,7 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String dualTokens = formatRequestTokenEstimates(question, history.logs, promptPrefix);
                 String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
@@ -1805,12 +1835,7 @@ public class AIService {
         try {
             int targetPromptTokens = gatherBudgetForChain(preferredBackend, forcedModel);
             long gatherTimeoutMs = gatherTimeoutForBudget(targetPromptTokens);
-            String emptyPrompt = buildPrompt(question, new ArrayList<>(), promptPrefix);
-            int chatFormatOverhead = 20;
-            int baseTokens = estimateTokensConservativeForAsk(emptyPrompt) +
-                             chatFormatOverhead;
-
-            int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
+            int tokenLimit = gatherTokenLimit(targetPromptTokens, question, promptPrefix);
 
             String gatherMsg = "\uD83D\uDCE8 Gathering messages (quality filtered, up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
             String statusEventId = matrixClient.sendNoticeWithEventId(responseRoomId, gatherMsg);
@@ -1823,8 +1848,8 @@ public class AIService {
                 }
             };
 
-            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
+            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimitForModels(exportRoomId,
+                    fromToken, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelsForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
             if (gatherTimedOut.get() || gatherElapsed > gatherTimeoutMs) {
@@ -1850,7 +1875,7 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String dualTokens = formatRequestTokenEstimates(question, history.logs, promptPrefix);
                 String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }
@@ -1887,6 +1912,12 @@ public class AIService {
                 if (choice == null) {
                     throw new Exception("Missing 'choices' array");
                 }
+                Integer reportedInputTokens = reportedInputTokens(root);
+                if (reportedInputTokens != null) {
+                    TokenCalibrationManager.getInstance().recordFromUsage(
+                            prompt, reportedInputTokens, root.path("model").asText(model),
+                            systemPromptForRequest(skipSystem, isAsk), CHAT_FORMAT_OVERHEAD);
+                }
                 String text = choice.path("message").path("content").asText(null);
                 if (text == null || text.trim().isEmpty()) {
                     throw new Exception("No response from " + provider.displayName + " (" + model + ").");
@@ -1902,6 +1933,18 @@ public class AIService {
             throw new Exception(provider.displayName + " (" + model + ") failed. Status: "
                     + response.statusCode() + ", Body: " + response.body());
         }
+    }
+
+    private static Integer reportedInputTokens(JsonNode response) {
+        JsonNode usage = response.path("usage");
+        int tokens = usage.path("prompt_tokens").asInt(-1);
+        if (tokens < 0) tokens = usage.path("input_tokens").asInt(-1);
+        return tokens < 0 ? null : tokens;
+    }
+
+    private static String systemPromptForRequest(boolean skipSystem, boolean isAsk) {
+        if (skipSystem) return null;
+        return isAsk ? Prompts.SYSTEM_ASK : Prompts.SYSTEM_OVERVIEW;
     }
 
     private HttpRequest buildChatCompletionRequest(ProviderConfig provider, String prompt, String model,
@@ -2140,11 +2183,7 @@ public class AIService {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         try {
             int targetPromptTokens = gatherBudgetForChain(Backend.AUTO, null);
-            String emptyPrompt = buildPrompt(question, new ArrayList<>(), Prompts.ASK_PREFIX);
-            int chatFormatOverhead = 20;
-            int baseTokens = estimateTokensConservativeForAsk(emptyPrompt) +
-                             chatFormatOverhead;
-            int tokenLimit = Math.max(1000, targetPromptTokens - baseTokens);
+            int tokenLimit = gatherTokenLimit(targetPromptTokens, question, Prompts.ASK_PREFIX);
 
             String displayName = targetUser.contains(":") ? targetUser.substring(1, targetUser.indexOf(":")) : targetUser.substring(1);
             String gatherMsg = "\uD83D\uDCE8 Gathering messages from " + displayName + " (up to ~" + (tokenLimit >= 1000 ? String.format("%.1fk", tokenLimit / 1000.0) : tokenLimit) + " tokens)...";
@@ -2158,8 +2197,8 @@ public class AIService {
                 }
             };
 
-            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimit(exportRoomId,
-                    null, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelForGather());
+            RoomHistoryManager.ChatLogsResult history = historyManager.fetchRoomHistoryUntilLimitForModels(exportRoomId,
+                    null, tokenLimit, true, zoneId, true, abortFlag, progressCallback, estimateModelsForGather());
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
             if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
@@ -2191,7 +2230,7 @@ public class AIService {
 
             {
                 int gatheredCount = history.logs.size();
-                String dualTokens = formatDualTokenEstimates(String.join("\n", history.logs));
+                String dualTokens = formatRequestTokenEstimates(question, history.logs, Prompts.ASK_PREFIX);
                 String finalGatherMsg = gatherMsg + " Gathered " + gatheredCount + " messages from " + displayName + " (" + dualTokens + "). Now querying AI provider...";
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId, finalGatherMsg);
             }

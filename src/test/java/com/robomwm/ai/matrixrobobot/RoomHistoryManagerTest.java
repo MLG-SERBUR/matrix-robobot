@@ -84,4 +84,24 @@ class RoomHistoryManagerTest {
             prev = now;
         }
     }
+
+    @Test
+    void conservativeRunningTotalUsesLargestFullFamilyEstimate() {
+        ZoneId zone = ZoneId.of("UTC");
+        List<RawLogLine> lines = new ArrayList<>();
+        for (int i = 0; i < 30; i++) {
+            lines.add(new RawLogLine(1_700_000_000_000L + i * 1000L,
+                    "@user123:matrix.org", "1234567890", "$e" + i));
+        }
+
+        int gptEstimate = RoomHistoryManager.estimateTokensIncremental(
+                lines, zone, true, "openai/gpt-oss-20b");
+        int qwenEstimate = RoomHistoryManager.estimateTokensIncremental(
+                lines, zone, true, "qwen/qwen3.8-27b");
+        int conservativeEstimate = RoomHistoryManager.estimateTokensIncrementalConservative(
+                lines, zone, true, List.of("openai/gpt-oss-20b", "qwen/qwen3.8-27b"));
+
+        assertEquals(Math.max(gptEstimate, qwenEstimate), conservativeEstimate);
+        assertTrue(conservativeEstimate >= gptEstimate && conservativeEstimate >= qwenEstimate);
+    }
 }

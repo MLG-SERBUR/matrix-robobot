@@ -225,6 +225,18 @@ public class RoomHistoryManager {
         return (int) Math.ceil(tokens);
     }
 
+    static int estimateTokensIncrementalConservative(List<RawLogLine> rawLinesReverse, ZoneId zoneId,
+            boolean aiFriendlyTimestamps, java.util.Collection<String> estimateModels) {
+        int best = 0;
+        if (estimateModels == null || estimateModels.isEmpty()) {
+            return estimateTokensIncremental(rawLinesReverse, zoneId, aiFriendlyTimestamps, null);
+        }
+        for (String model : estimateModels) {
+            best = Math.max(best, estimateTokensIncremental(rawLinesReverse, zoneId, aiFriendlyTimestamps, model));
+        }
+        return best;
+    }
+
     /**
      * Token cost of one gathered line, with grouped timestamps: the date is
      * printed only when it differs from the previous line's, matching
@@ -1134,12 +1146,26 @@ public class RoomHistoryManager {
      */
     public ChatLogsResult fetchRoomHistoryUntilLimit(String roomId, String fromToken, int tokenLimit, boolean includeTimestamp, ZoneId zoneId,
             boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback, String estimateModel) {
+        return fetchRoomHistoryUntilLimitForModels(roomId, fromToken, tokenLimit, includeTimestamp, zoneId,
+                aiFriendlyTimestamps, abortFlag, progressCallback, java.util.Collections.singletonList(estimateModel));
+    }
+
+    /**
+     * Variant that caps gathered history against the largest estimate across candidate tokenizer families.
+     */
+    public ChatLogsResult fetchRoomHistoryUntilLimitForModels(String roomId, String fromToken, int tokenLimit,
+            boolean includeTimestamp, ZoneId zoneId, boolean aiFriendlyTimestamps,
+            java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback,
+            java.util.Collection<String> estimateModels) {
         List<String> logs = new ArrayList<>();
         List<RawLogLine> rawLines = includeTimestamp ? new ArrayList<>() : null;
         String firstEventId = null;
         int currentTokens = 0;
-        // Fractional running total; rounded once per line for the limit check.
-        double rawTokenTotal = 0;
+        List<String> models = estimateModels == null || estimateModels.isEmpty()
+                ? java.util.Collections.singletonList(null)
+                : new ArrayList<>(estimateModels);
+        double[] rawTokenTotals = new double[models.size()];
+        int[] plainTokenTotals = new int[models.size()];
         // Date of the previously appended line, for grouped timestamp rendering.
         LocalDate appendedPrevDate = null;
 
@@ -1190,26 +1216,41 @@ public class RoomHistoryManager {
                             // incrementalRunningTotalMatchesFullRecompute). Accumulate
                             // unrounded and round once, otherwise the total would depend on
                             // which line carries the date prefix.
-                            double lineTokens = formatLogLineRawTokens(rawLine, appendedPrevDate, zoneId, aiFriendlyTimestamps, estimateModel);
-                            rawTokenTotal += lineTokens;
+                            double[] lineTokens = new double[models.size()];
+                            for (int i = 0; i < models.size(); i++) {
+                                lineTokens[i] = formatLogLineRawTokens(rawLine, appendedPrevDate, zoneId,
+                                        aiFriendlyTimestamps, models.get(i));
+                                rawTokenTotals[i] += lineTokens[i];
+                            }
                             appendedPrevDate = Instant.ofEpochMilli(originServerTs).atZone(normalizeZoneId(zoneId)).toLocalDate();
-                            if ((int) Math.ceil(rawTokenTotal) > tokenLimit) {
-                                rawTokenTotal -= lineTokens;
+                            int maxTokens = maximumRoundedTotal(rawTokenTotals);
+                            if (maxTokens > tokenLimit) {
+                                for (int i = 0; i < models.size(); i++) {
+                                    rawTokenTotals[i] -= lineTokens[i];
+                                }
                                 rawLines.remove(rawLines.size() - 1);
                                 reachedLimit = true;
                                 break;
                             }
-                            currentTokens = (int) Math.ceil(rawTokenTotal);
+                            currentTokens = maxTokens;
                             firstEventId = eventId;
                         } else {
                             String line = "<" + sender + "> " + body;
-                            int lineTokens = estimateLogLineTokens(line, estimateModel);
-                            if (currentTokens + lineTokens > tokenLimit) {
+                            int[] lineTokens = new int[models.size()];
+                            int maxTokens = 0;
+                            for (int i = 0; i < models.size(); i++) {
+                                lineTokens[i] = estimateLogLineTokens(line, models.get(i));
+                                maxTokens = Math.max(maxTokens, plainTokenTotals[i] + lineTokens[i]);
+                            }
+                            if (maxTokens > tokenLimit) {
                                 reachedLimit = true;
                                 break;
                             }
                             logs.add(line);
-                            currentTokens += lineTokens;
+                            for (int i = 0; i < models.size(); i++) {
+                                plainTokenTotals[i] += lineTokens[i];
+                            }
+                            currentTokens = maxTokens;
                             firstEventId = eventId;
                         }
                     }
@@ -1239,6 +1280,14 @@ public class RoomHistoryManager {
 
         Collections.reverse(logs);
         return new ChatLogsResult(logs, firstEventId);
+    }
+
+    private static int maximumRoundedTotal(double[] totals) {
+        int best = 0;
+        for (double total : totals) {
+            best = Math.max(best, (int) Math.ceil(total));
+        }
+        return best;
     }
 
     /**

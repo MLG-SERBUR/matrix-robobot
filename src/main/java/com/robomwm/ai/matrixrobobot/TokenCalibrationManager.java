@@ -15,7 +15,8 @@ import java.util.regex.Pattern;
  * Heuristic estimator + self-calibrating factor persisted to disk.
  * Raw estimate is a character-class weighted sum (see WEIGHTS_GPT/QWEN), then
  * retries with less on 403 context length.
- * EMA update: factor = factor*(1-ALPHA) + ratio*ALPHA where ratio = actual/estimatedRaw.
+ * EMA update: factor = factor*(1-ALPHA) + ratio*ALPHA where ratio compares reported
+ * input tokens (minus chat framing) with the raw estimate of all textual messages.
  *
  * Factors are stored per tokenizer family because token counts differ consistently
  * between families no matter the provider (e.g. all qwen models tokenize one way,
@@ -398,18 +399,38 @@ public class TokenCalibrationManager {
 
     /** Per-model variant: updates only that model's tokenizer family. */
     public synchronized double recordFromError(String prompt, String errorMsg, String model) {
-        String family = familyForModel(model);
-        double old = factors.getOrDefault(family, DEFAULT_FACTOR);
+        return recordFromError(prompt, errorMsg, model, null, 0);
+    }
+
+    /** Calibrate the textual request content while accounting separately for chat framing. */
+    public synchronized double recordFromError(String prompt, String errorMsg, String model,
+            String systemPrompt, int framingTokens) {
         Integer actual = extractActualTokensForCalibration(errorMsg);
         if (actual == null) {
             System.out.println("Calibration: could not parse actual tokens from: " + errorMsg);
-            return old;
+            return getFactor(model);
         }
-        int estimatedRaw = estimateRaw(prompt, model);
+        return recordFromActualTokens(prompt, actual, model, systemPrompt, framingTokens,
+                extractLimitForCalibration(errorMsg), "error");
+    }
+
+    public synchronized double recordFromUsage(String prompt, int actual, String model,
+            String systemPrompt, int framingTokens) {
+        return recordFromActualTokens(prompt, actual, model, systemPrompt, framingTokens, null, "usage");
+    }
+
+    private synchronized double recordFromActualTokens(String prompt, int actual, String model,
+            String systemPrompt, int framingTokens, Integer limit, String source) {
+        String family = familyForModel(model);
+        double old = factors.getOrDefault(family, DEFAULT_FACTOR);
+        String calibrationText = systemPrompt == null || systemPrompt.isEmpty()
+                ? prompt : systemPrompt + "\n" + prompt;
+        int estimatedRaw = estimateRaw(calibrationText, model);
         if (estimatedRaw == 0) return old;
         double rawBase = baseCharsPerToken(model);
-        int estimatedCalibrated = (int) Math.ceil(estimatedRaw * old);
-        double ratio = (double) actual / estimatedRaw;
+        int estimatedCalibrated = (int) Math.ceil(estimatedRaw * old) + framingTokens;
+        int actualContentTokens = Math.max(0, actual - framingTokens);
+        double ratio = (double) actualContentTokens / estimatedRaw;
         double rawRatio = ratio;
         // ratio <1 means we overestimated, don't reduce below MIN_FACTOR
         if (ratio < 1.0) ratio = 1.0;
@@ -417,22 +438,25 @@ public class TokenCalibrationManager {
         double factor = old * (1 - ALPHA) + ratio * ALPHA;
         factor = clamp(factor);
         factors.put(family, factor);
-        Integer limit = extractLimitForCalibration(errorMsg);
         String limitStr = limit != null ? String.valueOf(limit) : "unknown";
         // Detailed log for future review: raw vs calibrated vs actual to judge if linear factor sufficient
         // Persist to file (not chat) per user request; also keep stdout for journal
-        String detail = "Calibration update [" + family + (model != null ? "/" + model : "") + "]: estimatedRaw=" + estimatedRaw + " estimatedCalibrated=" + estimatedCalibrated + " (factor " + String.format("%.4f", old) + ") actual=" + actual + " limit=" + limitStr +
+        String detail = "Calibration update [" + family + (model != null ? "/" + model : "") + "] source=" + source + ": estimatedRaw=" + estimatedRaw + " estimatedCalibrated=" + estimatedCalibrated + " (factor " + String.format("%.4f", old) + ") actual=" + actual + " limit=" + limitStr +
                 " rawRatio=" + String.format("%.4f", rawRatio) + " clampedRatio=" + String.format("%.4f", ratio) + " factor " + String.format("%.4f", old) + " -> " + String.format("%.4f", factor) +
-                " promptChars=" + (prompt != null ? prompt.length() : 0);
+                " promptChars=" + (calibrationText != null ? calibrationText.length() : 0);
         System.out.println(detail);
-        appendHistory(family, model, estimatedRaw, rawBase, estimatedCalibrated, old, actual, limit, rawRatio, ratio, factor, prompt != null ? prompt.length() : 0,
-                countClasses(prompt, model));
+        appendHistory(family, model, estimatedRaw, rawBase, estimatedCalibrated, old, actual, limit, rawRatio, ratio, factor,
+                calibrationText != null ? calibrationText.length() : 0, framingTokens, source,
+                countClasses(calibrationText, model));
         samples.put(family, samples.getOrDefault(family, 0) + 1);
         saveFactors();
         return factor;
     }
 
-    private synchronized void appendHistory(String family, String model, int estimatedRaw, double rawBase, int estimatedCalibrated, double oldFactor, int actual, Integer limit, double rawRatio, double clampedRatio, double newFactor, int promptChars, long[] classCounts) {
+    private synchronized void appendHistory(String family, String model, int estimatedRaw, double rawBase,
+            int estimatedCalibrated, double oldFactor, int actual, Integer limit, double rawRatio,
+            double clampedRatio, double newFactor, int promptChars, int framingTokens, String source,
+            long[] classCounts) {
         try {
             java.util.Map<String, Object> entry = new java.util.LinkedHashMap<>();
             entry.put("timestamp", java.time.Instant.now().toString());
@@ -448,6 +472,8 @@ public class TokenCalibrationManager {
             entry.put("clampedRatio", clampedRatio);
             entry.put("newFactor", newFactor);
             entry.put("promptChars", promptChars);
+            entry.put("framingTokens", framingTokens);
+            entry.put("source", source);
             // Per-class character counts let the estimator weights be re-fitted
             // against real prompts; promptChars alone cannot say whether an error
             // came from emoji, code, or timestamps.
