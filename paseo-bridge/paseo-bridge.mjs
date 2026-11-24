@@ -21,7 +21,6 @@ try {
           list: "deny",
           glob: "deny",
           grep: "deny",
-          write: "deny",
           edit: "deny",
           bash: "deny",
           task: "deny",
