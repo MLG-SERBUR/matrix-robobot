@@ -41,6 +41,8 @@ public class AIService {
     protected final List<String> freeLlmModels;
     protected final List<String> ollamaProxyModels;
     protected final ExtraProviders extra;
+    private final PaseoDaemonClient paseoClient;
+    private final PaseoImageFetcher paseoImageFetcher;
 
     public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
             String cerebrasApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
@@ -57,6 +59,17 @@ public class AIService {
             String ollamaProxyApiKey, String ollamaProxyUrl,
             List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, 
             List<String> freeLlmModels, List<String> ollamaProxyModels, ExtraProviders extra) {
+        this(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey, groqApiKey, openrouterApiKey,
+                freeLlmApiKey, ollamaProxyApiKey, ollamaProxyUrl, arliModels, cerebrasModels, groqModels,
+                openrouterModels, freeLlmModels, ollamaProxyModels, extra, null, null);
+    }
+
+    public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
+            String cerebrasApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
+            String ollamaProxyApiKey, String ollamaProxyUrl,
+            List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels,
+            List<String> freeLlmModels, List<String> ollamaProxyModels, ExtraProviders extra,
+            PaseoDaemonClient paseoClient, PaseoImageFetcher paseoImageFetcher) {
         this.client = client;
         this.mapper = mapper;
         this.homeserver = homeserver;
@@ -77,6 +90,8 @@ public class AIService {
         this.ollamaProxyModels = ollamaProxyModels == null ? java.util.Collections.emptyList() : ollamaProxyModels;
         this.extra = extra != null ? extra : new ExtraProviders(
                 null, null, null, null, null, null, null, null, null, null, null, null, null);
+        this.paseoClient = paseoClient;
+        this.paseoImageFetcher = paseoImageFetcher;
         this.historyManager = new RoomHistoryManager(client, mapper, homeserver, accessToken);
         this.random = new Random();
     }
@@ -354,6 +369,19 @@ public class AIService {
         return "~" + formatTokenCount(gptEst) + " gpt / ~" + formatTokenCount(qwenEst) + " qwen tokens";
     }
 
+    static boolean shouldCollectImagesForBoundedHistory(int hours, int maxMessages,
+            String startEventId, String endEventId) {
+        return hours > 0 || maxMessages > 0 || startEventId != null || endEventId != null;
+    }
+
+    static boolean shouldUsePaseoForImages(boolean imagesCollectedForBound, List<String> imageUrls) {
+        return imagesCollectedForBound && imageUrls != null && !imageUrls.isEmpty();
+    }
+
+    static boolean shouldCollectImagesForUnreadSummary(String promptPrefix) {
+        return Prompts.TLDR_PREFIX.equals(promptPrefix);
+    }
+
     private String formatRequestTokenEstimates(String question, List<String> logs, String promptPrefix) {
         String prompt = buildPrompt(question, logs, promptPrefix);
         String systemPrompt = Prompts.ASK_PREFIX.equals(promptPrefix) || Prompts.DEBUGAI_PREFIX.equals(promptPrefix)
@@ -618,8 +646,7 @@ public class AIService {
             }
 
             // Apply quality filter
-            history = new RoomHistoryManager.ChatLogsResult(
-                    filterUserMessages(history.logs, QUALITY_FILTER_USER), history.firstEventId, history.errorMessage, history.antispamApplied);
+            history = filterHistoryUserMessages(history, QUALITY_FILTER_USER);
 
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
@@ -650,8 +677,9 @@ public class AIService {
     protected RoomHistoryManager.ChatLogsResult fetchHistoryForQuery(String exportRoomId, int hours, String fromToken,
             String startEventId, String endEventId, boolean forward, ZoneId zoneId, int maxMessages,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, RoomHistoryManager.ProgressCallback progressCallback) {
+        boolean collectImages = shouldCollectImagesForBoundedHistory(hours, maxMessages, startEventId, endEventId);
         return historyManager.fetchRoomHistoryRelative(exportRoomId, hours, fromToken, startEventId, endEventId, forward, zoneId,
-                maxMessages, false, true, abortFlag, progressCallback);
+                maxMessages, collectImages, true, abortFlag, progressCallback);
     }
 
     protected RoomHistoryManager.ChatLogsResult prepareHistoryForQuery(String responseRoomId, String exportRoomId,
@@ -780,6 +808,35 @@ public class AIService {
         // Lazy error handling: only send status message if at least one provider fails
         String batchEventId = null;
         StringBuilder accumulatedStatus = new StringBuilder();
+
+        if (paseoClient != null && paseoImageFetcher != null
+                && shouldUsePaseoForImages(history.imageUrls != null, history.imageUrls)) {
+            try {
+                List<PaseoDaemonClient.Image> images = paseoImageFetcher.fetchImages(history.imageUrls, abortFlag);
+                if (!images.isEmpty()) {
+                    if (abortFlag != null && abortFlag.get()) return;
+                    String paseoPrompt = prompt
+                            + "\n\nAttached images are the most recent images in chronological order, matching image messages in the history.";
+                    String systemPrompt = skipSystem ? null : Prompts.SYSTEM_OVERVIEW;
+                    String raw = AIRequestQueue.run("Paseo (" + paseoClient.provider() + ")",
+                            () -> paseoClient.query(paseoPrompt, systemPrompt, images, timeoutSeconds, abortFlag));
+                    String answer = appendMessageLink(raw, exportRoomId, firstEventId, "Paseo",
+                            paseoClient.provider());
+                    matrixClient.sendMarkdownWithEventId(responseRoomId, answer, threadExtraContent.get());
+                    return;
+                }
+            } catch (Exception e) {
+                if (abortFlag != null && abortFlag.get()) return;
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                String errorMsg = e.getMessage() == null ? e.toString() : e.getMessage();
+                System.out.println("Paseo (" + paseoClient.provider() + ") failed: " + errorMsg);
+                accumulatedStatus.append("Paseo (").append(paseoClient.provider()).append(") failed: ")
+                        .append(errorMsg);
+            }
+        }
 
         for (int i = 0; i < attempts.size(); i++) {
             if (abortFlag != null && abortFlag.get()) return;
@@ -1639,8 +1696,8 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
-                    lastReadEventId,
-                    zoneId, true, abortFlag, progressCallback);
+                    lastReadEventId, zoneId, shouldCollectImagesForUnreadSummary(promptPrefix), true, abortFlag,
+                    progressCallback);
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
             if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
@@ -1712,8 +1769,8 @@ public class AIService {
             };
 
             RoomHistoryManager.ChatLogsResult result = historyManager.fetchUnreadMessages(exportRoomId,
-                    lastReadEventId,
-                    zoneId, true, abortFlag, progressCallback);
+                    lastReadEventId, zoneId, shouldCollectImagesForUnreadSummary(promptPrefix), true, abortFlag,
+                    progressCallback);
 
             long gatherElapsed = System.currentTimeMillis() - gatherStart;
             if (gatherTimedOut.get() || gatherElapsed > GATHER_TIMEOUT_MS) {
@@ -1728,8 +1785,7 @@ public class AIService {
             }
 
             // Apply quality filter
-            result = new RoomHistoryManager.ChatLogsResult(
-                    filterUserMessages(result.logs, QUALITY_FILTER_USER), result.firstEventId, result.errorMessage, result.antispamApplied);
+            result = filterHistoryUserMessages(result, QUALITY_FILTER_USER);
 
             if (result.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
@@ -1864,8 +1920,7 @@ public class AIService {
             }
 
             // Apply quality filter
-            history = new RoomHistoryManager.ChatLogsResult(
-                    filterUserMessages(history.logs, QUALITY_FILTER_USER), history.firstEventId, history.errorMessage, history.antispamApplied);
+            history = filterHistoryUserMessages(history, QUALITY_FILTER_USER);
 
             if (history.logs.isEmpty()) {
                 matrixClient.updateNoticeMessage(responseRoomId, statusEventId,
@@ -2163,6 +2218,46 @@ public class AIService {
             }
         }
         return filtered;
+    }
+
+    static RoomHistoryManager.ChatLogsResult filterHistoryUserMessages(
+            RoomHistoryManager.ChatLogsResult history, String userId) {
+        List<String> filteredLogs = new ArrayList<>();
+        List<String> filteredEventIds = history.eventIds == null ? null : new ArrayList<>();
+        java.util.Set<String> retainedEventIds = new java.util.HashSet<>();
+        for (int i = 0; i < history.logs.size(); i++) {
+            String log = history.logs.get(i);
+            if (log.contains("<" + userId + ">")) continue;
+            filteredLogs.add(log);
+            if (filteredEventIds != null && i < history.eventIds.size()) {
+                String eventId = history.eventIds.get(i);
+                filteredEventIds.add(eventId);
+                if (eventId != null) retainedEventIds.add(eventId);
+            }
+        }
+
+        List<String> imageUrls = null;
+        List<String> imageCaptions = null;
+        List<String> imageEventIds = null;
+        if (history.imageUrls != null) {
+            imageUrls = new ArrayList<>();
+            imageCaptions = new ArrayList<>();
+            imageEventIds = new ArrayList<>();
+            if (history.imageEventIds != null && history.eventIds != null) {
+                for (int i = 0; i < history.imageUrls.size() && i < history.imageEventIds.size(); i++) {
+                    String eventId = history.imageEventIds.get(i);
+                    if (!retainedEventIds.contains(eventId)) continue;
+                    imageUrls.add(history.imageUrls.get(i));
+                    imageEventIds.add(eventId);
+                    if (history.imageCaptions != null && i < history.imageCaptions.size()) {
+                        imageCaptions.add(history.imageCaptions.get(i));
+                    }
+                }
+            }
+        }
+
+        return new RoomHistoryManager.ChatLogsResult(filteredLogs, history.firstEventId, history.errorMessage,
+                imageUrls, imageCaptions, imageEventIds, filteredEventIds, history.antispamApplied);
     }
 
     static List<String> filterOnlyUserMessages(List<String> logs, String userId) {

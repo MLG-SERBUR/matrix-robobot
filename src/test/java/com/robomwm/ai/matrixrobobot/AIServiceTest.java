@@ -10,6 +10,9 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AIServiceTest {
 
@@ -20,6 +23,45 @@ class AIServiceTest {
 
         assertEquals("Groq failed\nOpenRouter failed", firstUpdate);
         assertEquals("Groq failed\nOpenRouter failed\nArliAI failed", secondUpdate);
+    }
+
+    @Test
+    void paseoImageCollectionRequiresAHistoryBoundAndActualImages() {
+        assertFalse(AIService.shouldCollectImagesForBoundedHistory(-1, -1, null, null));
+        assertTrue(AIService.shouldCollectImagesForBoundedHistory(24, -1, null, null));
+        assertTrue(AIService.shouldCollectImagesForBoundedHistory(-1, 25, null, null));
+        assertTrue(AIService.shouldCollectImagesForBoundedHistory(-1, -1, "$start", null));
+        assertTrue(AIService.shouldCollectImagesForUnreadSummary(AIService.Prompts.TLDR_PREFIX));
+        assertFalse(AIService.shouldCollectImagesForUnreadSummary(AIService.Prompts.SUMMARY_PREFIX));
+        assertFalse(AIService.shouldUsePaseoForImages(false, List.of("mxc://server/image")));
+        assertFalse(AIService.shouldUsePaseoForImages(true, null));
+        assertFalse(AIService.shouldUsePaseoForImages(true, List.of()));
+        assertTrue(AIService.shouldUsePaseoForImages(true, List.of("mxc://server/image")));
+    }
+
+    @Test
+    void qualityFilteringDropsImagesFromFilteredMessages() {
+        RoomHistoryManager.ChatLogsResult history = new RoomHistoryManager.ChatLogsResult(
+                List.of("[date] <@filtered:example.org> image", "[date] <@kept:example.org> text"),
+                "$excluded", null,
+                List.of("mxc://server/excluded", "mxc://server/kept"), List.of("a.png", "b.png"),
+                List.of("$excluded", "$kept"), List.of("$excluded", "$kept"));
+
+        RoomHistoryManager.ChatLogsResult filtered =
+                AIService.filterHistoryUserMessages(history, "@filtered:example.org");
+
+        assertEquals(List.of("$kept"), filtered.eventIds);
+        assertEquals(List.of("mxc://server/kept"), filtered.imageUrls);
+        assertEquals(List.of("$kept"), filtered.imageEventIds);
+    }
+
+    @Test
+    void configIgnoresRemovedVisionSettings() throws Exception {
+        MatrixRobobot.Config config = new ObjectMapper().readValue(
+                "{\"imageCaptionBackend\":\"OLLAMA\",\"imageCaptionModel\":\"unused\"}",
+                MatrixRobobot.Config.class);
+
+        assertNotNull(config);
     }
 
     @Test

@@ -24,6 +24,11 @@ if ! command -v mvn &> /dev/null; then
     exit 1
 fi
 
+if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+    echo -e "${RED}Error: Node.js and npm are required for the Paseo image bridge.${NC}"
+    exit 1
+fi
+
 if ! command -v git &> /dev/null; then
     echo -e "${RED}Error: git is not installed.${NC}"
     exit 1
@@ -36,7 +41,11 @@ if [ ! -f "config.json" ]; then
     exit 1
 fi
 
-# 3. Build the project
+# 3. Install the Paseo bridge runtime
+echo -e "${BLUE}Installing Paseo bridge dependencies...${NC}"
+npm ci --omit=dev --prefix paseo-bridge
+
+# 4. Build the project
 echo -e "${BLUE}Building project with Maven...${NC}"
 mvn clean package
 
@@ -46,7 +55,7 @@ if [ ! -f "$JAR_FILE" ]; then
     exit 1
 fi
 
-# 4. Prepare Service variables
+# 5. Prepare Service variables
 SERVICE_NAME="matrix-robobot"
 USER_NAME=$(whoami)
 WORK_DIR=$(pwd)
@@ -56,7 +65,7 @@ GIT_BIN=$(which git)
 
 echo -e "${BLUE}Configuring systemd service: $SERVICE_NAME...${NC}"
 
-# 5. Create the service file content
+# 6. Create the service file content
 SERVICE_CONTENT="[Unit]
 Description=Matrix Robobot Service
 Wants=network-online.target
@@ -69,6 +78,7 @@ WorkingDirectory=$WORK_DIR
 # ExecStartPre=-$GIT_BIN pull
 # ExecStartPre=$MVN_BIN clean package
 Environment=MALLOC_ARENA_MAX=2
+EnvironmentFile=-%h/.config/matrix-robobot/paseo.env
 ExecStart=$JAVA_BIN -Xms32m -Xmx256m -XX:+UseSerialGC -Xss512k -XX:ReservedCodeCacheSize=48m -XX:MaxMetaspaceSize=96m -XX:MaxDirectMemorySize=64m -Xshare:auto -XX:+ExitOnOutOfMemoryError -jar $WORK_DIR/$JAR_FILE
 Restart=always
 RestartSec=10
@@ -79,13 +89,13 @@ StandardError=journal
 [Install]
 WantedBy=default.target"
 
-# 6. Check if service is running and stop it for update (if exists)
+# 7. Check if service is running and stop it for update (if exists)
 if systemctl --user is-active --quiet "$SERVICE_NAME"; then
     echo -e "${BLUE}Stopping existing user service for update...${NC}"
     systemctl --user stop "$SERVICE_NAME"
 fi
 
-# 7. Write to user systemd directory
+# 8. Write to user systemd directory
 USER_SYSTEMD_DIR="$HOME/.config/systemd/user"
 mkdir -p "$USER_SYSTEMD_DIR"
 

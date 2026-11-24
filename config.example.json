@@ -29,6 +29,5 @@
   "cloudflareModels": ["@cf/openai/gpt-oss-120b"],
   "ollamaModels": ["beam", "nemotron-3-ultra", "gpt-oss:120b", "gemma4:31b"],
   "sambaNovaModels": ["DeepSeek-V3.1", "gpt-oss-120b", "Meta-Llama-3.3-70B-Instruct"],
-  "imageCaptionBackend": "OLLAMA",
-  "imageCaptionModel": "qwen3-vl:4b"
+  "paseoProvider": "opencode/hy4-flash-free"
 }

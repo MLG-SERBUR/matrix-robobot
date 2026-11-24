@@ -2,6 +2,7 @@ package com.robomwm.ai.matrixrobobot;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MatrixRobobot {
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Config {
         public String homeserver;
         public String accessToken;
@@ -60,10 +62,10 @@ public class MatrixRobobot {
         public java.util.List<String> cloudflareModels;
         public java.util.List<String> ollamaModels;
         public java.util.List<String> sambaNovaModels;
-        public String imageCaptionBackend;
-        public String imageCaptionModel;
+        public String paseoProvider;
     }
 
+    private static final String DEFAULT_PASEO_PROVIDER = "opencode/hy4-flash-free";
     private static final Map<String, AtomicBoolean> runningOperations = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
@@ -113,31 +115,22 @@ public class MatrixRobobot {
                 config.accessToken);
         TextSearchService textSearchService = new TextSearchService(matrixClient, historyManager, client, mapper, url,
                 config, runningOperations);
+        String paseoProvider = config.paseoProvider == null || config.paseoProvider.isBlank()
+                ? DEFAULT_PASEO_PROVIDER : config.paseoProvider;
+        PaseoDaemonClient paseoClient = new PaseoDaemonClient(
+                java.util.List.of("node", "paseo-bridge/paseo-bridge.mjs"), paseoProvider,
+                System.getProperty("user.dir"));
+        PaseoImageFetcher paseoImageFetcher = new PaseoImageFetcher(client, url, config.accessToken);
         AIService aiService = new AIService(client, mapper, url, config.accessToken, config.arliApiKey,
                 config.cerebrasApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
                 config.ollamaProxyApiKey, config.ollamaProxyUrl,
                 config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels, 
-                config.freeLlmModels, config.ollamaProxyModels, extraProviders);
-        ImageFetcher imageFetcher = new ImageFetcher(client, mapper, url, config.accessToken);
-        VisionAIService visionAIService;
-        if ("OLLAMA".equalsIgnoreCase(config.imageCaptionBackend) || "OLLAMA_PROXY".equalsIgnoreCase(config.imageCaptionBackend)) {
-            visionAIService = new OllamaVisionAIService(client, mapper, url, config.accessToken,
-                    config.arliApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
-                    config.ollamaProxyApiKey, config.ollamaProxyUrl, imageFetcher, config.imageCaptionModel,
-                    config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels,
-                    config.freeLlmModels, config.ollamaProxyModels, extraProviders);
-        } else {
-            visionAIService = new VisionAIService(client, mapper, url, config.accessToken,
-                    config.arliApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
-                    config.ollamaProxyApiKey, config.ollamaProxyUrl, imageFetcher,
-                    config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels,
-                    config.freeLlmModels, config.ollamaProxyModels, extraProviders);
-        }
+                config.freeLlmModels, config.ollamaProxyModels, extraProviders, paseoClient, paseoImageFetcher);
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
         CommandDispatcher dispatcher = new CommandDispatcher(client, mapper, url, config.accessToken,
                 config.commandRoomId, config.exportRoomId, historyManager, runningOperations, textSearchService,
-                aiService, visionAIService, semanticSearchService, timezoneService, config.arliApiKey);
+                aiService, semanticSearchService, timezoneService, config.arliApiKey);
 
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, aiService,

@@ -1001,10 +1001,20 @@ public class RoomHistoryManager {
 
     public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId,
             boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag, ProgressCallback progressCallback) {
+        return fetchUnreadMessages(roomId, lastReadEventId, zoneId, false, aiFriendlyTimestamps, abortFlag,
+                progressCallback);
+    }
+
+    public ChatLogsResult fetchUnreadMessages(String roomId, String lastReadEventId, ZoneId zoneId,
+            boolean collectImages, boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag,
+            ProgressCallback progressCallback) {
         if (lastReadEventId == null)
             return new ChatLogsResult(new ArrayList<>(), null);
 
         List<RawLogLine> rawLines = new ArrayList<>();
+        List<String> imageUrls = collectImages ? new ArrayList<>() : null;
+        List<String> imageCaptions = collectImages ? new ArrayList<>() : null;
+        List<String> imageEventIds = collectImages ? new ArrayList<>() : null;
         String firstEventId = null;
 
         try {
@@ -1050,6 +1060,14 @@ public class RoomHistoryManager {
                         if (body != null && sender != null) {
                             rawLines.add(new RawLogLine(originServerTs, sender, body, eventId));
                             firstEventId = eventId;
+                            if (collectImages && "m.image".equals(ev.path("content").path("msgtype").asText(null))) {
+                                String imageUrl = ev.path("content").path("url").asText(null);
+                                if (imageUrl != null && !imageUrl.isEmpty()) {
+                                    imageUrls.add(imageUrl);
+                                    imageCaptions.add(body);
+                                    imageEventIds.add(eventId);
+                                }
+                            }
                         }
                     }
                 }
@@ -1065,10 +1083,17 @@ public class RoomHistoryManager {
             }
 
             Collections.reverse(rawLines);
-            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null, extractEventIds(rawLines));
+            if (collectImages) {
+                Collections.reverse(imageUrls);
+                Collections.reverse(imageCaptions);
+                Collections.reverse(imageEventIds);
+            }
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), firstEventId, null,
+                    imageUrls, imageCaptions, imageEventIds, extractEventIds(rawLines));
         } catch (Exception e) {
             System.err.println("Error fetching unread messages: " + e.getMessage());
-            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, null, extractEventIds(rawLines));
+            return new ChatLogsResult(formatLogLines(rawLines, zoneId, aiFriendlyTimestamps), null, null,
+                    imageUrls, imageCaptions, imageEventIds, extractEventIds(rawLines));
         }
     }
 

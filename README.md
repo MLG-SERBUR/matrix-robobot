@@ -27,7 +27,8 @@ Create a `config.json` file in the same directory as the JAR:
   "arliModels": ["Qwen3.5-27B-Derestricted"],
   "cerebrasModels": ["qwen-3-235b-a22b-instruct-2507"],
   "groqModels": ["meta-llama/llama-4-scout-17b-16e-instruct"],
-  "openrouterModels": ["openrouter/auto"]
+  "openrouterModels": ["openrouter/auto"],
+  "paseoProvider": "opencode/hy4-flash-free"
 }
 ```
 
@@ -53,6 +54,9 @@ Create a `config.json` file in the same directory as the JAR:
 - `openrouterModels`: List of OpenRouter models (first model used)
 - `ollamaModels`: Ollama Cloud models, tried last in automatic fallback. Beam is tried first when configured; remaining Ollama models are randomized per query since usage is tracked for the whole account rather than per model.
 - `geminiModels`/`mistralModels`/`zaiModels`/`cloudflareModels`/`sambaNovaModels`: Model lists for the other providers. They are tried after Groq and before OpenRouter. Cloudflare model order is randomized per query since usage is tracked for the whole account rather than per model.
+- `paseoProvider`: Paseo provider/model used for bounded AI queries and automatic TLDRs when their selected history contains images (defaults to `opencode/hy4-flash-free`).
+
+Paseo image queries require Node.js/npm and a running Paseo daemon. `./install_service.sh` installs the bridge dependency; the daemon defaults to `ws://127.0.0.1:6767/ws`. To override the connection, create `~/.config/matrix-robobot/paseo.env` with `PASEO_WS_URL=...` and, when needed, `PASEO_DAEMON_PASSWORD=...`. Requests without images and unbounded history continue to use the configured AI provider chain.
 
 ## Commands
 
@@ -76,6 +80,7 @@ All commands must be sent in the **command room** specified in your config:
 ## Prerequisites
 - Java 17+
 - Maven
+- Node.js 20.19+ and npm (for Paseo image queries)
 
 ## Build
 ```bash

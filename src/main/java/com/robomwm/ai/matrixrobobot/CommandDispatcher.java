@@ -35,7 +35,6 @@ public class CommandDispatcher {
     private final String exportRoomId;
     private final TextSearchService textSearchService;
     private final AIService aiService;
-    private final VisionAIService visionAIService;
     private final DebugAIService debugAIService;
     private final SemanticSearchService semanticSearchService;
     private final TimezoneService timezoneService;
@@ -174,7 +173,7 @@ public class CommandDispatcher {
     public CommandDispatcher(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
             String commandRoomId, String exportRoomId, RoomHistoryManager historyManager,
             Map<String, AtomicBoolean> runningOperations, TextSearchService textSearchService,
-            AIService aiService, VisionAIService visionAIService,
+            AIService aiService,
             SemanticSearchService semanticSearchService,
             TimezoneService timezoneService, String arliApiKey) {
         this.matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
@@ -184,7 +183,6 @@ public class CommandDispatcher {
         this.exportRoomId = exportRoomId;
         this.textSearchService = textSearchService;
         this.aiService = aiService;
-        this.visionAIService = visionAIService;
         this.debugAIService = new DebugAIService(client, mapper, homeserver, accessToken, arliApiKey);
         this.semanticSearchService = semanticSearchService;
         this.timezoneService = timezoneService;
@@ -239,16 +237,8 @@ public class CommandDispatcher {
             handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!overview",
                     AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
             return true;
-        } else if (trimmed.matches("!ioverview(?:\\s+.*)?")) {
-            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!ioverview",
-                    AIService.Backend.AUTO, AIService.Prompts.OVERVIEW_PREFIX);
-            return true;
         } else if (trimmed.matches("!summary(?:\\s+.*)?")) {
             handleHistoryAICommand(aiService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!summary",
-                    AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
-            return true;
-        } else if (trimmed.matches("!isummary(?:\\s+.*)?")) {
-            handleHistoryAICommand(visionAIService, trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, "!isummary",
                     AIService.Backend.AUTO, AIService.Prompts.SUMMARY_PREFIX);
             return true;
         } else if (isAskCommand(trimmed)) {
@@ -1268,9 +1258,7 @@ public class CommandDispatcher {
                 helpText = "**AI Commands (Page 2/3)**\n" +
                         "* `!ask [question]` - Query AI backend with up to 12k tokens of history (no timestamps)\n" +
                         "* `!summary <link or count or duration> [question]` - Condensed summary (No chunking)\n" +
-                        "* `!isummary <link or count or duration> [question]` - Condensed summary with images (Vision ArliAI)\n" +
                         "* `!overview <link or count or duration> [question]` - Detailed overview (No chunking)\n" +
-                        "* `!ioverview <link or count or duration> [question]` - Detailed overview with images (Vision ArliAI)\n" +
                         "* `!tldr <link or count or duration> [question]` - Very concise summary in bullet points, reading time under 15s. May append [question] for focused output.\n" +
                         "* `!debugai <link or count or duration> [question]` - Query AI backend with a custom prompt via question or chat logs\n" +
                         "* `!arliai <model> <prompt>` - Query ArliAI with specific model (fuzzy matched)\n" +
