@@ -63,11 +63,11 @@ public final class PaseoDaemonClient {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
             while (!process.waitFor(1, TimeUnit.SECONDS)) {
                 if (abortFlag != null && abortFlag.get()) {
-                    process.destroyForcibly();
+                    terminateProcess(process);
                     throw new java.util.concurrent.CancellationException("Paseo query aborted");
                 }
                 if (System.nanoTime() >= deadline) {
-                    process.destroyForcibly();
+                    terminateProcess(process);
                     throw new IOException("Paseo bridge timed out after " + timeoutSeconds + " seconds");
                 }
             }
@@ -83,15 +83,27 @@ public final class PaseoDaemonClient {
             }
             return answer;
         } catch (InterruptedException e) {
-            process.destroyForcibly();
+            terminateProcess(process);
             Thread.currentThread().interrupt();
             throw e;
         } catch (CompletionException e) {
-            process.destroyForcibly();
+            terminateProcess(process);
             throw new IOException("Failed to read Paseo bridge output", e.getCause());
         } catch (IOException | RuntimeException e) {
-            process.destroyForcibly();
+            terminateProcess(process);
             throw e;
+        }
+    }
+
+    private static void terminateProcess(Process process) {
+        process.destroy();
+        try {
+            if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+            }
+        } catch (InterruptedException e) {
+            process.destroyForcibly();
+            Thread.currentThread().interrupt();
         }
     }
 
