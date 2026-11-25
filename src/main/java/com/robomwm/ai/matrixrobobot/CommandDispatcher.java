@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Routes and executes commands (export, arliai, semantic, grep,
+ * Routes and executes commands (export, semantic, grep,
  * search, etc.)
  * Keeps only non-!last commands here. !last is handled in the main bot.
  */
@@ -35,10 +35,8 @@ public class CommandDispatcher {
     private final String exportRoomId;
     private final TextSearchService textSearchService;
     private final AIService aiService;
-    private final DebugAIService debugAIService;
     private final SemanticSearchService semanticSearchService;
     private final TimezoneService timezoneService;
-    private final AiSearchService aiSearchService;
     private final MatrixSearchService matrixSearchService;
 
     /**
@@ -153,29 +151,12 @@ public class CommandDispatcher {
         return new ParsedHistoryArgs(hours, maxMessages, startEventId, forward, remaining);
     }
 
-    private static final List<String> ARLIAI_MODELS = List.of(
-            "Qwen3.5-27B-Anko",
-            "Qwen3.5-27B-BlueStar-Derestricted",
-            "Qwen3.5-27B-BlueStar-Derestricted-Lite",
-            "Qwen3.5-27B-BlueStar-v2-Derestricted",
-            "Qwen3.5-27B-BlueStar-v2-Derestricted-Lite",
-            "Qwen3.5-27B-Musica-v1",
-            "Qwen3.5-27B-Omega-Evolution-v2.0-Derestricted",
-            "Qwen3.5-27B-Omega-Evolution-v2.0-Derestricted-Lite",
-            "Qwen3.5-27B-Vivid-Durian",
-            "Qwen3.5-27B-Writer-Derestricted",
-            "Qwen3.5-27B-Writer-Derestricted-Lite",
-            "Qwen3.5-27B-Writer-V2-Derestricted",
-            "Qwen3.5-27B-Writer-V2-Derestricted-Lite",
-            "Qwen3.5-27B-Derestricted"
-    );
-
     public CommandDispatcher(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
             String commandRoomId, String exportRoomId, RoomHistoryManager historyManager,
             Map<String, AtomicBoolean> runningOperations, TextSearchService textSearchService,
             AIService aiService,
             SemanticSearchService semanticSearchService,
-            TimezoneService timezoneService, String arliApiKey) {
+            TimezoneService timezoneService) {
         this.matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
         this.historyManager = historyManager;
         this.runningOperations = runningOperations;
@@ -183,10 +164,8 @@ public class CommandDispatcher {
         this.exportRoomId = exportRoomId;
         this.textSearchService = textSearchService;
         this.aiService = aiService;
-        this.debugAIService = new DebugAIService(client, mapper, homeserver, accessToken, arliApiKey);
         this.semanticSearchService = semanticSearchService;
         this.timezoneService = timezoneService;
-        this.aiSearchService = new AiSearchService(client, mapper, homeserver, accessToken, arliApiKey);
         this.matrixSearchService = new MatrixSearchService(matrixClient, client, mapper, homeserver, accessToken, runningOperations);
     }
 
@@ -243,15 +222,6 @@ public class CommandDispatcher {
             return true;
         } else if (isAskCommand(trimmed)) {
             handleAsk(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId, null, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.AUTO);
-            return true;
-        } else if (trimmed.matches("!debugarliai(?:\\s+.*)?")) {
-            handleDebugArliai(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
-            return true;
-        } else if (trimmed.matches("!arliai(?:\\s+.*)?")) {
-            handleArliai(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
-            return true;
-        } else if (trimmed.matches("!aisearch\\s+(\\d+)([dh])\\s+(.+)")) {
-            handleAiSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
             return true;
         } else if (trimmed.matches("!semantic\\s+(\\d+)h\\s+(.+)")) {
             handleSemanticSearch(trimmed, roomId, sender, prevBatch, responseRoomId, exportRoomId);
@@ -657,125 +627,6 @@ public class CommandDispatcher {
         }).start();
     }
 
-    /**
-     * Fuzzy match a model name input to the list of available models.
-     * Uses case-insensitive contains matching.
-     */
-    private String fuzzyMatchModel(String input) {
-        if (input == null || input.isEmpty()) {
-            return null;
-        }
-        
-        String lowerInput = input.toLowerCase();
-        
-        // First, try exact match (case-insensitive)
-        for (String model : ARLIAI_MODELS) {
-            if (model.equalsIgnoreCase(input)) {
-                return model;
-            }
-        }
-        
-        // Then try contains match
-        for (String model : ARLIAI_MODELS) {
-            if (model.toLowerCase().contains(lowerInput)) {
-                return model;
-            }
-        }
-        
-        // Try matching with underscores replaced by hyphens
-        String normalizedInput = lowerInput.replace("_", "-");
-        for (String model : ARLIAI_MODELS) {
-            if (model.toLowerCase().replace("_", "-").contains(normalizedInput)) {
-                return model;
-            }
-        }
-        
-        return null;
-    }
-
-    private void handleArliai(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-                              String exportRoomId) {
-        // Format: !arliai <model> <prompt>
-        String args = trimmed.replaceFirst("^!arliai\\s*", "").trim();
-        
-        if (args.isEmpty()) {
-            matrixClient.sendText(responseRoomId, "Usage: !arliai <model> <prompt>\n" +
-                    "Available models: " + String.join(", ", ARLIAI_MODELS) + "\n" +
-                    "Model names are fuzzy matched (e.g., 'musica', 'vivid', 'writer', 'bluestar')");
-            return;
-        }
-        
-        String[] parts = args.split("\\s+", 2);
-        String modelInput = parts[0];
-        String question = parts.length > 1 ? parts[1].trim() : null;
-        
-        String matchedModel = fuzzyMatchModel(modelInput);
-        
-        if (matchedModel == null) {
-            matrixClient.sendText(responseRoomId, "Unknown model: " + modelInput + "\n" +
-                    "Available models: " + String.join(", ", ARLIAI_MODELS) + "\n" +
-                    "Model names are fuzzy matched (e.g., 'musica', 'vivid', 'writer', 'bluestar')");
-            return;
-        }
-        
-        if (question == null || question.isEmpty()) {
-            matrixClient.sendText(responseRoomId, "Please provide a prompt after the model name.\n" +
-                    "Usage: !arliai " + modelInput + " <your prompt here>");
-            return;
-        }
-
-        System.out.println("Received !arliai command in " + roomId + " from " + sender + " (model: " + matchedModel + ")");
-
-        AtomicBoolean abortFlag = new AtomicBoolean(false);
-        runningOperations.put(sender, abortFlag);
-
-        final String fQuestion = question;
-        final String fModel = matchedModel;
-        ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-
-        new Thread(() -> {
-            try {
-                aiService.queryAsk(responseRoomId, exportRoomId, null, fQuestion, AIService.Prompts.ASK_PREFIX, abortFlag, fModel, AIService.AI_TIMEOUT_SECONDS, AIService.Backend.ARLIAI, zoneId);
-            } finally {
-                runningOperations.remove(sender);
-            }
-        }).start();
-    }
-
-    private void handleDebugArliai(String trimmed, String roomId, String sender, String prevBatch, String responseRoomId,
-                                   String exportRoomId) {
-        // Format: !debugarliai <model> [param=value ...] <prompt>
-        String args = trimmed.replaceFirst("^!debugarliai\\s*", "").trim();
-        
-        if (args.isEmpty()) {
-            matrixClient.sendMarkdown(responseRoomId, DebugAIService.getHelpText());
-            return;
-        }
-        
-        DebugAIService.ParseResult result = DebugAIService.parseArguments(args);
-        
-        if (result.hasError()) {
-            matrixClient.sendText(responseRoomId, "Error: " + result.error + "\n\n" + DebugAIService.getHelpText());
-            return;
-        }
-
-        System.out.println("Received !debugarliai command in " + roomId + " from " + sender + " (model: " + result.config.model + ")");
-
-        AtomicBoolean abortFlag = new AtomicBoolean(false);
-        runningOperations.put(sender, abortFlag);
-
-        final DebugAIService.DebugConfig fConfig = result.config;
-        final String fPrompt = result.prompt;
-
-        new Thread(() -> {
-            try {
-                debugAIService.queryDebugAI(responseRoomId, exportRoomId, null, fConfig, fPrompt, abortFlag, historyManager);
-            } finally {
-                runningOperations.remove(sender);
-            }
-        }).start();
-    }
-
     private void handleSemanticSearch(String trimmed, String roomId, String sender, String prevBatch,
             String responseRoomId, String exportRoomId) {
         Matcher matcher = Pattern.compile("!semantic\\s+(\\d+)h\\s+(.+)").matcher(trimmed);
@@ -792,33 +643,6 @@ public class CommandDispatcher {
             new Thread(() -> {
                 try {
                     semanticSearchService.performSemanticSearch(responseRoomId, exportRoomId, hours, null,
-                        query, zoneId, abortFlag);
-                } finally {
-                    runningOperations.remove(sender);
-                }
-            }).start();
-        }
-    }
-
-    private void handleAiSearch(String trimmed, String roomId, String sender, String prevBatch,
-            String responseRoomId, String exportRoomId) {
-        Matcher matcher = Pattern.compile("!aisearch\\s+(\\d+)([dh])\\s+(.+)").matcher(trimmed);
-        if (matcher.matches()) {
-            int duration = Integer.parseInt(matcher.group(1));
-            String unit = matcher.group(2);
-            String query = matcher.group(3).trim();
-
-            ZoneId zoneId = resolveZoneId(sender, responseRoomId);
-
-            int hours = unit.equals("d") ? duration * 24 : duration;
-
-            AtomicBoolean abortFlag = new AtomicBoolean(false);
-            runningOperations.put(sender, abortFlag);
-
-            System.out.println("Received aisearch command in " + roomId + " from " + sender);
-            new Thread(() -> {
-                try {
-                    aiSearchService.performAiSearch(responseRoomId, exportRoomId, hours, null,
                         query, zoneId, abortFlag);
                 } finally {
                     runningOperations.remove(sender);
@@ -1261,9 +1085,6 @@ public class CommandDispatcher {
                         "* `!overview <link or count or duration> [question]` - Detailed overview (No chunking)\n" +
                         "* `!tldr <link or count or duration> [question]` - Very concise summary in bullet points, reading time under 15s. May append [question] for focused output.\n" +
                         "* `!debugai <link or count or duration> [question]` - Query AI backend with a custom prompt via question or chat logs\n" +
-                        "* `!arliai <model> <prompt>` - Query ArliAI with specific model (fuzzy matched)\n" +
-                        "* `!debugarliai <model> [params...] <prompt>` - Query ArliAI with custom API parameters\n" +
-                        "* `!aisearch <hours>h <query>` - AI-powered agentic search (files, images, videos, conversations)\n\n" +
                         "**User-specific**:\n" +
                         "* `!userask <@user or username> [question]` - Query AI using ONLY messages from a specific user\n\n" +
                         "**Quality-filtered variants** (ignores specific spammy user):\n" +

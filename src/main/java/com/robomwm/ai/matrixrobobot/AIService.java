@@ -23,7 +23,6 @@ public class AIService {
     protected final ObjectMapper mapper;
     protected final String homeserver;
     protected final String accessToken;
-    protected final String arliApiKey;
     protected final String cerebrasApiKey;
     protected final String groqApiKey;
     protected final String openrouterApiKey;
@@ -34,7 +33,6 @@ public class AIService {
     protected final Random random;
     public static final int AI_TIMEOUT_SECONDS = 1200;
     public static final String QUALITY_FILTER_USER = "@buynbadrah:mikuplushfarm.ovh";
-    protected final List<String> arliModels;
     protected final List<String> cerebrasModels;
     protected final List<String> groqModels;
     protected final List<String> openrouterModels;
@@ -44,37 +42,36 @@ public class AIService {
     private final PaseoDaemonClient paseoClient;
     private final PaseoImageFetcher paseoImageFetcher;
 
-    public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
+    public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
             String cerebrasApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
             String ollamaProxyApiKey, String ollamaProxyUrl,
-            List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, 
+            List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels,
             List<String> freeLlmModels, List<String> ollamaProxyModels) {
-        this(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey, groqApiKey, openrouterApiKey,
-                freeLlmApiKey, ollamaProxyApiKey, ollamaProxyUrl, arliModels, cerebrasModels, groqModels,
+        this(client, mapper, homeserver, accessToken, cerebrasApiKey, groqApiKey, openrouterApiKey,
+                freeLlmApiKey, ollamaProxyApiKey, ollamaProxyUrl, cerebrasModels, groqModels,
                 openrouterModels, freeLlmModels, ollamaProxyModels, null);
     }
 
-    public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
+    public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
             String cerebrasApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
             String ollamaProxyApiKey, String ollamaProxyUrl,
-            List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels, 
+            List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels,
             List<String> freeLlmModels, List<String> ollamaProxyModels, ExtraProviders extra) {
-        this(client, mapper, homeserver, accessToken, arliApiKey, cerebrasApiKey, groqApiKey, openrouterApiKey,
-                freeLlmApiKey, ollamaProxyApiKey, ollamaProxyUrl, arliModels, cerebrasModels, groqModels,
+        this(client, mapper, homeserver, accessToken, cerebrasApiKey, groqApiKey, openrouterApiKey,
+                freeLlmApiKey, ollamaProxyApiKey, ollamaProxyUrl, cerebrasModels, groqModels,
                 openrouterModels, freeLlmModels, ollamaProxyModels, extra, null, null);
     }
 
-    public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken, String arliApiKey,
+    public AIService(HttpClient client, ObjectMapper mapper, String homeserver, String accessToken,
             String cerebrasApiKey, String groqApiKey, String openrouterApiKey, String freeLlmApiKey,
             String ollamaProxyApiKey, String ollamaProxyUrl,
-            List<String> arliModels, List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels,
+            List<String> cerebrasModels, List<String> groqModels, List<String> openrouterModels,
             List<String> freeLlmModels, List<String> ollamaProxyModels, ExtraProviders extra,
             PaseoDaemonClient paseoClient, PaseoImageFetcher paseoImageFetcher) {
         this.client = client;
         this.mapper = mapper;
         this.homeserver = homeserver;
         this.accessToken = accessToken;
-        this.arliApiKey = arliApiKey;
         this.cerebrasApiKey = cerebrasApiKey;
         this.groqApiKey = groqApiKey;
         this.openrouterApiKey = openrouterApiKey;
@@ -82,7 +79,6 @@ public class AIService {
         this.ollamaProxyApiKey = ollamaProxyApiKey;
         this.ollamaProxyUrl = ollamaProxyUrl != null ? ollamaProxyUrl : "http://localhost:8000/api/chat";
         // Defaults live in config.example.json only; no code fallback — missing/null or empty disables provider.
-        this.arliModels = arliModels == null ? java.util.Collections.emptyList() : arliModels;
         this.cerebrasModels = cerebrasModels == null ? java.util.Collections.emptyList() : cerebrasModels;
         this.groqModels = groqModels == null ? java.util.Collections.emptyList() : groqModels;
         this.openrouterModels = openrouterModels == null ? java.util.Collections.emptyList() : openrouterModels;
@@ -134,7 +130,7 @@ public class AIService {
     }
 
     public enum Backend {
-        AUTO, ARLIAI, OLLAMA_PROXY, FREELLM, CEREBRAS, GROQ,
+        AUTO, OLLAMA_PROXY, FREELLM, CEREBRAS, GROQ,
         GEMINI, MISTRAL, ZAI, CLOUDFLARE, OLLAMA_CLOUD, SAMBANOVA,
         OPENROUTER
     }
@@ -179,18 +175,6 @@ public class AIService {
         }
     }
 
-    public static void applyArliAiNonThinkingDefaults(Map<String, Object> payload) {
-        payload.putIfAbsent("temperature", 0.3);
-        payload.putIfAbsent("top_p", 0.9);
-        payload.putIfAbsent("top_k", 20);
-        payload.putIfAbsent("min_p", 0.0);
-        payload.putIfAbsent("presence_penalty", 1.5);
-        payload.putIfAbsent("repetition_penalty", 1.0);
-        payload.put("reasoning_effort", "none");
-        payload.put("thinking_token_budget", 0);
-        payload.put("chat_template_kwargs", Map.of("enable_thinking", false));
-    }
-
     public static boolean isGroqQwenModel(String model) {
         return model != null && model.toLowerCase().contains("qwen");
     }
@@ -212,8 +196,6 @@ public class AIService {
         return GROQ_DEFAULT_IPTM_LIMIT;
     }
 
-    /** Observed ArliAI context window for the qwen fallback models. */
-    public static final int ARLIAI_INPUT_LIMIT = 12288;
     // Free-tier per-request input budgets (researched Sep 2026; recheck when
     // fallbacks start failing — providers change these without notice):
     // Cerebras free trial: 30K uncached input TPM (official model docs).
@@ -250,7 +232,7 @@ public class AIService {
      * Known input limit requiring a trim for this attempt, or null when the
      * attempt has no known restrictive limit. Currently only Groq qwen models
      * (~7k) qualify; gpt gathers at 8k need no trim, other providers fall
-     * through untrimmed (e.g. ArliAI 12k handles the full prompt).
+     * through untrimmed.
      */
     static Integer knownTrimLimitForAttempt(ProviderAttempt attempt) {
         if (attempt == null || attempt.provider == null) return null;
@@ -282,7 +264,6 @@ public class AIService {
         if (attempt == null || attempt.provider == null) return null;
         switch (attempt.provider.backend) {
             case GROQ: return groqIptmLimitForModel(attempt.model);
-            case ARLIAI: return ARLIAI_INPUT_LIMIT;
             case CEREBRAS: return CEREBRAS_INPUT_LIMIT;
             case GEMINI: return GEMINI_INPUT_LIMIT;
             case SAMBANOVA: return SAMBANOVA_INPUT_LIMIT;
@@ -705,7 +686,7 @@ public class AIService {
      * shrink {@code curLogs} (tail slice) so the next fallback gets a smaller prompt.
      * Always calibrates on TPM/context errors; only trims when trying a model
      * with a known restrictive limit (Groq qwen ~7k). Other failures fall
-     * through untrimmed (e.g. gpt 8k prompt stays full for ArliAI 12k).
+     * through untrimmed when no configured provider has a known limit.
      * Returns the rebuilt prompt when trimmed, null otherwise. Pure trim sizing via
      * TokenCalibrationManager.computeTrimmedSize.
      */
@@ -760,9 +741,8 @@ public class AIService {
 
     /**
      * Proactively grow {@code curLogs} toward a model's known input limit
-     * before trying it, so falling back to a larger budget (e.g. ArliAI 12k
-     * after a Groq 8k gather) uses the extra headroom instead of leaving it
-     * empty. Re-gathers from the original token; keeps existing logs when the
+     * before trying it, so falling back to a larger budget uses the extra
+     * headroom instead of leaving it empty. Re-gathers from the original token; keeps existing logs when the
      * fetch adds nothing. No-op unless unbounded !ask and the prompt is
      * already well under the attempt's limit.
      */
@@ -1131,7 +1111,7 @@ public class AIService {
     }
 
     static final List<Backend> AUTO_PROVIDER_ORDER = List.of(
-            Backend.GROQ, Backend.ARLIAI, Backend.OLLAMA_PROXY,
+            Backend.GROQ, Backend.OLLAMA_PROXY,
             Backend.FREELLM, Backend.CEREBRAS, Backend.GEMINI, Backend.MISTRAL, Backend.CLOUDFLARE,
             Backend.ZAI, Backend.SAMBANOVA, Backend.OPENROUTER, Backend.OLLAMA_CLOUD);
 
@@ -1165,8 +1145,6 @@ public class AIService {
                 for (String model : groqModels) {
                     attempts.add(new ProviderAttempt(provider, model));
                 }
-            } else if (backend == Backend.ARLIAI) {
-                attempts.add(new ProviderAttempt(provider, getRandomModel(arliModels)));
             } else if (backend == Backend.OPENROUTER) {
                 // For OpenRouter, prefer sending full models array so OpenRouter can use native fallback.
                 // Use a joined string for display, actual request will use models list.
@@ -1229,10 +1207,6 @@ public class AIService {
                                 "HTTP-Referer", "https://github.com/MLG-SERBUR/matrix-robobot",
                                 "X-Title", "Matrix Robobot"),
                         Map.of());
-            case ARLIAI:
-                return new ProviderConfig(Backend.ARLIAI, "ArliAI", "Arli AI", "ARLI_API_KEY", arliApiKey,
-                        "https://api.arliai.com/v1/chat/completions", true, Map.of(),
-                        Map.of("output_kind", "delta"));
             case FREELLM:
                 return new ProviderConfig(Backend.FREELLM, "FreeLLM", "FreeLLM", "FREELLM_API_KEY",
                         freeLlmApiKey, "http://localhost:3001/v1/chat/completions", true, Map.of(), Map.of());
@@ -1283,8 +1257,6 @@ public class AIService {
                 return groqModels.get(0);
             case OPENROUTER:
                 return openrouterModels.get(0);
-            case ARLIAI:
-                return getRandomModel(arliModels);
             case FREELLM:
                 return freeLlmModels.get(0);
             case OLLAMA_PROXY:
@@ -1335,24 +1307,12 @@ public class AIService {
                 eventIdHolder, footer, timeoutSeconds, abortFlag, useNotice, exportRoomId, firstEventId);
     }
 
-    protected String callArliAI(String prompt, String model, boolean skipSystem, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
-        return callStreaming(getProviderConfig(Backend.ARLIAI), prompt, model, skipSystem, false, responseRoomId, exportRoomId,
-                firstEventId, timeoutSeconds, abortFlag, footer);
-    }
-
-    protected String callArliAIStreamingToEvent(String prompt, String model, boolean skipSystem, String responseRoomId,
-            String[] eventIdHolder, String footer, int timeoutSeconds, java.util.concurrent.atomic.AtomicBoolean abortFlag,
-            boolean useNotice, String exportRoomId, String firstEventId) throws Exception {
-        return callStreamingToEvent(getProviderConfig(Backend.ARLIAI), prompt, model, skipSystem, false, responseRoomId,
-                eventIdHolder, footer, timeoutSeconds, abortFlag, useNotice, exportRoomId, firstEventId);
-    }
-
     private String callStreaming(ProviderConfig provider, String prompt, String model, boolean skipSystem,
             boolean isAsk, String responseRoomId, String exportRoomId, String firstEventId, int timeoutSeconds,
             java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
         HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, true, timeoutSeconds);
         return AIRequestQueue.run(provider.displayName + " (" + model + ") streaming",
-                () -> streamArliAIResponse(request, responseRoomId, exportRoomId, firstEventId, provider.displayName,
+                () -> streamProviderResponse(request, responseRoomId, exportRoomId, firstEventId, provider.displayName,
                         abortFlag, footer));
     }
 
@@ -1362,18 +1322,18 @@ public class AIService {
             String firstEventId) throws Exception {
         HttpRequest request = buildChatCompletionRequest(provider, prompt, model, skipSystem, isAsk, true, timeoutSeconds);
         return AIRequestQueue.run(provider.displayName + " (" + model + ") streaming",
-                () -> streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, provider.displayName,
+                () -> streamProviderResponseToEvent(request, responseRoomId, eventIdHolder, provider.displayName,
                         abortFlag, footer, useNotice, exportRoomId, firstEventId));
     }
 
 
-    protected String streamArliAIResponse(HttpRequest request, String responseRoomId, String exportRoomId, String firstEventId, String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
+    protected String streamProviderResponse(HttpRequest request, String responseRoomId, String exportRoomId, String firstEventId, String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer) throws Exception {
         String[] eventIdHolder = new String[]{null};
-        return streamArliAIResponseToEvent(request, responseRoomId, eventIdHolder, aiName, abortFlag, footer, true,
+        return streamProviderResponseToEvent(request, responseRoomId, eventIdHolder, aiName, abortFlag, footer, true,
                 exportRoomId, firstEventId);
     }
 
-    protected String streamArliAIResponseToEvent(HttpRequest request, String responseRoomId, String[] eventIdHolder,
+    protected String streamProviderResponseToEvent(HttpRequest request, String responseRoomId, String[] eventIdHolder,
             String aiName, java.util.concurrent.atomic.AtomicBoolean abortFlag, String footer, boolean useNotice,
             String exportRoomId, String firstEventId) throws Exception {
         MatrixClient matrixClient = new MatrixClient(client, mapper, homeserver, accessToken);
@@ -1440,7 +1400,7 @@ public class AIService {
                                 responseContent.append(message.get("content").asText());
                             }
                         } 
-                        // Handle OpenAI/ArliAI format
+                        // Handle OpenAI-compatible format
                         else if (node.has("choices")) {
                             JsonNode choices = node.path("choices");
                             if (choices.isArray() && choices.size() > 0) {
@@ -2037,9 +1997,6 @@ public class AIService {
             payload.put("messages", buildMessages(prompt, skipSystem, isAsk));
             payload.put("stream", stream);
             payload.putAll(provider.extraPayload);
-        }
-        if (provider.backend == Backend.ARLIAI) {
-            applyArliAiNonThinkingDefaults(payload);
         }
         if (provider.backend == Backend.GROQ && isGroqQwenModel(model)) {
             applyGroqQwenNonThinkingDefaults(payload);

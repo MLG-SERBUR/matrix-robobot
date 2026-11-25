@@ -36,14 +36,12 @@ public class MatrixRobobot {
         public String accessToken;
         public String commandRoomId;
         public String exportRoomId;
-        public String arliApiKey;
         public String cerebrasApiKey;
         public String groqApiKey;
         public String openrouterApiKey;
         public String freeLlmApiKey;
         public String ollamaProxyApiKey;
         public String ollamaProxyUrl;
-        public java.util.List<String> arliModels;
         public java.util.List<String> cerebrasModels;
         public java.util.List<String> groqModels;
         public java.util.List<String> openrouterModels;
@@ -121,16 +119,16 @@ public class MatrixRobobot {
                 java.util.List.of("node", "paseo-bridge/paseo-bridge.mjs"), paseoProvider,
                 System.getProperty("user.dir"));
         PaseoImageFetcher paseoImageFetcher = new PaseoImageFetcher(client, url, config.accessToken);
-        AIService aiService = new AIService(client, mapper, url, config.accessToken, config.arliApiKey,
+        AIService aiService = new AIService(client, mapper, url, config.accessToken,
                 config.cerebrasApiKey, config.groqApiKey, config.openrouterApiKey, config.freeLlmApiKey,
                 config.ollamaProxyApiKey, config.ollamaProxyUrl,
-                config.arliModels, config.cerebrasModels, config.groqModels, config.openrouterModels, 
+                config.cerebrasModels, config.groqModels, config.openrouterModels,
                 config.freeLlmModels, config.ollamaProxyModels, extraProviders, paseoClient, paseoImageFetcher);
         SemanticSearchService semanticSearchService = new SemanticSearchService(client, mapper, url,
                 config.accessToken);
         CommandDispatcher dispatcher = new CommandDispatcher(client, mapper, url, config.accessToken,
                 config.commandRoomId, config.exportRoomId, historyManager, runningOperations, textSearchService,
-                aiService, semanticSearchService, timezoneService, config.arliApiKey);
+                aiService, semanticSearchService, timezoneService);
 
         // NEW: AutoLastService with explicit HttpClient passed
         AutoLastService autoLastService = new AutoLastService(matrixClient, lastMessageService, aiService,

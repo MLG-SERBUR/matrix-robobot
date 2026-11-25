@@ -5,7 +5,7 @@ Matrix bot that helps you stay in the loop by tracking read receipts, providing 
 ## Architecture
 
 The bot uses a **separate room configuration**:
-- **Command Room**: Where the bot listens for commands (`!testcommand`, `!export`, `!arliai`) and receives all responses
+- **Command Room**: Where the bot listens for commands (such as `!testcommand` and `!export`) and receives all responses
 - **Export Room**: Where chat history is fetched from for exports and AI queries (never receives messages)
 
 This allows you to keep command execution and responses in one room while fetching history from another.
@@ -20,11 +20,9 @@ Create a `config.json` file in the same directory as the JAR:
   "accessToken": "YOUR_ACCESS_TOKEN",
   "commandRoomId": "!commandRoom:matrix.example.com",
   "exportRoomId": "!exportRoom:matrix.example.com",
-  "arliApiKey": "YOUR_ARLI_API_KEY",
   "cerebrasApiKey": "YOUR_CEREBRAS_API_KEY",
   "groqApiKey": "YOUR_GROQ_API_KEY",
   "openrouterApiKey": "YOUR_OPENROUTER_API_KEY",
-  "arliModels": ["Qwen3.5-27B-Derestricted"],
   "cerebrasModels": ["qwen-3-235b-a22b-instruct-2507"],
   "groqModels": ["meta-llama/llama-4-scout-17b-16e-instruct"],
   "openrouterModels": ["openrouter/auto"],
@@ -37,7 +35,6 @@ Create a `config.json` file in the same directory as the JAR:
 - `accessToken`: Access token for the bot/user
 - `commandRoomId`: Room ID where commands are listened for and responses are sent
 - `exportRoomId`: Room ID where chat history is fetched from (for exports and AI queries)
-- `arliApiKey`: API key for Arli AI (optional, but required for Arli AI commands)
 - `cerebrasApiKey`: API key for Cerebras (optional)
 - `groqApiKey`: API key for Groq (optional)
 - `openrouterApiKey`: API key for OpenRouter (optional)
@@ -48,7 +45,6 @@ Create a `config.json` file in the same directory as the JAR:
 - `cloudflareAccountId`: Cloudflare account ID (required for Workers AI)
 - `ollamaApiKey`: API key for Ollama Cloud (ollama.com) (optional)
 - `sambaNovaApiKey`: API key for SambaNova (optional)
-- `arliModels`: List of Arli AI models to use (randomly selected for each query)
 - `cerebrasModels`: List of Cerebras models to try in sequence on fallback
 - `groqModels`: List of Groq models to try in sequence on fallback
 - `openrouterModels`: List of OpenRouter models (first model used)
@@ -69,13 +65,6 @@ All commands must be sent in the **command room** specified in your config:
   - Example: `!export 12h` will write a file like `!exportRoom-...-last12h-<ts>.txt`
 - `!export <link> [+|-<N>]` — Export from a message link with optional +/- count
   - Example: `!export https://matrix.to/#/.../$eventId +50` will export 50 messages after the linked message
-- `!arliai <TZ> <N>h [question]` — Queries Arli AI with chat logs from the **export room** for the last N hours. Chat logs will use the specified timezone for timestamps.
-  - Example: `!arliai PST 12h` — Analyzes last 12 hours of chat with PST timestamps
-  - Example: `!arliai EST 6h What was the main topic of discussion?` — Analyzes last 6 hours with a specific question
-- `!arliai-ts <YYYY-MM-DD-HH-MM> <TZ> <N>h [question]` — Queries Arli AI with chat logs from the **export room** starting at a specific date and time, covering the next N hours. Chat logs will use the specified timezone for timestamps.
-  - Example: `!arliai-ts 2024-12-30-23-59 PST 24h` — Analyzes 24 hours of chat starting at 23:59 PST on December 30, 2024
-  - Example: `!arliai-ts 2024-12-30-14-30 EST 6h What was discussed?` — Analyzes 6 hours starting at 14:30 EST on December 30, 2024 with a specific question
-  - Supported timezones: PST, PDT, MST, MDT, CST, CDT, EST, EDT, UTC, GMT
 
 ## Prerequisites
 - Java 17+

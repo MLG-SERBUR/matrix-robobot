@@ -34,7 +34,7 @@ public class TokenCalibrationManager {
     public static final String FAMILY_GPT = "gpt";
     public static final String FAMILY_DEFAULT = "default";
 
-    // Regex to extract actual prompt tokens from ArliAI 403: "exceeded ... (25487/12288)"
+    // Regex to extract actual prompt tokens from provider context errors: "exceeded ... (25487/12288)"
     private static final Pattern CONTEXT_PATTERN = Pattern.compile("\\((\\d+)\\s*/\\s*\\d+\\s*\\)");
     private static final Pattern GROQ_REQUESTED_PATTERN = Pattern.compile("Requested\\s+(\\d+)");
     private static final Pattern GROQ_LIMIT_PATTERN = Pattern.compile("Limit\\s+(\\d+)");
