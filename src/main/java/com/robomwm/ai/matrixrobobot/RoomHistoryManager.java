@@ -402,7 +402,9 @@ public class RoomHistoryManager {
             String endEventId, boolean forward, ZoneId zoneId, int maxMessages, boolean collectImages, boolean aiFriendlyTimestamps, java.util.concurrent.atomic.AtomicBoolean abortFlag,
             ProgressCallback progressCallback) {
         if (startEventId == null) {
-            return fetchRoomHistoryDetailed(roomId, hours, fromToken, -1, -1, zoneId, maxMessages, collectImages, aiFriendlyTimestamps, abortFlag, progressCallback);
+            int historyHours = maxMessages > 0 && hours <= 0 ? Integer.MAX_VALUE : hours;
+            return fetchRoomHistoryDetailed(roomId, historyHours, fromToken, -1, -1, zoneId,
+                    maxMessages, collectImages, aiFriendlyTimestamps, abortFlag, progressCallback);
         }
 
         List<RawLogLine> rawLines = new ArrayList<>();
@@ -601,7 +603,7 @@ public class RoomHistoryManager {
         List<String> imageEventIds = collectImages ? new ArrayList<>() : null;
         String firstEventId = null;
 
-        long startTime = (startTimestamp > 0) ? startTimestamp
+        long startTime = (startTimestamp >= 0) ? startTimestamp
                 : (System.currentTimeMillis() - (long) hours * 3600L * 1000L);
         long calculatedEndTime = (endTime > 0) ? endTime : System.currentTimeMillis();
 

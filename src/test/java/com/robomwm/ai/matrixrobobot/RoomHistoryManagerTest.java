@@ -3,6 +3,11 @@ package com.robomwm.ai.matrixrobobot;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
+
+import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +34,39 @@ class RoomHistoryManagerTest {
 
         assertEquals(-1L, window[0]);
         assertEquals(-1L, window[1]);
+    }
+
+    @Test
+    void countBasedHistoryIncludesRecentMessagesWithoutAnHourWindow() throws Exception {
+        long eventTimestamp = System.currentTimeMillis() - 1000L;
+        String responseBody = "{\"chunk\":[{\"type\":\"m.room.message\",\"origin_server_ts\":"
+                + eventTimestamp + ",\"sender\":\"@user:example.org\",\"event_id\":\"$event\","
+                + "\"content\":{\"msgtype\":\"m.text\",\"body\":\"recent message\"}}],\"end\":\"NEXT\"}";
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            byte[] body = responseBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            RoomHistoryManager historyManager = new RoomHistoryManager(
+                    HttpClient.newHttpClient(),
+                    new ObjectMapper(),
+                    "http://127.0.0.1:" + server.getAddress().getPort(),
+                    "test-token");
+
+            RoomHistoryManager.ChatLogsResult result = historyManager.fetchRoomHistoryRelative(
+                    "!room:example.org", -1, "START", null, null, false, ZoneId.of("UTC"),
+                    1, false, true, null, null);
+
+            assertEquals(1, result.logs.size());
+            assertTrue(result.logs.get(0).contains("recent message"));
+        } finally {
+            server.stop(0);
+        }
     }
 
     /**
