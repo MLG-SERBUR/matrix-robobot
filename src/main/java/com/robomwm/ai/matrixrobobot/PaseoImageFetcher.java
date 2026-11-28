@@ -4,6 +4,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -15,6 +16,7 @@ public final class PaseoImageFetcher {
     private static final long MAX_IMAGE_SIZE = 5 * 1024 * 1024;
     private static final int MAX_IMAGES_PER_QUERY = 20;
     private static final long MAX_TOTAL_IMAGE_SIZE = 20 * 1024 * 1024;
+    private static final int MAX_ERROR_BODY_LOG_BYTES = 2048;
 
     private final HttpClient httpClient;
     private final String homeserverUrl;
@@ -60,6 +62,13 @@ public final class PaseoImageFetcher {
                 .build();
         HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
         if (response.statusCode() != 200) {
+            byte[] responseBody = response.body();
+            int loggedBodyLength = Math.min(responseBody.length, MAX_ERROR_BODY_LOG_BYTES);
+            String loggedBody = new String(responseBody, 0, loggedBodyLength, StandardCharsets.UTF_8)
+                    .replace('\r', ' ').replace('\n', ' ').replace('\t', ' ');
+            if (responseBody.length > loggedBodyLength) loggedBody += "... (truncated)";
+            System.err.println("Matrix media request failed: HTTP " + response.statusCode()
+                    + ", URL=" + url + ", response body=" + loggedBody);
             throw new java.io.IOException("Matrix media returned HTTP " + response.statusCode());
         }
         byte[] data = response.body();
